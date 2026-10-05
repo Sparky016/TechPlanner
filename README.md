@@ -10,13 +10,13 @@ Requirements: Node 22, npm, Docker.
 npm ci
 cp .env.example .env                              # then fill in values
 docker compose -f docker-compose.dev.yml up -d    # PostgreSQL 16 on :5432 (techplanner/techplanner/techplanner)
-npm run migrate                                   # placeholder until the migration task lands
+npm run migrate                                   # applies db/migrations/*.sql (reads .env if present)
 npm run dev                                       # http://localhost:3000
 ```
 
 Scripts: `lint`, `typecheck`, `test` (unit, `src/**/*.test.ts`), `test:integration`
 (`tests/integration/**`, sequential, needs the dev database), `test:e2e` (Playwright), `build`, `start`.
-`migrate`, `worker`, `audit:verify` and `eval:llm` print "not implemented" until their tasks land.
+`worker`, `audit:verify` and `eval:llm` print "not implemented" until their tasks land.
 
 ### Configuration
 

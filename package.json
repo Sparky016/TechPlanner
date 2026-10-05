@@ -14,7 +14,7 @@
     "test": "vitest run --config vitest.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
-    "migrate": "tsx scripts/not-implemented.ts migrate",
+    "migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts",
     "worker": "tsx scripts/not-implemented.ts worker",
     "audit:verify": "tsx scripts/not-implemented.ts audit:verify",
     "eval:llm": "tsx scripts/not-implemented.ts eval:llm",
@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "next": "^15.5.27",
+    "pg": "^8.23.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zod": "^4.6.5"
@@ -30,6 +31,7 @@
     "@eslint/eslintrc": "^3.3.7",
     "@playwright/test": "^1.63.0",
     "@types/node": "^26.6.4",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "eslint": "^9.39.5",
