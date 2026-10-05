@@ -128,6 +128,19 @@ describe('hash chain', () => {
     });
   });
 
+  it('hashes non-canonical session ids in the form Postgres stores them', async () => {
+    const canonical = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+    for (const sessionId of ['a0eebc999c0b4ef8bb6d6bb9bd380a11', '{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}']) {
+      const { id } = await recordAudit({ action: 'draft.saved', result: 'success', sessionId });
+      const [row] = await query<{ session_id: string }>('SELECT session_id FROM audit_record WHERE id = $1', [id]);
+      expect(row.session_id).toBe(canonical);
+    }
+    await expect(recordAudit({ action: 'draft.saved', result: 'success', sessionId: 'not-a-uuid' })).rejects.toThrow(
+      /sessionId must be a UUID/,
+    );
+    expect(await verifyAuditChain(db)).toEqual({ ok: true, count: 54 });
+  });
+
   it('reports the first tampered record', async () => {
     const ids = await query<{ id: string }>('SELECT id FROM audit_record ORDER BY id');
     const target = ids[10].id;

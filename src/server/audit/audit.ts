@@ -32,8 +32,8 @@ async function append(client: PoolClient, input: AuditInput): Promise<{ id: stri
     ts: new Date().toISOString(),
     userId: input.userId ?? null,
     userDisplayName: input.userDisplayName ?? null,
-    // uuid columns read back in lowercase; hash the form the verifier will see.
-    sessionId: input.sessionId ? input.sessionId.toLowerCase() : null,
+    // uuid columns read back in canonical form; hash the form the verifier will see.
+    sessionId: input.sessionId ? canonicalUuid(input.sessionId) : null,
     ticketIds: input.ticketIds ?? [],
     action: input.action,
     result: input.result,
@@ -67,4 +67,13 @@ async function append(client: PoolClient, input: AuditInput): Promise<{ id: stri
     ],
   );
   return { id: inserted.rows[0].id, hash };
+}
+
+// Postgres accepts uuids with braces, without hyphens, or in upper case, but always stores and returns the
+// lowercase 8-4-4-4-12 form. Normalise to that form so the hashed value equals the stored one; reject anything else.
+function canonicalUuid(value: string): string {
+  const unbraced = /^\{.*\}$/.test(value) ? value.slice(1, -1) : value;
+  const hex = unbraced.replace(/-/g, '').toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(hex)) throw new Error('sessionId must be a UUID');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
