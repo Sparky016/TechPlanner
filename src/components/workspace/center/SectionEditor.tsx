@@ -1,6 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { markdown } from '@codemirror/lang-markdown';
+import CodeMirror, { EditorView } from '@uiw/react-codemirror';
+import { useEffect, useMemo, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { ApiError } from '@/lib/api/client';
 import type { SectionStatus } from '@/lib/readiness/types';
@@ -8,7 +11,8 @@ import type { SectionName } from '@/lib/spec/sections';
 import { PendingSuggestion, type Suggestion } from './PendingSuggestion';
 import { type AutosaveFn, useAutosave } from './useAutosave';
 
-// One collapsible Working Copy section: status badge, markdown text editor with a plain-text preview toggle,
+// One collapsible Working Copy section: status badge, CodeMirror markdown editor with a rendered preview toggle
+// (react-markdown without rehype-raw, so raw HTML in the body is never rendered),
 // autosave indicator, version-conflict choice (SR-4.3) and the section's pending AI suggestions.
 
 const STATUS_LABEL: Record<SectionStatus, string> = { complete: 'Complete', partial: 'Partial', missing: 'Missing' };
@@ -102,6 +106,12 @@ export function SectionEditor(props: SectionEditorProps) {
     }
   }
 
+  // The label goes on CodeMirror's contenteditable (the actual textbox), not its wrapper div.
+  const extensions = useMemo(
+    () => [markdown(), EditorView.lineWrapping, EditorView.contentAttributes.of({ 'aria-label': `${name} content` })],
+    [name],
+  );
+
   const contentId = `section-${name}`.replace(/[^a-zA-Z0-9-]/g, '-');
   // A version conflict is reported by the conflict choice, not as a save failure.
   const failed = autosave.status === 'error' && !isConflict(autosave.error);
@@ -164,22 +174,22 @@ export function SectionEditor(props: SectionEditorProps) {
             </button>
           </div>
           {preview ? (
-            <pre aria-label={`${name} preview`} className="whitespace-pre-wrap break-words rounded border border-slate-200 bg-slate-50 p-2 text-sm">
-              {text}
-            </pre>
+            <div aria-label={`${name} preview`} className="break-words rounded border border-slate-200 bg-slate-50 p-2 text-sm">
+              <ReactMarkdown>{text}</ReactMarkdown>
+            </div>
           ) : (
-            <textarea
-              aria-label={`${name} content`}
+            <CodeMirror
               value={text}
+              extensions={extensions}
+              editable={!readOnly}
               readOnly={readOnly}
-              disabled={readOnly}
-              onChange={(e) => {
-                setText(e.target.value);
-                autosave.schedule(e.target.value);
+              basicSetup={{ lineNumbers: false, foldGutter: false }}
+              onChange={(value) => {
+                setText(value);
+                autosave.schedule(value);
               }}
               onBlur={() => void flush()}
-              rows={Math.min(20, Math.max(4, text.split('\n').length + 1))}
-              className="w-full rounded border border-slate-300 p-2 font-mono text-sm disabled:bg-slate-50"
+              className="overflow-hidden rounded border border-slate-300 text-sm"
             />
           )}
           {suggestions.map((s) => (

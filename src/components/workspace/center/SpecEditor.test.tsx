@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useEffect } from 'react';
+import { EditorView } from '@uiw/react-codemirror';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type WorkspaceEvent, WorkspaceProvider, useWorkspace } from '@/components/workspace/WorkspaceProvider';
 import { SECTION_NAMES } from '@/lib/spec/sections';
@@ -7,6 +8,27 @@ import { SpecEditor } from './SpecEditor';
 
 const apiFetch = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/api/client', async (orig) => ({ ...(await orig<typeof import('@/lib/api/client')>()), apiFetch }));
+
+// jsdom has no layout: CodeMirror's measure pass needs Range rects.
+if (typeof Range !== 'undefined' && !Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+}
+
+// Drive the real CodeMirror view: jsdom cannot type into its contenteditable, so dispatch a user change.
+function cmView(el: HTMLElement): EditorView {
+  const view = EditorView.findFromDOM(el);
+  if (!view) throw new Error('not a CodeMirror editor');
+  return view;
+}
+const valueOf = (el: HTMLElement) => cmView(el).state.doc.toString();
+const isEditable = (el: HTMLElement) => el.getAttribute('contenteditable') === 'true';
+function typeInto(el: HTMLElement, value: string) {
+  act(() => {
+    const view = cmView(el);
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
+  });
+}
 
 afterEach(() => {
   cleanup();
@@ -72,7 +94,7 @@ describe('SpecEditor', () => {
     const state: MockState = { holder: 'you', wc: workingCopy(1, { Scope: 'old scope' }) };
     mockApi(state);
     renderEditor();
-    expect(((await screen.findByLabelText('Scope content')) as HTMLTextAreaElement).value).toBe('old scope');
+    expect(valueOf(await screen.findByLabelText('Scope content'))).toBe('old scope');
 
     vi.useFakeTimers();
     state.wc = workingCopy(2, { Scope: 'AI scope' });
@@ -81,7 +103,7 @@ describe('SpecEditor', () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     const region = screen.getByRole('region', { name: 'Scope' });
-    expect((screen.getByLabelText('Scope content') as HTMLTextAreaElement).value).toBe('AI scope');
+    expect(valueOf(screen.getByLabelText('Scope content'))).toBe('AI scope');
     expect(region.getAttribute('data-highlighted')).toBe('true');
     expect(within(region).getByText('Updated by AI')).toBeTruthy();
     await act(() => vi.advanceTimersByTimeAsync(3_000));
@@ -92,10 +114,10 @@ describe('SpecEditor', () => {
     mockApi({ holder: 'you', wc: workingCopy(4) });
     renderEditor();
     const box = await screen.findByLabelText('Scope content');
-    await waitFor(() => expect((box as HTMLTextAreaElement).disabled).toBe(false));
-    fireEvent.change(box, { target: { value: 'typed' } });
+    await waitFor(() => expect(isEditable(box)).toBe(true));
+    typeInto(box, 'typed');
     await act(async () => {
-      fireEvent.blur(box);
+      fireEvent.focusOut(box);
     });
     expect(apiFetch).toHaveBeenCalledWith('/api/sessions/s1/working-copy/sections/scope', {
       method: 'PATCH',
@@ -119,9 +141,9 @@ describe('SpecEditor', () => {
   it('disables editing and Save Draft while read-only', async () => {
     mockApi({ holder: 'other', wc: workingCopy(1) });
     renderEditor();
-    const box = (await screen.findByLabelText('Scope content')) as HTMLTextAreaElement;
+    const box = await screen.findByLabelText('Scope content');
     await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/api/sessions/s1/lock', { method: 'POST' }));
-    expect(box.disabled).toBe(true);
+    await waitFor(() => expect(isEditable(box)).toBe(false));
     expect((screen.getByRole('button', { name: 'Save Draft' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
