@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-05 19:35
+updated: 2026-10-05 22:42
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -251,3 +251,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-05 19:28 | 35 | worker dispatched (opus/medium)
 2026-10-05 19:30 | 34 | eval FAIL (1 failure: textarea/pre instead of CodeMirror + react-markdown required by Scope In — caused by orchestrator no-deps instruction) → rework cycle 1 dispatched (opus/medium; deps allowed)
 2026-10-05 19:35 | 35 | worker complete @ 43de824 (section statuses unordered — JSONB key order) → eval dispatched (sonnet/medium)
+2026-10-05 22:42 | 34,35 | rework-34 worker and eval-35 killed by usage limit (HTTP 429); rework 34 left uncommitted partial changes (deps installed, SectionEditor + tests edited) → fresh worker dispatched to finish cycle 1 from tree state; eval 35 re-dispatched
