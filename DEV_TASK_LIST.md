@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-05 15:42
+updated: 2026-10-05 19:27
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -40,21 +40,21 @@ Phases:
 | 20 | 2 | [Revisions API: save draft, history, compare and restore](DEV_TASK_20.yml) | high | medium | sonnet / medium | 07, 13, 15, 19 | DONE | ced0782 |
 | 21 | 2 | [Attachment ingestion and context budget](DEV_TASK_21.yml) | medium | medium | sonnet / medium | 12, 14, 16 | DONE | 610ec79 |
 | 22 | 2 | [Audit trail read and JSON Lines export API](DEV_TASK_22.yml) | medium | low | haiku / medium | 03, 13, 15 | DONE | 3e3ce31 |
-| 23 | 3 | [AI facilitator engine: prompt, tools and turn execution](DEV_TASK_23.yml) | high | high | opus / medium | 07, 12, 18, 26 | PENDING | — |
-| 24 | 3 | [Readiness evaluator engine and issue reconciliation](DEV_TASK_24.yml) | high | high | opus / medium | 03, 06, 07, 12 | PENDING | — |
-| 25 | 3 | [Conversation API: streaming messages (SSE), notes and AI questions](DEV_TASK_25.yml) | high | high | opus / medium | 13, 15, 23 | PENDING | — |
-| 26 | 3 | [Readiness scheduling and API: debounced evaluation, evaluate now, end clarification, accepted risk](DEV_TASK_26.yml) | high | medium | sonnet / medium | 08, 13, 15, 24 | PENDING | — |
-| 27 | 4 | [Publish orchestration: mandatory evaluation, gate/override, published revision, step runner and retry](DEV_TASK_27.yml) | critical | critical | opus / high | 08, 20, 24, 28, 29, 30, 31 | PENDING | — |
-| 28 | 4 | [Publish foundations: step contract, published markdown, Confluence storage and Jira ADF builders](DEV_TASK_28.yml) | high | high | opus / medium | 05 | PENDING | — |
-| 29 | 4 | [Confluence publish step with external-change conflict detection](DEV_TASK_29.yml) | high | high | opus / medium | 09, 14, 28 | PENDING | — |
-| 30 | 4 | [Jira publish steps: attachment, description block, comment and label (idempotent)](DEV_TASK_30.yml) | high | high | opus / medium | 14, 28 | PENDING | — |
-| 31 | 4 | [Downstream webhook step (HMAC-signed, retried)](DEV_TASK_31.yml) | high | medium | sonnet / medium | 03, 28 | PENDING | — |
-| 32 | 5 | [App shell, login page, data notice, session list and new-session form](DEV_TASK_32.yml) | high | medium | sonnet / medium | 11, 13, 18 | PENDING | — |
-| 33 | 5 | [Session workspace layout, session lock UX and left panel (conversation, questions, notes, sources)](DEV_TASK_33.yml) | high | high | opus / medium | 15, 18, 25, 32 | PENDING | — |
-| 34 | 5 | [Center panel: section editor, autosave, live AI patch highlight, pending suggestions, Save Draft](DEV_TASK_34.yml) | high | high | opus / medium | 19, 20, 33 | PENDING | — |
+| 23 | 3 | [AI facilitator engine: prompt, tools and turn execution](DEV_TASK_23.yml) | high | high | opus / medium | 07, 12, 18, 26 | DONE | 8e1c51b |
+| 24 | 3 | [Readiness evaluator engine and issue reconciliation](DEV_TASK_24.yml) | high | high | opus / medium | 03, 06, 07, 12 | DONE | 705ef58 |
+| 25 | 3 | [Conversation API: streaming messages (SSE), notes and AI questions](DEV_TASK_25.yml) | high | high | opus / medium | 13, 15, 23 | DONE | fe9858d |
+| 26 | 3 | [Readiness scheduling and API: debounced evaluation, evaluate now, end clarification, accepted risk](DEV_TASK_26.yml) | high | medium | sonnet / medium | 08, 13, 15, 24 | DONE | d0c3dcf |
+| 27 | 4 | [Publish orchestration: mandatory evaluation, gate/override, published revision, step runner and retry](DEV_TASK_27.yml) | critical | critical | opus / high | 08, 20, 24, 28, 29, 30, 31 | DONE | 6c006c0 |
+| 28 | 4 | [Publish foundations: step contract, published markdown, Confluence storage and Jira ADF builders](DEV_TASK_28.yml) | high | high | opus / medium | 05 | DONE | eb5b169 |
+| 29 | 4 | [Confluence publish step with external-change conflict detection](DEV_TASK_29.yml) | high | high | opus / medium | 09, 14, 28 | DONE | 0d12a68 |
+| 30 | 4 | [Jira publish steps: attachment, description block, comment and label (idempotent)](DEV_TASK_30.yml) | high | high | opus / medium | 14, 28 | DONE | 463749d |
+| 31 | 4 | [Downstream webhook step (HMAC-signed, retried)](DEV_TASK_31.yml) | high | medium | sonnet / medium | 03, 28 | DONE | 90f4494 |
+| 32 | 5 | [App shell, login page, data notice, session list and new-session form](DEV_TASK_32.yml) | high | medium | sonnet / medium | 11, 13, 18 | DONE | 2f0d8c5 |
+| 33 | 5 | [Session workspace layout, session lock UX and left panel (conversation, questions, notes, sources)](DEV_TASK_33.yml) | high | high | opus / medium | 15, 18, 25, 32 | DONE | c09c14a |
+| 34 | 5 | [Center panel: section editor, autosave, live AI patch highlight, pending suggestions, Save Draft](DEV_TASK_34.yml) | high | high | opus / medium | 19, 20, 33 | IN_PROGRESS | — |
 | 35 | 5 | [Right panel: readiness, issues, action items, clarification control, publish with override and step status](DEV_TASK_35.yml) | high | high | opus / medium | 26, 27, 33 | PENDING | — |
 | 36 | 5 | [Version history UI: list, compare and restore](DEV_TASK_36.yml) | medium | medium | sonnet / medium | 20, 34 | PENDING | — |
-| 37 | 5 | [Audit trail view for a session](DEV_TASK_37.yml) | medium | low | haiku / medium | 22, 32 | PENDING | — |
+| 37 | 5 | [Audit trail view for a session](DEV_TASK_37.yml) | medium | low | haiku / medium | 22, 32 | DONE | e2cabd1 |
 | 38 | 6 | [Production Docker image (web + worker + pinned Copilot CLI), migrations on deploy, rollback runbook](DEV_TASK_38.yml) | high | high | opus / medium | 02, 08, 09, 12 | PENDING | — |
 | 39 | 6 | [End-to-end Playwright suite with Atlassian, Copilot and webhook mocks](DEV_TASK_39.yml) | high | high | opus / medium | 27, 34, 35, 36, 37 | PENDING | — |
 | 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | PENDING | — |
@@ -201,3 +201,49 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-05 15:38 | 20 | eval PASS → DONE @ ced0782 (accepted risk: restore not atomic across replaceAllSections and createRevision)
 2026-10-05 15:42 | 18 | re-eval PASS (rework cycle 1) → DONE @ ba7c88e..017f3ee
 2026-10-05 15:42 | phase 2 | all 12 tasks DONE → phase verification gate dispatched (haiku/low)
+2026-10-05 17:42 | phase 2 | resumed after /clear; gate result lost → phase verification gate re-dispatched (haiku/low)
+2026-10-05 17:47 | phase 2 | gate PASS (lint, typecheck, build; unit 166, integration 102) → phase boundary pause
+2026-10-05 17:5x | phase 3 | started on user instruction
+2026-10-05 17:5x | 24 | worker dispatched (opus/medium)
+2026-10-05 18:1x | 24 | worker complete @ 705ef58 → eval dispatched (sonnet/medium)
+2026-10-05 18:2x | 24 | eval PASS → DONE @ 705ef58 (8 assumptions all accepted)
+2026-10-05 18:2x | 26 | worker dispatched (sonnet/medium)
+2026-10-05 18:2x | 26 | worker complete @ d0c3dcf → eval dispatched (sonnet/low)
+2026-10-05 18:2x | 26 | eval PASS → DONE @ d0c3dcf (note: background eval falls back to userId 'system' when facilitator_id is NULL)
+2026-10-05 18:2x | 23 | worker dispatched (opus/medium)
+2026-10-05 18:3x | 23 | worker complete @ 8e1c51b (+snapshot file, SessionNotFoundError) → eval dispatched (sonnet/medium)
+2026-10-05 18:3x | 23 | eval PASS → DONE @ 8e1c51b (12 assumptions accepted; open edge: scheduleEvaluation failure after commit means no 'done' event)
+2026-10-05 18:3x | 25 | worker dispatched (opus/medium)
+2026-10-05 18:4x | 25 | worker complete @ fe9858d (notes INSERT duplicated from runTurn.ts; latent pre-aborted-signal edge in sse.ts) → eval dispatched (sonnet/medium)
+2026-10-05 18:4x | 25 | eval PASS → DONE @ fe9858d (9 assumptions accepted; follow-up: export insertMessage from runTurn.ts and dedupe notes route)
+2026-10-05 18:4x | phase 3 | all 4 tasks DONE → phase verification gate dispatched (haiku/low)
+2026-10-05 18:46 | phase 3 | gate PASS (lint, typecheck, build; unit 194, integration 125) → phase boundary pause
+2026-10-05 18:5x | phases 4+5 | started on user instruction (run 4 and 5 continuously; 32 runs alongside phase 4, no file overlap)
+2026-10-05 18:5x | 28 | worker dispatched (opus/medium)
+2026-10-05 18:5x | 32 | worker dispatched (sonnet/medium)
+2026-10-05 18:5x | 28 | worker complete @ eb5b169 (+marked, @xmldom/xmldom dev) → eval dispatched (sonnet/medium)
+2026-10-05 18:5x | 32 | worker complete @ 2f0d8c5 (+tailwind, jsdom, testing-library; 5 extra files) → eval dispatched (sonnet/low)
+2026-10-05 18:5x | deps | 28 and 32 both edited package.json concurrently; HEAD verified to contain both dependency sets, tree clean. Lesson: do not co-schedule tasks that may add deps
+2026-10-05 18:5x | 28 | eval PASS → DONE @ eb5b169 (contract matches task doc verbatim)
+2026-10-05 18:5x | 29 | worker dispatched (opus/medium)
+2026-10-05 18:5x | 30 | worker dispatched (opus/medium; 31 held — concurrency cap 3 with 32 in EVAL)
+2026-10-05 19:0x | 32 | eval PASS → DONE @ 2f0d8c5 (extras accepted as required Tailwind setup; build needs config env vars)
+2026-10-05 19:0x | 31 | worker dispatched (sonnet/medium)
+2026-10-05 19:0x | 31 | worker complete @ 90f4494 (sha256=<hex> signature fallback; README note skipped, not in Files) → eval dispatched (sonnet/low)
+2026-10-05 19:0x | 31 | eval PASS → DONE @ 90f4494 (README downstream note deferred — knowledge gap only)
+2026-10-05 19:0x | 33 | worker dispatched (opus/medium; 37 held — shares SessionHeader.tsx with 33)
+2026-10-05 19:0x | 29 | worker complete @ 0d12a68 (ctx.title assumed = ticket summary; task 27 must pass summary) → eval dispatched (sonnet/medium)
+2026-10-05 19:0x | 30 | worker complete @ 463749d (description step fails fast on null confluencePageUrl) → eval dispatched (sonnet/medium)
+2026-10-05 19:0x | 29 | eval PASS → DONE @ 0d12a68 (14/14; spurious-mismatch edge judged safe-side; task 27 must pass primary ticket summary as ctx.title)
+2026-10-05 19:0x | 30 | eval PASS → DONE @ 463749d (8/8; acting-user token confirmed)
+2026-10-05 19:0x | 27 | worker dispatched (opus/high)
+2026-10-05 19:1x | 33 | worker complete @ c09c14a (+apiFetchResponse in client.ts; <a>→Link in 2 task-32 files for lint) → eval dispatched (sonnet/medium)
+2026-10-05 19:1x | 33 | eval PASS → DONE @ c09c14a (full unit suite 259; no lock-release route — relies on 60 s expiry)
+2026-10-05 19:1x | 34 | worker dispatched (opus/medium)
+2026-10-05 19:1x | 37 | worker dispatched (haiku/medium)
+2026-10-05 19:1x | 27 | worker complete @ 6c006c0 (self-amended own commit ed0328d; verified no other commit affected) → eval dispatched (opus/medium)
+2026-10-05 19:2x | 27 | eval PASS → DONE @ 6c006c0 (follow-ups: enqueue-failure path writes no publish.failed audit nor session.status; retry by another user runs on original publisher tokens and attributes audits to them)
+2026-10-05 19:2x | phase 4 | all 5 tasks DONE → continuing into phase 5 without pause (user instruction); 35 held — shares sessions/[id]/page.tsx with in-flight 34
+2026-10-05 19:22 | 37 | worker complete @ e2cabd1 (client component imports AUDIT_ACTIONS from @/server/audit/actions) → eval dispatched (haiku/low)
+2026-10-05 19:26 | 37 | eval PASS → DONE @ e2cabd1 (eval report omitted lint/typecheck/build results — deferred to final gate)
+2026-10-05 19:3x | list | DEV_TASK_LIST.md found reverted to its committed 4335fe9 (phase-2) state — a worker reset the working tree. Rows and run log for 17:42–19:2x reconstructed from session record (minute-level times approximate, marked x). Orchestrator now commits the list after each update.
