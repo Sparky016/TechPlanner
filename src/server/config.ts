@@ -40,6 +40,8 @@ const envSchema = z
     COPILOT_CLI_PATH: optional(z.string().min(1)),
     FACILITATOR_MODEL: required,
     EVALUATOR_MODEL: required,
+    // '1' swaps the Copilot client for FakeLlmClient (tests only).
+    LLM_FAKE: optional(z.enum(['0', '1'])),
     CONTEXT_TOKEN_BUDGET: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(150000)),
     CONFLUENCE_SPACE_KEY: required,
     CONFLUENCE_PARENT_PAGE_ID: required,
