@@ -1,4 +1,5 @@
 import { LockBanner, WorkspaceProvider } from '@/components/workspace/WorkspaceProvider';
+import { SpecEditor } from '@/components/workspace/center/SpecEditor';
 import { Conversation } from '@/components/workspace/left/Conversation';
 import { NotesInput } from '@/components/workspace/left/NotesInput';
 import { QuestionsList } from '@/components/workspace/left/QuestionsList';
@@ -7,8 +8,8 @@ import { SessionHeader } from '@/components/workspace/left/SessionHeader';
 // Rendered per request (the (app) layout is force-dynamic for the CSP nonce).
 export const dynamic = 'force-dynamic';
 
-// Three-panel session workspace (§6). The left panel is here; the center (specification editor, task 34) and
-// right (readiness/issues, task 35) panels mount into the marked slots inside the same WorkspaceProvider.
+// Three-panel session workspace (§6): left panel, center specification editor (task 34); the right panel
+// (readiness/issues, task 35) mounts into the marked slot inside the same WorkspaceProvider.
 export default async function SessionWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   return (
@@ -23,7 +24,9 @@ export default async function SessionWorkspacePage({ params }: { params: Promise
             <Conversation />
             <NotesInput />
           </aside>
-          <section aria-label="Specification" data-slot="workspace-center" className="min-h-0 overflow-y-auto p-4" />
+          <section aria-label="Specification" data-slot="workspace-center" className="min-h-0 overflow-y-auto p-4">
+            <SpecEditor />
+          </section>
           <section aria-label="Readiness" data-slot="workspace-right" className="min-h-0 overflow-y-auto p-4" />
         </div>
       </div>
