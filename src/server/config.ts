@@ -48,6 +48,7 @@ const envSchema = z
     DOWNSTREAM_WEBHOOK_SECRET: optional(z.string().min(1)),
     SECTION_WEIGHTS: optional(jsonString(sectionWeights)),
     APP_BASE_URL: z.string().url(),
+    METRICS_TOKEN: optional(z.string().min(1)),
   })
   .superRefine((env, ctx) => {
     if (env.DOWNSTREAM_WEBHOOK_URL && !env.DOWNSTREAM_WEBHOOK_SECRET) {
