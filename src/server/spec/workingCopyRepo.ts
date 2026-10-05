@@ -100,8 +100,15 @@ async function writeSections(client: PoolClient, sessionId: string, sections: Wo
   return rows[0].version;
 }
 
-/** Creates the working copy for a session (all sections empty unless initial bodies are given). */
-export async function initWorkingCopy(sessionId: string, initial?: SpecSections): Promise<WorkingCopy> {
+/**
+ * Creates the working copy for a session (all sections empty unless initial bodies are given).
+ * Pass `client` to insert inside the caller's transaction (e.g. together with the planning_session row).
+ */
+export async function initWorkingCopy(
+  sessionId: string,
+  initial?: SpecSections,
+  client?: PoolClient,
+): Promise<WorkingCopy> {
   const bodies = initial ?? emptySections();
   const sections = {} as WorkingCopySections;
   for (const name of SECTION_NAMES)
@@ -110,10 +117,12 @@ export async function initWorkingCopy(sessionId: string, initial?: SpecSections)
       lastAiReadAt: null,
       lastUserEditAt: null,
     };
-  const [row] = await query<WorkingCopyRow>(
-    'INSERT INTO working_copy (session_id, sections) VALUES ($1, $2) RETURNING session_id, sections, version, updated_at',
-    [sessionId, JSON.stringify(sections)],
-  );
+  const sql =
+    'INSERT INTO working_copy (session_id, sections) VALUES ($1, $2) RETURNING session_id, sections, version, updated_at';
+  const params = [sessionId, JSON.stringify(sections)];
+  const [row] = client
+    ? (await client.query<WorkingCopyRow>(sql, params)).rows
+    : await query<WorkingCopyRow>(sql, params);
   return toWorkingCopy(row);
 }
 
