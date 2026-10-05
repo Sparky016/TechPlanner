@@ -15,7 +15,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
     "migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts",
-    "worker": "tsx scripts/not-implemented.ts worker",
+    "worker": "tsx --env-file-if-exists=.env src/worker/index.ts",
     "audit:verify": "tsx --env-file-if-exists=.env scripts/audit-verify.ts",
     "eval:llm": "tsx scripts/not-implemented.ts eval:llm",
     "format": "prettier --write ."
@@ -23,6 +23,7 @@
   "dependencies": {
     "next": "^15.5.27",
     "pg": "^8.23.1",
+    "pg-boss": "^12.36.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zod": "^4.6.5"
