@@ -1,0 +1,75 @@
+id: "06"
+title: "Readiness score, mandatory critical rules, gate and issue fingerprinting"
+phase: 1
+severity: high
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["05"]
+status: PENDING
+source: "SPEC_DOC.md SR-6.3, SR-7.1–SR-7.4, SR-8.1, D-6"
+
+objective: |
+  Implement the deterministic parts of readiness: the weighted score formula, the rule-based Critical
+  issues from SR-7.3, the gate check, and stable issue fingerprints so issues persist across evaluations.
+  The LLM evaluator (task 24) feeds these functions; the UI shows their output.
+
+scope:
+  in:
+    - "src/lib/readiness/types.ts: SectionStatus = 'complete'|'partial'|'missing'; IssueSeverity = 'critical'|'warning'|'informational'; IssueStatus = 'open'|'resolved'|'accepted-risk'"
+    - "src/lib/readiness/score.ts: computeReadinessScore(statuses, weights?)"
+    - "src/lib/readiness/rules.ts: mandatoryCriticalIssues(statuses) and gatePasses(issues)"
+    - "src/server/readiness/fingerprint.ts: normalizeIssueText(), issueFingerprint(section, description)"
+    - "Unit tests"
+  out:
+    - "LLM evaluation and persistence (task 24, 26)"
+    - "Contradiction / non-measurable acceptance criteria detection (LLM-judged in task 24)"
+
+files:
+  "src/lib/readiness/types.ts": "create"
+  "src/lib/readiness/score.ts": "create"
+  "src/lib/readiness/rules.ts": "create"
+  "src/lib/readiness/readiness.test.ts": "create"
+  "src/server/readiness/fingerprint.ts": "create"
+  "src/server/readiness/fingerprint.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; src/lib isomorphic; src/server server-only; Vitest colocated (npm test);
+  section names from SECTION_NAMES in src/lib/spec/sections.ts (task 05).
+  Score (SR-6.3): round(100 * Σ(w_i * v_i) / Σ w_i), v = 1 / 0.5 / 0 for complete / partial / missing,
+  default w_i = 1 for all 27 sections; weights param is Partial<Record<SectionName, number>> (from SECTION_WEIGHTS
+  config — caller parses); unknown section names in weights throw; non-positive weights throw. Use Math.round (half up).
+  mandatoryCriticalIssues (SR-7.3 deterministic subset): for each of Problem Statement, Scope, Functional Requirements,
+  Technical Design, Acceptance Criteria with status 'missing', return { severity:'critical', section,
+  description: '<Section> is missing' }.
+  gatePasses(issues): true iff no issue has severity 'critical' and status 'open' (D-6 — score is informational only).
+  Fingerprint (SR-7.4): normalizeIssueText lowercases, strips punctuation, collapses whitespace, trims;
+  issueFingerprint = sha256 hex of `${section}\n${normalized}` (node:crypto).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "27 complete -> 100; 27 missing -> 0; 26 complete + 1 partial -> 98"
+    verify: "npm test -- readiness"
+  - id: AC2
+    behavior: "Custom weights change the score as per formula (fixture: Security weight 3 missing, rest complete -> round(100*26/29) = 90)"
+    verify: "npm test -- readiness"
+  - id: AC3
+    behavior: "mandatoryCriticalIssues returns exactly one critical issue per missing core section and none for missing non-core sections"
+    verify: "npm test -- readiness"
+  - id: AC4
+    behavior: "gatePasses is false with one open critical, true when that issue is resolved, true with open warnings only"
+    verify: "npm test -- readiness"
+  - id: AC5
+    behavior: "issueFingerprint is identical for descriptions differing only in case, punctuation or whitespace, and differs across sections"
+    verify: "npm test -- fingerprint"
+
+risks_vulnerabilities:
+  - risk: "Fingerprint too strict, causing duplicate issues each evaluation"
+    mitigation: "Normalization tested; evaluator (task 24) also receives open issues to reuse wording"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-06): add readiness score, critical rules, gate and issue fingerprints

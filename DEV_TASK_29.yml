@@ -1,0 +1,72 @@
+id: "29"
+title: "Confluence publish step with external-change conflict detection"
+phase: 4
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["09", "14", "28"]
+status: PENDING
+source: "SPEC_DOC.md SR-13.2 step 1, SR-13.5, §7.5 Confluence config, D-8"
+
+objective: |
+  Publish the Generated Specification to Confluence as the facilitator: create the page under the configured
+  space/parent on first publish, update the same page on republish, and never silently overwrite a page edited in
+  Confluence since the last publish.
+
+scope:
+  in:
+    - "src/server/publish/steps/confluenceStep.ts implementing PublishStep 'confluence'"
+    - "Target resolution: CONFLUENCE_PROJECT_OVERRIDES[project of primary key] else CONFLUENCE_SPACE_KEY / CONFLUENCE_PARENT_PAGE_ID"
+    - "Persist planning_session.confluence_page_id and confluence_page_version after success"
+    - "Audit confluence.updated (success or failure)"
+  out:
+    - "Orchestration/retry (task 27)"
+
+files:
+  "src/server/publish/steps/confluenceStep.ts": "create"
+  "src/server/publish/steps/confluenceStep.test.ts": "create; undici MockAgent"
+
+implementation_notes: |
+  Conventions: TS strict; server-only; atlassianJson from src/server/atlassian/client.ts (task 14) — always as the facilitator's
+  user id (SR-1.2); PublishStep/PublishContext from src/server/publish/types.ts and markdownToConfluenceStorage (task 28);
+  DB via src/server/db/pool.ts; recordAudit (task 03); config via getConfig(); Vitest (npm test).
+  Space id: GET /wiki/api/v2/spaces?keys=<KEY> (cache per process).
+  Create: POST /wiki/api/v2/pages { spaceId, parentId, status:'current', title, body:{ representation:'storage', value } };
+  title = '<PRIMARY-KEY>: <ticket summary> — Technical Specification'. If Confluence rejects a duplicate title, retry once with
+  ' (<sessionId first 8 chars>)' appended.
+  Update: GET /wiki/api/v2/pages/{id} -> current version; if current !== stored confluence_page_version and
+  options.confluenceAction !== 'overwrite': if 'cancel' return status 'cancelled'; else return failed { code:'page_changed_externally' }.
+  Otherwise PUT /wiki/api/v2/pages/{id} { id, status:'current', title, body, version:{ number: current+1, message:'Tech Planner revision <n>' } }.
+  On detecting a version mismatch, increment confluence_external_edit_total{project} (task 09; SPEC_DOC §11 post-publish edit tracking).
+  Result: { pageId, version, url (site base + _links.webui) }. Idempotency: if previousResult has pageId and version equals current
+  page version, treat as success without re-PUT.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "First publish creates a page under the configured parent and stores page id and version on the session"
+    verify: "npm test -- confluenceStep"
+  - id: AC2
+    behavior: "Republish updates the same page with version+1"
+    verify: "npm test -- confluenceStep"
+  - id: AC3
+    behavior: "Version mismatch returns failed page_changed_externally; with confluenceAction overwrite it updates; with cancel it returns cancelled"
+    verify: "npm test -- confluenceStep"
+  - id: AC4
+    behavior: "Per-project override selects the override space/parent"
+    verify: "npm test -- confluenceStep"
+  - id: AC5
+    behavior: "Each run writes a confluence.updated audit record with result success/failure"
+    verify: "npm test -- confluenceStep"
+
+risks_vulnerabilities:
+  - risk: "Overwriting human Confluence edits"
+    mitigation: "Version check; overwrite only on explicit user action"
+
+knowledge_gaps:
+  - "Page title convention is unspecified. Fallback: '<KEY>: <summary> — Technical Specification'."
+
+commit_message: |
+  feat(task-29): add Confluence publish step with conflict detection

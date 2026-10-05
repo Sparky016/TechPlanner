@@ -1,0 +1,69 @@
+id: "35"
+title: "Right panel: readiness, issues, action items, clarification control, publish with override and step status"
+phase: 5
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["26", "27", "33"]
+status: PENDING
+source: "SPEC_DOC.md §6 Right panel, SR-6.5, SR-7.4, SR-8.2, SR-9.1, SR-13.3"
+
+objective: |
+  Show readiness (score, per-section status, missing sections, critical issues, warnings, action items) with
+  Evaluate now and End clarification controls, and drive Publish: override dialog when the gate fails, per-step
+  publish status, and Retry failed steps including the Confluence overwrite/cancel choice.
+
+scope:
+  in:
+    - "src/components/workspace/right/ReadinessPanel.tsx: score, 'Ready' indicator when gatePasses, section status list, missing sections, critical issues, warnings (Accept risk), informational, action items (open questions)"
+    - "Polling GET /readiness every 5 s while evaluationPending and after each AI turn 'done' event"
+    - "Evaluate now and End clarification buttons"
+    - "src/components/workspace/right/PublishPanel.tsx: Publish button; OverrideDialog on 409 gate_failed listing open critical issues, justification (≥20 chars) and explicit confirmation checkbox"
+    - "Publish step list (pending/running/success/failed/waiting/cancelled) polling GET /publish/:runId every 2 s until finished; Retry failed steps; page_changed_externally -> Overwrite / Cancel choice"
+  out:
+    - "Backend logic (tasks 26, 27)"
+
+files:
+  "src/components/workspace/right/ReadinessPanel.tsx": "create"
+  "src/components/workspace/right/PublishPanel.tsx": "create"
+  "src/components/workspace/right/OverrideDialog.tsx": "create"
+  "src/components/workspace/right/*.test.tsx": "create"
+  "src/app/(app)/sessions/[id]/page.tsx": "update; mount right panel"
+
+implementation_notes: |
+  Conventions: TS strict; apiFetch (task 32); WorkspaceProvider bus/readOnly (task 33); endpoints GET /readiness, POST /evaluate,
+  POST /end-clarification, POST /issues/:id/accept-risk (task 26); POST /publish, GET /publish/:runId, POST /publish/:runId/retry (task 27);
+  Tailwind; Vitest + Testing Library with fake timers.
+  Override dialog (SR-9.1): Confirm button disabled until justification.trim().length >= 20 AND checkbox checked; sends
+  { overrideJustification, confirmOverride: true }. Accept risk only shown for warning/informational.
+  Score is labelled informational; gate status ('Ready' / 'N critical issues open') is the primary indicator (D-6).
+  Accessible dialog: focus trap, Escape closes, labelled controls (NFR-10).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Override confirm is disabled until 20+ char justification and checkbox; submit sends both fields"
+    verify: "npm test -- OverrideDialog"
+  - id: AC2
+    behavior: "Publish step list renders all six steps with states and shows Retry when run failed"
+    verify: "npm test -- PublishPanel"
+  - id: AC3
+    behavior: "page_changed_externally failure offers Overwrite and Cancel which call retry with confluenceAction"
+    verify: "npm test -- PublishPanel"
+  - id: AC4
+    behavior: "Readiness panel shows 'Ready' when gatePasses and lists critical issues otherwise; Accept risk hidden for critical"
+    verify: "npm test -- ReadinessPanel"
+  - id: AC5
+    behavior: "End clarification button calls the endpoint and reflects clarificationEnded"
+    verify: "npm test -- ReadinessPanel"
+
+risks_vulnerabilities:
+  - risk: "Accidental override"
+    mitigation: "Justification + explicit confirmation listing critical issues"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-35): add readiness and publish panel with override flow

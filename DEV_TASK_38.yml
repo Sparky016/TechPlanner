@@ -1,0 +1,66 @@
+id: "38"
+title: "Production Docker image (web + worker + pinned Copilot CLI), migrations on deploy, rollback runbook"
+phase: 6
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["02", "08", "09", "12"]
+status: PENDING
+source: "SPEC_DOC.md §8 Deployment & rollback, LLM-2, D-1"
+
+objective: |
+  Package the app as one Docker image that runs either the web server or the worker, includes the pinned GitHub
+  Copilot CLI, applies forward-only migrations on deploy, exposes /healthz, and document deploy and rollback.
+
+scope:
+  in:
+    - "Dockerfile: multi-stage Node 22; Next.js standalone output; Copilot CLI installed at the version pinned in docs/adr/0015-copilot-sdk-api.md; non-root user"
+    - "docker/entrypoint.sh: ROLE=web|worker|migrate; web/worker do not run migrations implicitly"
+    - "docker-compose.prod.example.yml: migrate (one-shot), web, worker, postgres (managed DB in production)"
+    - "HEALTHCHECK calling /healthz for web"
+    - "docs/runbook.md: deploy order (migrate -> worker -> web), rollback (redeploy previous image; migrations expand/contract compatible for one release), secrets list, Copilot token rotation"
+  out:
+    - "CI/CD pipelines and cloud provisioning (not specified)"
+
+files:
+  "Dockerfile": "create"
+  ".dockerignore": "create"
+  "docker/entrypoint.sh": "create"
+  "docker-compose.prod.example.yml": "create"
+  "next.config.ts": "update; output 'standalone'"
+  "docs/runbook.md": "create"
+
+implementation_notes: |
+  Conventions: scripts from task 01 (npm run migrate, npm run worker); health checks from src/server/observability (task 09)
+  including the 'copilot' check (task 12); config variables per .env.example.
+  Copilot CLI: install exactly the version recorded in ADR 0015 (task 12); set COPILOT_CLI_PATH accordingly. The CLI's working
+  directory is created at runtime by the LlmClient (task 12); the image must not contain repository source beyond the build output.
+  No secrets baked into the image; all via environment.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "docker build succeeds and the image runs as a non-root user"
+    verify: "docker build -t techplanner . && docker run --rm techplanner id -u (non-zero)"
+  - id: AC2
+    behavior: "Copilot CLI is present at the pinned version"
+    verify: "docker run --rm --entrypoint sh techplanner -c '$COPILOT_CLI_PATH --version'"
+  - id: AC3
+    behavior: "docker compose -f docker-compose.prod.example.yml up brings web healthy (/healthz 200 with database check ok) after migrate completes"
+    verify: "docker compose -f docker-compose.prod.example.yml up -d && curl -fsS localhost:3000/healthz"
+  - id: AC4
+    behavior: "Runbook documents deploy order, rollback and the expand/contract migration rule"
+    verify: "inspect docs/runbook.md"
+
+risks_vulnerabilities:
+  - risk: "Secrets baked into image layers"
+    mitigation: ".dockerignore excludes .env*; env-only configuration"
+
+knowledge_gaps:
+  - "Target hosting platform beyond 'organisation's hosting server' is unspecified. Fallback: generic Docker/compose example + runbook."
+  - "Copilot health check needs a valid COPILOT_GITHUB_TOKEN in the deployment environment; without it AC3 runs with LLM_FAKE=1."
+
+commit_message: |
+  build(task-38): add production Docker image, compose example and runbook

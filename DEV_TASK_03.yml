@@ -1,0 +1,85 @@
+id: "03"
+title: "Immutable, hash-chained audit log service and verifier"
+phase: 1
+severity: critical
+complexity: critical
+model: opus
+effort: high
+eval_model: opus
+eval_effort: medium
+depends_on: ["02"]
+status: PENDING
+source: "SPEC_DOC.md SR-12.1–SR-12.4, SR-12.6, PRD §14, D-13"
+
+objective: |
+  Provide the single write path for Audit Records. recordAudit() appends a record whose SHA-256 hash
+  chains to the previous one. The database rejects UPDATE/DELETE/TRUNCATE on audit_record.
+  `npm run audit:verify` validates the chain and reports the first broken link. Every later task writes
+  audit events only through this module.
+
+scope:
+  in:
+    - "db/migrations/0002_audit_append_only.sql: trigger raising an exception on UPDATE, DELETE and TRUNCATE of audit_record; REVOKE UPDATE, DELETE, TRUNCATE ON audit_record FROM PUBLIC"
+    - "src/server/audit/actions.ts: AuditAction union of the SR-12.1 names plus 'auth.refresh_failed', 'question.dismissed', 'issue.accepted_risk', 'session.lock_taken_over'"
+    - "src/server/audit/hash.ts: canonicalJson(), redactDetails(), computeHash()"
+    - "src/server/audit/audit.ts: recordAudit()"
+    - "scripts/audit-verify.ts; point npm run audit:verify at it"
+  out:
+    - "Audit read/export API (task 22) and audit UI (task 37)"
+    - "Emitting feature-specific events (each feature task does that)"
+
+files:
+  "db/migrations/0002_audit_append_only.sql": "create"
+  "src/server/audit/actions.ts": "create"
+  "src/server/audit/hash.ts": "create"
+  "src/server/audit/hash.test.ts": "create"
+  "src/server/audit/audit.ts": "create"
+  "scripts/audit-verify.ts": "create"
+  "tests/integration/audit.test.ts": "create"
+  "package.json": "update audit:verify script"
+
+implementation_notes: |
+  Conventions: TS strict; DB via db/query/withTransaction from src/server/db/pool.ts (task 02); integration
+  tests via `npm run test:integration` using resetDatabase() from tests/integration/setup.ts.
+  Public signature (later tasks call it exactly like this):
+    export interface AuditInput { action: AuditAction; result: 'success' | 'failure';
+      userId?: string | null; userDisplayName?: string | null; sessionId?: string | null;
+      ticketIds?: string[]; details?: Record<string, unknown>; correlationId?: string | null }
+    export async function recordAudit(input: AuditInput, client?: PoolClient): Promise<{ id: string; hash: string }>
+  Chaining: in a transaction (the caller's if client is given) run
+  `SELECT pg_advisory_xact_lock(hashtext('audit_chain'))`, read the latest hash (ORDER BY id DESC LIMIT 1),
+  hash = SHA-256(prevHashHex + canonicalJson({ts, userId, userDisplayName, sessionId, ticketIds, action, result, details, correlationId})),
+  then insert. ts = new Date().toISOString() (ms precision, UTC), stored and hashed as the same string value.
+  canonicalJson: sort object keys recursively, keep array order, no whitespace.
+  redactDetails: recursively replace values whose key matches /token|secret|password|authorization|cookie/i with "[REDACTED]" (SR-12.4).
+  audit-verify: iterate records by id with a cursor, recompute, print `OK <count>` and exit 0, or `BROKEN at id=<id>` and exit 1.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "UPDATE, DELETE and TRUNCATE on audit_record each fail"
+    verify: "npm run test:integration -- audit"
+  - id: AC2
+    behavior: "50 concurrent recordAudit calls produce one unbroken chain (audit:verify prints OK 50)"
+    verify: "npm run test:integration -- audit"
+  - id: AC3
+    behavior: "After tampering with a record (test disables the trigger as superuser), audit:verify exits 1 naming that id"
+    verify: "npm run test:integration -- audit"
+  - id: AC4
+    behavior: "details keys such as accessToken, refresh_token and Authorization are stored as [REDACTED]"
+    verify: "npm test -- hash"
+  - id: AC5
+    behavior: "AuditAction contains every event name in SPEC_DOC SR-12.1"
+    verify: "inspect src/server/audit/actions.ts against SR-12.1"
+
+risks_vulnerabilities:
+  - risk: "Concurrent writers fork the hash chain"
+    mitigation: "Transaction-scoped advisory lock serializes chain-head reads"
+  - risk: "Secrets written into storage that can never be deleted"
+    mitigation: "Key-based redaction before insert, tested"
+
+knowledge_gaps:
+  - "SR-12.1 has no event names for question dismissal, accepted-risk, lock take-over or refresh failure, which other SRs require auditing. Fallback: the four extra names listed in scope."
+  - "The production DB role name is unknown. Fallback: REVOKE from PUBLIC plus the trigger, which enforces regardless of role."
+
+commit_message: |
+  feat(task-03): add append-only hash-chained audit log and verifier

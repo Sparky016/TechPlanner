@@ -1,0 +1,74 @@
+id: "25"
+title: "Conversation API: streaming messages (SSE), notes and AI questions"
+phase: 3
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["13", "15", "23"]
+status: PENDING
+source: "SPEC_DOC.md SR-3.5–SR-3.7, SR-4.2, NFR-1, NFR-8, LLM-7, §7.3 messages/notes endpoints"
+
+objective: |
+  Expose facilitation over HTTP: send a message and receive the AI turn as a Server-Sent Events stream, read
+  conversation history, add notes (context only, no AI turn), and list/dismiss AI questions.
+
+scope:
+  in:
+    - "POST /api/sessions/:id/messages { text } -> text/event-stream of FacilitatorEvents"
+    - "GET /api/sessions/:id/messages -> history (role, content, createdAt, seq)"
+    - "POST /api/sessions/:id/notes { text } -> stored role 'note'; no AI turn"
+    - "GET /api/sessions/:id/questions -> all questions with status"
+    - "POST /api/sessions/:id/questions/:qid/dismiss { reason? } -> audit question.dismissed"
+    - "One turn at a time per session: concurrent POST /messages -> 409 turn_in_progress"
+  out:
+    - "Client rendering (task 33)"
+
+files:
+  "src/app/api/sessions/[id]/messages/route.ts": "create"
+  "src/app/api/sessions/[id]/notes/route.ts": "create"
+  "src/app/api/sessions/[id]/questions/route.ts": "create"
+  "src/app/api/sessions/[id]/questions/[qid]/dismiss/route.ts": "create"
+  "src/server/http/sse.ts": "create; sseResponse(asyncIterable, { signal })"
+  "tests/integration/conversationApi.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; withApiHandler (task 13) — POST requires CSRF header, so the client uses fetch + ReadableStream (not
+  EventSource); requireSessionAccess + requireLock with x-tab-id (task 15); runFacilitatorTurn and FacilitatorEvent from
+  src/server/facilitator/runTurn.ts (task 23); recordAudit (task 03); tests `npm run test:integration` with LLM_FAKE=1.
+  Route config: export const runtime = 'nodejs'; export const dynamic = 'force-dynamic'.
+  SSE format: `event: <type>\ndata: <json>\n\n`; heartbeat comment `: ping` every 15 s; header Cache-Control no-cache,
+  X-Accel-Buffering no. Map LLM 'error' events to `event: error` with { code, message, correlationId } — the user's message
+  stays persisted (NFR-8 'without losing the message').
+  Turn mutex: pg_try_advisory_lock(hashtext('turn:'||sessionId)) on a dedicated client held for the stream; release in finally
+  (including client disconnect via request.signal).
+  Text limits: message ≤ 10 000 chars, note ≤ 10 000, dismiss reason ≤ 500.
+  Measure time to first token and observe llm_request_duration_seconds{kind:'facilitator_first_token'} (NFR-1).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "POST /messages streams token, patch/question and done events in SSE format (fake LLM)"
+    verify: "npm run test:integration -- conversationApi"
+  - id: AC2
+    behavior: "Second concurrent POST /messages for the same session returns 409 turn_in_progress; lock released after first completes or client aborts"
+    verify: "npm run test:integration -- conversationApi"
+  - id: AC3
+    behavior: "POST /notes stores a note and triggers no LLM call"
+    verify: "npm run test:integration -- conversationApi"
+  - id: AC4
+    behavior: "Dismissing a question sets status dismissed with reason and writes question.dismissed"
+    verify: "npm run test:integration -- conversationApi"
+  - id: AC5
+    behavior: "LLM failure produces an SSE error event with correlationId and the facilitator message remains in history"
+    verify: "npm run test:integration -- conversationApi"
+
+risks_vulnerabilities:
+  - risk: "Leaked advisory locks block a session"
+    mitigation: "Release in finally and on abort; session-level lock dies with the DB connection"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-25): add streaming conversation, notes and questions API

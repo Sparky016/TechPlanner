@@ -1,0 +1,72 @@
+id: "15"
+title: "Session access guard (Jira-delegated) and single-editor session lock"
+phase: 2
+severity: high
+complexity: critical
+model: opus
+effort: high
+eval_model: opus
+eval_effort: medium
+depends_on: ["13", "14"]
+status: PENDING
+source: "SPEC_DOC.md §7.3 (access check cached ≤5 min), D-12, D-3, §6 Session lock, §7.2 planning_session.lock_*"
+
+objective: |
+  Enforce that only users who can read a session's primary Jira ticket can use the session (D-12), and that
+  only one browser tab at a time can modify it (D-3), with an audited take-over.
+
+scope:
+  in:
+    - "src/server/sessions/access.ts: requireSessionAccess(ctx, sessionId) -> PlanningSessionRow; 5-minute in-memory cache keyed userId:ticketKey"
+    - "src/server/sessions/lock.ts: acquireOrRenewLock, takeOverLock, requireLock(sessionId, tabId)"
+    - "POST /api/sessions/:id/lock (acquire/renew; body none; header x-tab-id) -> { holder: 'you' | 'other', expiresAt }"
+    - "POST /api/sessions/:id/lock/take-over -> audits session.lock_taken_over"
+  out:
+    - "Client-side heartbeat and read-only UI (tasks 33, 34)"
+
+files:
+  "src/server/sessions/access.ts": "create"
+  "src/server/sessions/lock.ts": "create"
+  "src/server/sessions/repo.ts": "create; getSessionById(id) row mapper reused by later tasks"
+  "src/app/api/sessions/[id]/lock/route.ts": "create"
+  "src/app/api/sessions/[id]/lock/take-over/route.ts": "create"
+  "tests/integration/sessionGuard.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; withApiHandler + ApiContext from src/server/http/handler.ts (task 13); HttpError from
+  src/server/http/errors.ts; atlassianFetch from src/server/atlassian/client.ts (task 14); DB via src/server/db/pool.ts;
+  recordAudit from src/server/audit/audit.ts; integration tests `npm run test:integration`, Atlassian mocked with undici MockAgent.
+  Access: GET /rest/api/3/issue/{primaryKey}?fields=summary as the user; 200 -> allowed (cache 5 min); 403/404 -> HttpError 404
+  'Session not found' (do not reveal existence); other errors propagate. Unknown session id -> 404.
+  Lock: tabId = client-generated UUID sent as 'x-tab-id' header (required on mutating session endpoints).
+  acquireOrRenewLock: single UPDATE ... WHERE id=$1 AND (lock_holder IS NULL OR lock_holder=$tab OR lock_expires_at < now())
+  SET lock_holder=$tab, lock_expires_at=now()+interval '60 seconds' RETURNING; zero rows -> holder 'other'.
+  takeOverLock: unconditional set, audit session.lock_taken_over with previous holder (tab ids only).
+  requireLock(sessionId, tabId): throws HttpError 423 code 'session_locked' if not current unexpired holder.
+  Lock holder is a tab id, not a user id (same user, two tabs -> one read-only).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "A user whose Jira call returns 404 gets 404 from requireSessionAccess; a second call within 5 min does not hit Jira"
+    verify: "npm run test:integration -- sessionGuard"
+  - id: AC2
+    behavior: "Two tabs racing acquireOrRenewLock: exactly one gets holder 'you'"
+    verify: "npm run test:integration -- sessionGuard"
+  - id: AC3
+    behavior: "Expired lock (lock_expires_at in the past) can be acquired by another tab"
+    verify: "npm run test:integration -- sessionGuard"
+  - id: AC4
+    behavior: "take-over transfers the lock and writes session.lock_taken_over; previous tab then gets 423 from requireLock"
+    verify: "npm run test:integration -- sessionGuard"
+
+risks_vulnerabilities:
+  - risk: "Lost updates from two editors (D-3)"
+    mitigation: "Atomic conditional UPDATE lock + requireLock on all mutations"
+  - risk: "Information disclosure of session existence"
+    mitigation: "Unauthorized and missing both return 404"
+
+knowledge_gaps:
+  - "SPEC_DOC §7.3 lists only lock/take-over; an acquire/renew endpoint and TTL are unspecified. Fallback: POST /api/sessions/:id/lock with 60 s TTL renewed every 20 s by the client."
+
+commit_message: |
+  feat(task-15): add Jira-delegated session access guard and session lock

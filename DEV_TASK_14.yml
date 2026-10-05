@@ -1,0 +1,63 @@
+id: "14"
+title: "Atlassian REST client with token injection, refresh-on-401 and rate-limit backoff"
+phase: 2
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["09", "11"]
+status: PENDING
+source: "SPEC_DOC.md SR-1.2, NFR-8, §7.1 Integrations"
+
+objective: |
+  Provide atlassianFetch(), the only way code calls Jira or Confluence: it uses the acting user's own token
+  (SR-1.2), retries once after refreshing on 401, honours Retry-After on 429/503 (NFR-8), maps failures to a
+  typed error, and records metrics without logging secrets.
+
+scope:
+  in:
+    - "src/server/atlassian/client.ts: atlassianFetch(userId, product, path, init?) and atlassianJson<T>()"
+    - "AtlassianApiError { status, product, code, message }"
+    - "Unit tests with undici MockAgent"
+  out:
+    - "Jira/Confluence specific calls (tasks 16, 17, 29, 30)"
+
+files:
+  "src/server/atlassian/client.ts": "create"
+  "src/server/atlassian/client.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; server-only; getValidAccessToken from src/server/auth/tokens.ts (task 11);
+  logger + metrics (atlassian_api_errors_total) from src/server/observability (task 09); config via getConfig().
+  Base URLs: product 'jira' -> https://api.atlassian.com/ex/jira/{ATLASSIAN_CLOUD_ID}{path};
+  'confluence' -> https://api.atlassian.com/ex/confluence/{ATLASSIAN_CLOUD_ID}{path} (path starts with /rest/... or /wiki/...).
+  Headers: Authorization Bearer <token>, Accept application/json (unless overridden). Do not set Content-Type for FormData.
+  401: force-refresh via getValidAccessToken(userId, { force: true }) once and retry; second 401 -> AtlassianApiError.
+  429/503: wait Retry-After seconds (or 1 s, 2 s, 4 s if absent), cap 30 s per wait, max 3 retries.
+  Non-2xx: AtlassianApiError with status and Atlassian errorMessages joined; increment metric {product,status}.
+  Add `force` option to getValidAccessToken if task 11 did not.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "401 triggers exactly one forced refresh and retry"
+    verify: "npm test -- client"
+  - id: AC2
+    behavior: "429 with Retry-After: 2 waits ~2 s (fake timers) and retries; after 3 retries throws AtlassianApiError status 429"
+    verify: "npm test -- client"
+  - id: AC3
+    behavior: "Requests carry the user's bearer token and the configured cloudId in the URL"
+    verify: "npm test -- client"
+  - id: AC4
+    behavior: "Error paths increment atlassian_api_errors_total and log no Authorization header"
+    verify: "npm test -- client"
+
+risks_vulnerabilities:
+  - risk: "Retry storms against Atlassian"
+    mitigation: "Bounded retries with Retry-After respect"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-14): add Atlassian REST client with refresh and backoff

@@ -1,0 +1,80 @@
+id: "07"
+title: "Working copy repository with section patches and edit precedence"
+phase: 1
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["02", "05"]
+status: PENDING
+source: "SPEC_DOC.md SR-4.2, SR-4.3, SR-4.5, D-5, §7.2 working_copy/pending_suggestion"
+
+objective: |
+  Provide the persistence layer for the Working Copy: initialise it, apply Facilitator edits, apply AI
+  section patches with the D-5 precedence rule (AI never overwrites a section the user edited after the AI
+  last read it; it creates a pending suggestion instead), and resolve suggestions. API routes (task 19) and the
+  facilitator engine (task 23) call only this module.
+
+scope:
+  in:
+    - "src/server/spec/patch.ts: type SectionPatch = { section: SectionName; op: 'replace' | 'append'; content: string }; applyPatchToBody(body, patch)"
+    - "src/server/spec/workingCopyRepo.ts: initWorkingCopy, getWorkingCopy, updateSectionByUser, applyAiPatch, markAiRead, acceptSuggestion, rejectSuggestion, replaceAllSections"
+    - "Unit tests for applyPatchToBody; integration tests for repository behaviour"
+  out:
+    - "HTTP routes and audit emission (task 19)"
+    - "LLM tool definitions (task 23)"
+
+files:
+  "src/server/spec/patch.ts": "create"
+  "src/server/spec/patch.test.ts": "create"
+  "src/server/spec/workingCopyRepo.ts": "create"
+  "tests/integration/workingCopyRepo.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; DB via db/query/withTransaction from src/server/db/pool.ts (task 02); section names
+  from src/lib/spec/sections.ts and emptySections() from src/lib/spec/document.ts (task 05); integration tests
+  `npm run test:integration` with resetDatabase().
+  working_copy.sections JSONB shape: { [SectionName]: { body: string, lastAiReadAt: string|null, lastUserEditAt: string|null } }.
+  working_copy.version increments on every write (optimistic concurrency).
+  applyPatchToBody: 'replace' -> content; 'append' -> body + (body ? '\n' : '') + content.
+  updateSectionByUser(sessionId, section, body, expectedVersion): if version mismatch throw VersionConflictError;
+    set body and lastUserEditAt=now(); return new version.
+  markAiRead(sessionId, at: Date): sets lastAiReadAt=at on every section (called when a facilitation turn snapshots the doc).
+  applyAiPatch(sessionId, patch, aiReadAt: Date): in a transaction with SELECT ... FOR UPDATE;
+    if section.lastUserEditAt > aiReadAt -> insert pending_suggestion(status 'pending') and return { disposition: 'suggested', suggestionId };
+    else apply, bump version, return { disposition: 'applied', version }.
+  acceptSuggestion(suggestionId, editedContent?) applies (editedContent replaces patch.content if given) and sets status accepted;
+  rejectSuggestion sets status rejected. Accept/reject on a non-pending suggestion throws.
+  replaceAllSections(sessionId, sections) used by revision restore (task 20): validates with validateSections, bumps version.
+  Return types must be explicit and exported.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "An AI patch to a section with lastUserEditAt later than aiReadAt is stored as a pending suggestion and the body is unchanged"
+    verify: "npm run test:integration -- workingCopyRepo"
+  - id: AC2
+    behavior: "An AI patch to a section not edited since aiReadAt is applied and version increments"
+    verify: "npm run test:integration -- workingCopyRepo"
+  - id: AC3
+    behavior: "updateSectionByUser with a stale expectedVersion throws VersionConflictError"
+    verify: "npm run test:integration -- workingCopyRepo"
+  - id: AC4
+    behavior: "acceptSuggestion applies (optionally edited) content; accepting twice throws"
+    verify: "npm run test:integration -- workingCopyRepo"
+  - id: AC5
+    behavior: "Concurrent applyAiPatch and updateSectionByUser on the same section never lose an update"
+    verify: "npm run test:integration -- workingCopyRepo (concurrency case)"
+  - id: AC6
+    behavior: "applyPatchToBody replace/append behave as specified"
+    verify: "npm test -- patch"
+
+risks_vulnerabilities:
+  - risk: "AI silently overwrites human edits (violates D-5)"
+    mitigation: "Row lock + timestamp comparison inside one transaction; tested"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-07): add working copy repository with AI patch precedence

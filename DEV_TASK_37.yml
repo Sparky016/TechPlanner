@@ -1,0 +1,51 @@
+id: "37"
+title: "Audit trail view for a session"
+phase: 5
+severity: medium
+complexity: low
+model: haiku
+effort: medium
+eval_model: haiku
+eval_effort: low
+depends_on: ["22", "32"]
+status: PENDING
+source: "SPEC_DOC.md §6 Additional screens (audit trail view), SR-12.5"
+
+objective: |
+  Provide a page listing a session's audit records with action filter, pagination and a JSON Lines export link.
+
+scope:
+  in:
+    - "src/app/(app)/sessions/[id]/audit/page.tsx: table (time, user, action, result, correlation id, details expandable)"
+    - "Action filter, 'Load more' keyset pagination, Export JSONL link"
+    - "Link to the audit page from the workspace header"
+  out:
+    - "Backend (task 22)"
+
+files:
+  "src/app/(app)/sessions/[id]/audit/page.tsx": "create"
+  "src/components/audit/AuditTable.tsx": "create"
+  "src/components/audit/AuditTable.test.tsx": "create"
+  "src/components/workspace/left/SessionHeader.tsx": "update; add audit link"
+
+implementation_notes: |
+  Conventions: TS strict; apiFetch (task 32); endpoints GET /api/sessions/:id/audit and /audit/export (task 22);
+  Tailwind; Vitest + Testing Library. Details JSON rendered as preformatted text (never as HTML).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Table renders records and expands details as preformatted JSON"
+    verify: "npm test -- AuditTable"
+  - id: AC2
+    behavior: "Load more requests the next cursor; filter re-queries with action param"
+    verify: "npm test -- AuditTable"
+  - id: AC3
+    behavior: "Export link points to /api/sessions/:id/audit/export"
+    verify: "npm test -- AuditTable"
+
+risks_vulnerabilities: []
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-37): add session audit trail view

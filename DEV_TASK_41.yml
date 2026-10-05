@@ -1,0 +1,55 @@
+id: "41"
+title: "Performance verification against NFR-1 to NFR-5"
+phase: 6
+severity: medium
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["39"]
+status: PENDING
+source: "SPEC_DOC.md NFR-1–NFR-5, D-7"
+
+objective: |
+  Provide repeatable load/latency scripts and a report showing whether the app meets the NFR-1..NFR-5 targets,
+  separating app overhead (fake LLM) from real model latency.
+
+scope:
+  in:
+    - "scripts/perf/run.ts: drives the running app (with Atlassian mock from task 39) to measure p95 of session open, session creation, first streamed token, patch-visible latency, evaluation duration"
+    - "Concurrency scenario: 50 concurrent active sessions each sending messages and autosaves for 5 minutes (NFR-5) with LLM_FAKE=1 and configurable fake latency"
+    - "Optional --real-llm mode measuring NFR-1/NFR-2 with the real Copilot SDK"
+    - "docs/perf-report.md with results table vs targets"
+  out:
+    - "Optimisation work (create follow-up tasks for any miss)"
+
+files:
+  "scripts/perf/run.ts": "create"
+  "docs/perf-report.md": "create"
+  "package.json": "add perf script"
+
+implementation_notes: |
+  Conventions: TS strict, tsx scripts; endpoints from tasks 18, 19, 25, 26; Atlassian mock server from tests/e2e/mocks (task 39);
+  /metrics histograms (task 09) can be scraped for server-side timings.
+  Targets: NFR-1 first token ≤3 s p95, patch visible ≤1 s; NFR-2 evaluation ≤20 s p95; NFR-3 session open ≤2 s p95, creation ≤30 s p95;
+  NFR-4 ≤5 s edit loss (verified by autosave cadence); NFR-5 ≥50 concurrent sessions without errors.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "npm run perf completes against a local stack and prints p50/p95 per metric"
+    verify: "npm run perf"
+  - id: AC2
+    behavior: "50-session scenario reports error rate and p95 latencies"
+    verify: "npm run perf -- --scenario concurrency"
+  - id: AC3
+    behavior: "docs/perf-report.md lists every NFR-1..NFR-5 target with measured value and pass/fail"
+    verify: "inspect docs/perf-report.md"
+
+risks_vulnerabilities: []
+
+knowledge_gaps:
+  - "Production hardware profile is unknown. Fallback: report includes the machine spec used; real-LLM measurements require a Copilot token."
+
+commit_message: |
+  test(task-41): add performance verification scripts and report

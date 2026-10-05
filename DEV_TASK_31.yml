@@ -1,0 +1,66 @@
+id: "31"
+title: "Downstream webhook step (HMAC-signed, retried)"
+phase: 4
+severity: high
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["03", "28"]
+status: PENDING
+source: "SPEC_DOC.md §7.4 Downstream Hook, SR-13.2 step 6, D-9"
+
+objective: |
+  Notify the downstream AI Task Generator that a specification was published by POSTing the §7.4 payload to the
+  configured webhook with an HMAC-SHA256 signature and bounded retries. With no webhook configured the step succeeds
+  as 'label-only' because the spec-published Jira label is the signal.
+
+scope:
+  in:
+    - "src/server/publish/steps/downstreamStep.ts implementing PublishStep 'downstream'"
+    - "src/server/publish/webhookSignature.ts: signPayload(rawBody, secret) and verifySignature (for consumers/tests)"
+    - "Audit downstream.triggered"
+  out:
+    - "Any direct call to the Task Generator API (D-9 forbids)"
+
+files:
+  "src/server/publish/steps/downstreamStep.ts": "create"
+  "src/server/publish/webhookSignature.ts": "create"
+  "src/server/publish/steps/downstreamStep.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; server-only; PublishStep contract (task 28); config DOWNSTREAM_WEBHOOK_URL / DOWNSTREAM_WEBHOOK_SECRET
+  via getConfig(); recordAudit (task 03); Vitest with fake timers (npm test).
+  Payload exactly as SPEC_DOC §7.4: { event:'spec.published', sessionId, primaryTicket, tickets, revision, readinessScore,
+  override (boolean), confluencePageUrl, attachmentName (`${primary}-spec-r${rev}.md`), specMarkdown, publishedBy (accountId), publishedAt (ISO) }.
+  Headers: Content-Type application/json; X-Signature: sha256=<hex HMAC-SHA256 of the exact raw body>; X-Delivery-Id: <runId>.
+  Timeout 10 s (AbortSignal.timeout); retries after 1 s, 5 s, 25 s (3 retries) on network error or non-2xx; then failed
+  { code:'webhook_failed', message: 'HTTP <status>' }. No URL configured -> success { mode:'label-only' }.
+  Never follow redirects (redirect:'manual') and never log the secret.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Payload contains every §7.4 field and X-Signature verifies with verifySignature"
+    verify: "npm test -- downstreamStep"
+  - id: AC2
+    behavior: "Two 500 responses then 200 -> success after retries at 1 s and 5 s"
+    verify: "npm test -- downstreamStep"
+  - id: AC3
+    behavior: "Four failures -> status failed code webhook_failed"
+    verify: "npm test -- downstreamStep"
+  - id: AC4
+    behavior: "No DOWNSTREAM_WEBHOOK_URL -> success with mode label-only and no HTTP call"
+    verify: "npm test -- downstreamStep"
+
+risks_vulnerabilities:
+  - risk: "Forged downstream triggers"
+    mitigation: "HMAC signature over the raw body"
+  - risk: "SSRF via redirects"
+    mitigation: "URL only from config; redirects not followed"
+
+knowledge_gaps:
+  - "Exact X-Signature value format is unspecified. Fallback: 'sha256=<hex>'; document in README for the downstream team."
+
+commit_message: |
+  feat(task-31): add signed downstream webhook publish step

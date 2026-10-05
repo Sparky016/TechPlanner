@@ -1,0 +1,84 @@
+id: "24"
+title: "Readiness evaluator engine and issue reconciliation"
+phase: 3
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["03", "06", "07", "12"]
+status: PENDING
+source: "SPEC_DOC.md SR-6.1, SR-6.3, SR-6.4, SR-6.6, SR-7.1–SR-7.4, SR-3.3, PRD §10, §11, LLM-4"
+
+objective: |
+  Evaluate the Working Copy with a separate, stateless evaluator run: a status and reason for each of the 27
+  sections, issues by severity, merged with the deterministic critical rules, reconciled against existing issues
+  by fingerprint, scored, persisted and audited.
+
+scope:
+  in:
+    - "src/server/readiness/evaluatorPrompt.ts: rubric prompt"
+    - "src/server/readiness/evaluatorTools.ts: report_section_status, raise_issue"
+    - "src/server/readiness/evaluate.ts: evaluateSession(sessionId, { userId }) -> EvaluationResult"
+    - "src/server/readiness/reconcile.ts: reconcileIssues(existing, reported) pure function"
+    - "Unit tests (reconcile, fake LLM); integration test for persistence"
+  out:
+    - "Scheduling/debounce and HTTP endpoints (task 26)"
+    - "Real-model quality evals (task 40)"
+
+files:
+  "src/server/readiness/evaluatorPrompt.ts": "create"
+  "src/server/readiness/evaluatorTools.ts": "create"
+  "src/server/readiness/evaluate.ts": "create"
+  "src/server/readiness/reconcile.ts": "create"
+  "src/server/readiness/reconcile.test.ts": "create"
+  "src/server/readiness/evaluate.test.ts": "create"
+  "tests/integration/evaluate.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; server-only; getLlmClient (task 12; FakeLlmClient in tests); computeReadinessScore,
+  mandatoryCriticalIssues, gatePasses (src/lib/readiness, task 06); issueFingerprint (src/server/readiness/fingerprint.ts, task 06);
+  getWorkingCopy (task 07); SECTION_NAMES (task 05); recordAudit (task 03); observe readiness_score metric (task 09);
+  config EVALUATOR_MODEL and SECTION_WEIGHTS; tests `npm test` / `npm run test:integration`.
+  Run: new stateless run per evaluation (no conversation history) (LLM-4) with the rendered Working Copy and the list of
+  currently open issues (so wording is reused). Prompt rubric = SR-6.4 checklist + PRD §10 definition ('a developer unfamiliar with
+  the project can complete the work without clarification') + SR-7.2 severity semantics + SR-7.3 (non-measurable acceptance criterion
+  or contradiction between sections => critical) + SR-3.3 (vague statements => not complete) + SR-5.2 ('Not applicable — reason' may be complete).
+  Tools: report_section_status { section: enum, status: 'complete'|'partial'|'missing', reason ≤ 200 };
+  raise_issue { severity, section: enum, description ≤ 300 }.
+  Missing section statuses after the run: one corrective follow-up; still missing -> status 'missing', reason 'Not evaluated'.
+  Issues = LLM issues ∪ mandatoryCriticalIssues(statuses). reconcileIssues (SR-7.4): match by fingerprint;
+  reported & existing open/accepted-risk -> keep (accepted-risk stays accepted-risk unless severity is now critical -> open);
+  reported & new -> insert open; existing open not reported -> resolved (resolved_at now); existing resolved & reported again -> reopen.
+  Persist in one transaction: evaluation row (section_statuses with reasons, score), issue changes; then recordAudit
+  readiness.evaluated { evaluationId, score, statuses, counts: {critical, warning, informational}, gatePasses }.
+  EvaluationResult: { evaluationId, score, statuses, issues (open + accepted-risk), gatePasses }.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Fake evaluator reporting all 27 sections yields the score computed by computeReadinessScore and one evaluation row"
+    verify: "npm run test:integration -- evaluate"
+  - id: AC2
+    behavior: "Missing Acceptance Criteria produces an open critical issue even if the LLM raised none"
+    verify: "npm test -- evaluate"
+  - id: AC3
+    behavior: "reconcileIssues keeps, inserts, resolves and reopens per rules; accepted-risk warnings survive re-evaluation"
+    verify: "npm test -- reconcile"
+  - id: AC4
+    behavior: "Sections the evaluator omits are recorded as missing with reason 'Not evaluated' after one corrective run"
+    verify: "npm test -- evaluate"
+  - id: AC5
+    behavior: "Each evaluation writes one readiness.evaluated audit record with score and counts"
+    verify: "npm run test:integration -- evaluate"
+
+risks_vulnerabilities:
+  - risk: "Evaluator bias from conversation (rubber-stamping)"
+    mitigation: "Stateless run without conversation history (LLM-4)"
+  - risk: "Issue churn from re-worded descriptions"
+    mitigation: "Open issues passed to the prompt for reuse; normalized fingerprints"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-24): add readiness evaluator engine with issue reconciliation

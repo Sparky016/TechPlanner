@@ -1,0 +1,71 @@
+id: "21"
+title: "Attachment ingestion and context budget"
+phase: 2
+severity: medium
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["12", "14", "16"]
+status: PENDING
+source: "SPEC_DOC.md SR-2.4, SR-2.5, D-10"
+
+objective: |
+  Decide which Jira attachments are ingested (text-extracted or passed as images) versus listed, download and
+  extract them, and enforce the total context token budget with visible truncation.
+
+scope:
+  in:
+    - "src/server/ingest/attachments.ts: classifyAttachment(meta, supportsImages), ingestAttachments(userId, attachments, supportsImages)"
+    - "src/server/ingest/extract.ts: extractText(buffer, mimeType, filename) for txt/md/json/yaml/csv/pdf/docx"
+    - "src/server/ingest/budget.ts: estimateTokens(text), applyContextBudget(items, budget)"
+    - "Unit tests with small fixture files"
+  out:
+    - "Persisting snapshots (task 18)"
+    - "OCR of scanned PDFs"
+
+files:
+  "src/server/ingest/attachments.ts": "create"
+  "src/server/ingest/extract.ts": "create"
+  "src/server/ingest/budget.ts": "create"
+  "src/server/ingest/ingest.test.ts": "create"
+  "src/server/ingest/__fixtures__/": "create sample.txt, sample.pdf, sample.docx, sample.png"
+
+implementation_notes: |
+  Conventions: TS strict; server-only; atlassianFetch from src/server/atlassian/client.ts (task 14) to download
+  attachment contentUrl; attachment metadata type from src/server/atlassian/jira.ts (task 16); LlmClient.supportsImages
+  from src/server/llm (task 12); Vitest colocated (npm test).
+  Rules (SR-2.4): text types (.txt .md .json .yaml .yml .csv) and PDF and DOCX ≤ 10 MB -> extract text;
+  images png/jpg/jpeg/gif/webp ≤ 5 MB -> ingest as image only if supportsImages, else list with reason 'images_not_supported';
+  max 20 ingested per session (in Jira order) — the rest listed with reason 'limit_reached'; everything else listed with
+  reason 'unsupported_type' or 'too_large'. Download failures -> 'unavailable' with reason.
+  Libraries: mammoth for DOCX, unpdf for PDF text (see knowledge_gaps).
+  Budget (SR-2.5): estimateTokens = ceil(chars/4) (images count 1 500 tokens each). Item kinds: ticket_core, comment(with created date),
+  confluence_page, attachment. ticket_core is never truncated. When total > budget, drop oldest comments first,
+  then largest attachments, then largest Confluence pages, until within budget; return { kept, truncated: [{kind, ref, reason:'context_budget'}] }.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Classification follows SR-2.4 limits (11 MB PDF -> too_large; 21st eligible attachment -> limit_reached; .exe -> unsupported_type)"
+    verify: "npm test -- ingest"
+  - id: AC2
+    behavior: "Text is extracted from the PDF and DOCX fixtures"
+    verify: "npm test -- ingest"
+  - id: AC3
+    behavior: "With supportsImages=false images are listed with reason images_not_supported"
+    verify: "npm test -- ingest"
+  - id: AC4
+    behavior: "applyContextBudget removes oldest comments before attachments and never removes ticket_core; returns the truncated list"
+    verify: "npm test -- ingest"
+
+risks_vulnerabilities:
+  - risk: "Malicious or huge files exhaust memory"
+    mitigation: "Check size from metadata before download; abort stream beyond limit"
+
+knowledge_gaps:
+  - "Token counting method for SR-2.5 is unspecified and the Copilot SDK may not expose a tokenizer. Fallback: chars/4 estimate."
+  - "PDF/DOCX extraction libraries unspecified. Fallback: unpdf and mammoth."
+
+commit_message: |
+  feat(task-21): add attachment ingestion and context budget enforcement

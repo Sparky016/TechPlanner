@@ -1,0 +1,79 @@
+id: "09"
+title: "Operational logging, correlation IDs, metrics and /healthz"
+phase: 1
+severity: medium
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["02"]
+status: PENDING
+source: "SPEC_DOC.md NFR-9, §8 Error handling, §11 Instrumentation, LLM-2, LLM-8, D-14"
+
+objective: |
+  Provide structured JSON operational logs (separate from Audit Records) with secret redaction,
+  a per-request correlation ID, Prometheus metrics, and a /healthz endpoint with pluggable checks.
+
+scope:
+  in:
+    - "src/server/observability/logger.ts: pino logger with redact paths for token/secret/password/authorization/cookie"
+    - "src/server/observability/context.ts: AsyncLocalStorage-based runWithContext({ correlationId, userId? }, fn), getCorrelationId(), newCorrelationId()"
+    - "src/server/observability/metrics.ts: prom-client registry and metrics listed below"
+    - "src/server/observability/health.ts: registerHealthCheck(name, fn), runHealthChecks(); built-in 'database' check"
+    - "src/app/healthz/route.ts: GET returns 200 {status:'ok', checks} or 503 {status:'unhealthy', checks}"
+    - "src/app/metrics/route.ts: GET returns Prometheus text when Authorization: Bearer <METRICS_TOKEN> matches; 404 when METRICS_TOKEN unset"
+  out:
+    - "Copilot CLI health check (task 12 registers it)"
+    - "Audit records (task 03)"
+
+files:
+  "src/server/observability/logger.ts": "create"
+  "src/server/observability/context.ts": "create"
+  "src/server/observability/metrics.ts": "create"
+  "src/server/observability/health.ts": "create"
+  "src/server/observability/observability.test.ts": "create"
+  "src/app/healthz/route.ts": "create"
+  "src/app/metrics/route.ts": "create"
+  "src/server/config.ts": "update; add optional METRICS_TOKEN"
+  ".env.example": "update; METRICS_TOKEN"
+
+implementation_notes: |
+  Conventions: TS strict; server-only modules; Vitest colocated (npm test); config via getConfig().
+  Metric names (NFR-9): http_request_duration_seconds{route,method,status} histogram;
+  llm_request_duration_seconds{kind} histogram; llm_tokens_total{kind,direction} counter; llm_errors_total{kind,code} counter;
+  atlassian_api_errors_total{product,status} counter; publish_step_failures_total{step} counter;
+  readiness_score histogram (buckets 0..100 step 10);
+  publish_total{project,override} counter and readiness_score_at_publish histogram and confluence_external_edit_total{project}
+  counter (SPEC_DOC §11 success-metric instrumentation; observed by tasks 27 and 29). Export typed helpers, e.g. observeLlmRequest(kind, seconds).
+  Correlation ID: uuid v4; later the API handler wrapper (task 13) wraps each request in runWithContext.
+  Health check functions return { ok: boolean, detail?: string } with a 2 s timeout each.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Logging an object with accessToken / Authorization fields outputs [Redacted] for them"
+    verify: "npm test -- observability"
+  - id: AC2
+    behavior: "getCorrelationId() returns the id set by runWithContext across awaits"
+    verify: "npm test -- observability"
+  - id: AC3
+    behavior: "/healthz returns 503 when a registered check fails or times out, 200 otherwise"
+    verify: "npm test -- observability (route handler invoked directly)"
+  - id: AC4
+    behavior: "/metrics returns 404 without METRICS_TOKEN configured, 401 with wrong bearer, Prometheus text with correct bearer"
+    verify: "npm test -- observability"
+  - id: AC5
+    behavior: "All metric names listed in implementation_notes are registered"
+    verify: "inspect src/server/observability/metrics.ts"
+
+risks_vulnerabilities:
+  - risk: "Secrets leaking into operational logs (NFR-6)"
+    mitigation: "pino redact paths; tested"
+  - risk: "Unauthenticated metrics exposure"
+    mitigation: "Disabled unless METRICS_TOKEN is set"
+
+knowledge_gaps:
+  - "NFR-9 requires metrics but not how they are exposed or scraped. Fallback: Prometheus /metrics gated by optional METRICS_TOKEN (new env var); flag for ops."
+
+commit_message: |
+  feat(task-09): add structured logging, correlation IDs, metrics and healthz

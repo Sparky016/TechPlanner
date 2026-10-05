@@ -1,0 +1,56 @@
+id: "22"
+title: "Audit trail read and JSON Lines export API"
+phase: 2
+severity: medium
+complexity: low
+model: haiku
+effort: medium
+eval_model: haiku
+eval_effort: low
+depends_on: ["03", "13", "15"]
+status: PENDING
+source: "SPEC_DOC.md SR-12.5, §7.3 audit endpoints"
+
+objective: |
+  Let users with access to a session read its audit trail (paginated) and export it as JSON Lines for
+  troubleshooting, compliance and historical review.
+
+scope:
+  in:
+    - "GET /api/sessions/:id/audit?cursor=&limit=&action= -> { records, nextCursor } newest first"
+    - "GET /api/sessions/:id/audit/export -> application/x-ndjson stream, Content-Disposition attachment; filename=audit-<sessionId>.jsonl, oldest first"
+  out:
+    - "Audit UI (task 37)"
+    - "Global (cross-session) audit views"
+
+files:
+  "src/server/audit/read.ts": "create; listSessionAudit, streamSessionAudit"
+  "src/app/api/sessions/[id]/audit/route.ts": "create"
+  "src/app/api/sessions/[id]/audit/export/route.ts": "create"
+  "tests/integration/auditApi.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; withApiHandler (task 13); requireSessionAccess (task 15); DB via src/server/db/pool.ts;
+  tests `npm run test:integration`.
+  Record JSON: { id, ts, user: {accountId, displayName}, sessionId, ticketIds, action, result, details, correlationId, hash }
+  (hash hex). Cursor = last id (keyset pagination). limit default 50, max 200. Export streams with a DB cursor in batches of 500.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "List returns newest first with working keyset pagination and action filter"
+    verify: "npm run test:integration -- auditApi"
+  - id: AC2
+    behavior: "Export returns one valid JSON object per line, oldest first, with attachment Content-Disposition"
+    verify: "npm run test:integration -- auditApi"
+  - id: AC3
+    behavior: "User without Jira access to the primary ticket gets 404"
+    verify: "npm run test:integration -- auditApi"
+
+risks_vulnerabilities:
+  - risk: "Exposing audit data across sessions"
+    mitigation: "Query always filtered by session_id after access check"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-22): add audit trail read and JSONL export API

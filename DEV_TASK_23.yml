@@ -1,0 +1,93 @@
+id: "23"
+title: "AI facilitator engine: prompt, tools and turn execution"
+phase: 3
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["07", "12", "18", "26"]
+status: PENDING
+source: "SPEC_DOC.md SR-3.1–SR-3.4, SR-3.6, SR-3.8, SR-4.1–SR-4.3, SR-8.1–SR-8.3, PRD §9, LLM-4, LLM-5"
+
+objective: |
+  Run one facilitation turn: build the senior-architect prompt from sources, notes, conversation, Working Copy
+  and open issues; call the LlmClient with tools that patch sections and ask questions; persist the conversation;
+  apply patches with D-5 precedence; emit streaming events; audit the turn; schedule a readiness evaluation.
+
+scope:
+  in:
+    - "src/server/facilitator/prompt.ts: buildFacilitatorSystemPrompt(), buildFacilitatorMessages(sessionContext)"
+    - "src/server/facilitator/tools.ts: tool definitions apply_section_patch, ask_question, mark_question_answered"
+    - "src/server/facilitator/runTurn.ts: runFacilitatorTurn({ sessionId, user, text }) -> AsyncIterable<FacilitatorEvent>"
+    - "src/server/facilitator/context.ts: loadSessionContext(sessionId) (snapshots, notes, messages, working copy, open issues, open questions, gate status, clarification_ended)"
+    - "Unit tests with FakeLlmClient; integration test for persistence"
+  out:
+    - "HTTP/SSE endpoint (task 25)"
+    - "Readiness evaluation logic (task 24)"
+    - "Prompt quality evals against the real model (task 40)"
+
+files:
+  "src/server/facilitator/prompt.ts": "create"
+  "src/server/facilitator/tools.ts": "create"
+  "src/server/facilitator/context.ts": "create"
+  "src/server/facilitator/runTurn.ts": "create"
+  "src/server/facilitator/facilitator.test.ts": "create"
+  "tests/integration/facilitator.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; server-only; LlmClient/getLlmClient from src/server/llm (task 12, use FakeLlmClient in tests via
+  LLM_FAKE=1 or injection); applyAiPatch/markAiRead from src/server/spec/workingCopyRepo.ts (task 07); SECTION_NAMES (task 05);
+  gatePasses (task 06); scheduleEvaluation from src/server/readiness/schedule.ts (task 26); recordAudit (task 03); config
+  FACILITATOR_MODEL; tests `npm test` / `npm run test:integration`.
+  Event type (task 25 streams these): FacilitatorEvent = { type:'token', text } | { type:'patch', section, version }
+  | { type:'suggestion', suggestionId, section } | { type:'question', questionId, text, section } | { type:'done', messageSeq }
+  | { type:'error', code, message }.
+  System prompt must encode: act as senior software architect (PRD §9 list); never merely transcribe — every turn either calls
+  apply_section_patch or ask_question or both (SR-3.2); do not accept vague statements (quantity/owner/condition/test) as complete,
+  ask a concrete follow-up instead (SR-3.3); prioritise questions for open Critical issues, then Warnings, then Informational;
+  at most 3 questions per turn (SR-3.4); keep the 27-section structure; 'Not applicable — <reason>' allowed (SR-5.2).
+  Gate-aware text: if gatePasses -> state that no critical gaps remain and label further concerns non-blocking (SR-8.2a, SR-8.3).
+  If clarification_ended -> do NOT offer ask_question tool; answer only what was asked (SR-8.2b).
+  Tools: apply_section_patch { section: enum SECTION_NAMES, op: 'replace'|'append', content: string ≤ 20000 } -> applyAiPatch with
+  aiReadAt = turn start; ask_question { text ≤ 500, section?: enum, issueId?: uuid } -> insert ai_question (4th call in a turn returns
+  'Question limit reached for this turn'); mark_question_answered { questionId } -> status answered.
+  Persistence: insert facilitator message (role 'facilitator') before calling the model; call markAiRead(turnStart);
+  insert AI message (role 'ai') with full text at the end. If the turn produced neither patch nor question and clarification is
+  not ended, issue one corrective follow-up run asking the model to patch or ask; then accept the outcome.
+  Audit once per turn: ai.suggestion { messageSeq, patches: [{section, op, disposition}], questions: [ids], model }.
+  After a turn with ≥1 applied patch call scheduleEvaluation(sessionId).
+  Concurrency: callers guarantee one turn at a time (task 25).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Scripted fake turn with two patches and one question yields token, patch, question and done events and persists both messages and the question"
+    verify: "npm run test:integration -- facilitator"
+  - id: AC2
+    behavior: "Patch to a section the user edited after turn start yields a 'suggestion' event and leaves the body unchanged"
+    verify: "npm run test:integration -- facilitator"
+  - id: AC3
+    behavior: "Fourth ask_question in a turn is rejected with the limit message; only 3 questions stored"
+    verify: "npm test -- facilitator"
+  - id: AC4
+    behavior: "With clarification_ended=true the tools passed to the LLM exclude ask_question"
+    verify: "npm test -- facilitator"
+  - id: AC5
+    behavior: "Exactly one ai.suggestion audit record per turn; scheduleEvaluation called when a patch applied"
+    verify: "npm run test:integration -- facilitator"
+  - id: AC6
+    behavior: "System prompt contains the SR-3.2, SR-3.3, SR-3.4 rules and the gate status"
+    verify: "npm test -- facilitator (prompt snapshot)"
+
+risks_vulnerabilities:
+  - risk: "Prompt injection from Jira/Confluence content steering the AI"
+    mitigation: "Wrap source material in clearly delimited 'untrusted source data' blocks; tools limited to spec edits/questions (LLM-6)"
+  - risk: "AI overwrites human edits"
+    mitigation: "All writes via applyAiPatch with turn-start aiReadAt"
+
+knowledge_gaps:
+  - "Behavioural quality is only verified by task 40 evals against the real model; this task verifies mechanics with the fake."
+
+commit_message: |
+  feat(task-23): add AI facilitator turn engine with section patch and question tools

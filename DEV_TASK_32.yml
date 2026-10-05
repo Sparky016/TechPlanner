@@ -1,0 +1,77 @@
+id: "32"
+title: "App shell, login page, data notice, session list and new-session form"
+phase: 5
+severity: high
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["11", "13", "18"]
+status: PENDING
+source: "SPEC_DOC.md §6 Additional screens, SR-2.1, SR-2.7, SR-1.4, SR-1.6, NFR-7, §8 Error handling"
+
+objective: |
+  Build the non-workspace UI: authenticated shell, login screen, first-login data-handling notice, list of my
+  sessions with filters, and the create-session form, plus the shared client API helper all pages use.
+
+scope:
+  in:
+    - "Tailwind CSS setup; src/app/(app)/layout.tsx shell with header (user display name, logout)"
+    - "src/app/login/page.tsx: 'Sign in with Atlassian' -> /auth/login; error messages for ?error=site and ?error=auth"
+    - "Data notice (NFR-7): modal on first login explaining that ticket/Confluence content is processed via GitHub Copilot; GET /api/me and POST /api/me/ack-data-notice"
+    - "src/app/(app)/sessions/page.tsx: list with status (draft/published/partially_published) and ticket filters"
+    - "src/app/(app)/sessions/new/page.tsx: ticket keys input, 409 duplicate confirmation (link to existing), 422 unreadable keys display"
+    - "src/lib/api/client.ts: apiFetch() adding CSRF token, x-tab-id, JSON handling, error objects with correlationId, redirect to /login on 401 reauth_required"
+    - "Component test setup: Vitest jsdom + @testing-library/react for *.test.tsx"
+  out:
+    - "Session workspace (tasks 33-36) and audit view (task 37)"
+
+files:
+  "src/app/(app)/layout.tsx": "create; requireUser server-side, redirect to /login"
+  "src/app/login/page.tsx": "create"
+  "src/app/(app)/sessions/page.tsx": "create"
+  "src/app/(app)/sessions/new/page.tsx": "create"
+  "src/components/DataNotice.tsx": "create"
+  "src/components/ErrorBanner.tsx": "create; shows message + correlation ID"
+  "src/app/api/me/route.ts": "create"
+  "src/app/api/me/ack-data-notice/route.ts": "create; sets app_user.data_notice_ack_at"
+  "src/lib/api/client.ts": "create"
+  "src/lib/api/tabId.ts": "create; per-tab UUID in sessionStorage"
+  "src/components/*.test.tsx": "create component tests"
+  "vitest.config.ts": "update; jsdom for *.test.tsx"
+
+implementation_notes: |
+  Conventions: TS strict; App Router; server-side auth via getCurrentUser (src/server/auth/session.ts, task 11); API routes via
+  withApiHandler (task 13); session list/create endpoints from task 18 (GET/POST /api/sessions); CSRF token via GET /api/csrf (task 13);
+  Tailwind; components in src/components; Vitest + Testing Library (npm test).
+  Error display (§8): every API error shows a human-readable message and its correlation ID.
+  Desktop-first; min width 1280 px for the workspace only — these pages must also render at 1024 px.
+  Keyboard operable forms with labels (NFR-10).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Unauthenticated access to /sessions redirects to /login"
+    verify: "npm test (route/page test) or inspect src/app/(app)/layout.tsx redirect"
+  - id: AC2
+    behavior: "New session form shows the duplicate confirmation on 409 and unreadable keys on 422"
+    verify: "npm test -- sessions/new (component test with mocked apiFetch)"
+  - id: AC3
+    behavior: "Data notice shows until acknowledged and POST /api/me/ack-data-notice persists acknowledgement"
+    verify: "npm test -- DataNotice; npm run test:integration -- me"
+  - id: AC4
+    behavior: "apiFetch sends x-csrf-token and x-tab-id on POST/PATCH and surfaces correlationId on errors"
+    verify: "npm test -- client"
+  - id: AC5
+    behavior: "Lint, typecheck and build pass"
+    verify: "npm run lint && npm run typecheck && npm run build"
+
+risks_vulnerabilities:
+  - risk: "Missing CSRF header on client calls"
+    mitigation: "All client calls go through apiFetch"
+
+knowledge_gaps:
+  - "Data notice wording is not specified (NFR-7). Fallback: plain statement that Jira/Confluence content is sent to GitHub Copilot under the organisation's Copilot terms; mark copy for review."
+
+commit_message: |
+  feat(task-32): add app shell, login, data notice and session list/create pages

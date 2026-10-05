@@ -1,0 +1,66 @@
+id: "30"
+title: "Jira publish steps: attachment, description block, comment and label (idempotent)"
+phase: 4
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["14", "28"]
+status: PENDING
+source: "SPEC_DOC.md SR-13.2 steps 2–5, SR-9.2, D-8, PRD §13 Jira"
+
+objective: |
+  Update every session ticket in Jira as the facilitator: attach the spec markdown, insert or replace the
+  delimited specification block in the description without touching original content, add a publish comment,
+  and add the spec-published label. Each step is idempotent so retries never duplicate.
+
+scope:
+  in:
+    - "src/server/publish/steps/jiraSteps.ts exporting jiraAttachStep, jiraDescriptionStep, jiraCommentStep, jiraLabelStep (PublishStep)"
+    - "Per-ticket results recorded in StepResult.result { [ticketKey]: { status, id? , error? } }; step fails if any ticket fails"
+    - "Audit jira.updated per ticket per step"
+  out:
+    - "Orchestration (task 27)"
+
+files:
+  "src/server/publish/steps/jiraSteps.ts": "create"
+  "src/server/publish/steps/jiraSteps.test.ts": "create; undici MockAgent"
+
+implementation_notes: |
+  Conventions: TS strict; server-only; atlassianFetch/atlassianJson (task 14) as the facilitator; PublishStep contract,
+  upsertSpecBlock/buildSpecBlockNodes/buildPublishCommentAdf (task 28); recordAudit (task 03); Vitest (npm test).
+  Attach (step 2): filename `${KEY}-spec-r${revisionNumber}.md`; first GET issue fields=attachment and skip if same filename exists;
+  else POST /rest/api/3/issue/{key}/attachments multipart 'file', header 'X-Atlassian-Token: no-check'.
+  Description (step 3): GET fields=description; upsertSpecBlock; PUT /rest/api/3/issue/{key} { fields: { description } }.
+  Requires ctx.confluencePageUrl (orchestrator guarantees). Original content outside markers is unchanged (D-8).
+  Comment (step 4): fetch comments and skip if any body contains 'tech-planner-run:<runId>'; else POST comment ADF.
+  Label (step 5): PUT /rest/api/3/issue/{key} { update: { labels: [ { add: 'spec-published' } ] } }.
+  Retries only re-process tickets whose previous per-ticket status is not success (use ctx.previousResult).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Attach uploads once per ticket; rerun with existing filename uploads nothing"
+    verify: "npm test -- jiraSteps"
+  - id: AC2
+    behavior: "Description PUT body preserves all original ADF nodes and contains exactly one spec block after two runs"
+    verify: "npm test -- jiraSteps"
+  - id: AC3
+    behavior: "Comment step skips when a comment with the run marker exists; comment includes override justification when set"
+    verify: "npm test -- jiraSteps"
+  - id: AC4
+    behavior: "Label step sends an add operation (not a replace of labels)"
+    verify: "npm test -- jiraSteps"
+  - id: AC5
+    behavior: "With two tickets where one fails, step status is failed, the successful ticket is not re-processed on retry, and jira.updated is audited per ticket"
+    verify: "npm test -- jiraSteps"
+
+risks_vulnerabilities:
+  - risk: "Overwriting ticket descriptions or labels"
+    mitigation: "Marker-based block and label add operation; tested"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-30): add idempotent Jira publish steps

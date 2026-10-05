@@ -1,0 +1,59 @@
+id: "04"
+title: "AES-256-GCM secret encryption utility"
+phase: 1
+severity: critical
+complexity: critical
+model: opus
+effort: high
+eval_model: opus
+eval_effort: medium
+depends_on: ["01"]
+status: PENDING
+source: "SPEC_DOC.md SR-1.5, NFR-6, D-11"
+
+objective: |
+  Provide encryptSecret()/decryptSecret() so Atlassian access and refresh tokens are stored at rest
+  with AES-256-GCM using TOKEN_ENCRYPTION_KEY and are never stored in plaintext.
+
+scope:
+  in:
+    - "src/server/crypto/secrets.ts: encryptSecret(plaintext: string): Buffer; decryptSecret(blob: Buffer): string; class SecretDecryptionError"
+    - "Unit tests"
+  out:
+    - "Key rotation tooling"
+    - "OAuth flow (task 11)"
+
+files:
+  "src/server/crypto/secrets.ts": "create"
+  "src/server/crypto/secrets.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; server-only module (`import 'server-only'`); Vitest colocated tests (npm test);
+  config via getConfig() from src/server/config.ts (task 01).
+  Use node:crypto. Blob layout: 1-byte version 0x01 | 12-byte random IV | 16-byte GCM auth tag | ciphertext.
+  Key = Buffer.from(getConfig().TOKEN_ENCRYPTION_KEY, 'base64') (task 01 validates 32 bytes).
+  decryptSecret throws SecretDecryptionError on unknown version, wrong key or tampering. Messages never
+  include plaintext, ciphertext or key material.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Encrypt then decrypt returns the original string, including unicode and empty string"
+    verify: "npm test -- secrets"
+  - id: AC2
+    behavior: "Encrypting the same plaintext twice yields different blobs"
+    verify: "npm test -- secrets"
+  - id: AC3
+    behavior: "Flipping any byte of IV, tag or ciphertext makes decryptSecret throw SecretDecryptionError"
+    verify: "npm test -- secrets"
+  - id: AC4
+    behavior: "Decrypting with a different key throws SecretDecryptionError"
+    verify: "npm test -- secrets"
+
+risks_vulnerabilities:
+  - risk: "IV reuse breaks GCM confidentiality"
+    mitigation: "crypto.randomBytes(12) on every call; uniqueness tested"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-04): add AES-256-GCM secret encryption utility

@@ -1,0 +1,53 @@
+id: "36"
+title: "Version history UI: list, compare and restore"
+phase: 5
+severity: medium
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["20", "34"]
+status: PENDING
+source: "SPEC_DOC.md §6 Center panel (version history), SR-11.2–SR-11.4"
+
+objective: |
+  Let the Facilitator browse revisions, compare any two with a section-aligned diff, and restore one
+  (non-destructively) from the center panel.
+
+scope:
+  in:
+    - "src/components/workspace/center/HistoryDrawer.tsx: list (number, time, author, trigger, score, published badge)"
+    - "Compare: select two revisions -> changed sections with line diff (added/removed highlighting); unchanged sections collapsed"
+    - "Restore: confirmation dialog explaining a new revision is created; refresh working copy afterwards"
+  out:
+    - "Backend (task 20)"
+
+files:
+  "src/components/workspace/center/HistoryDrawer.tsx": "create"
+  "src/components/workspace/center/RevisionDiff.tsx": "create"
+  "src/components/workspace/center/HistoryDrawer.test.tsx": "create"
+  "src/components/workspace/center/SpecEditor.tsx": "update; History button opens drawer"
+
+implementation_notes: |
+  Conventions: TS strict; apiFetch (task 32); WorkspaceProvider readOnly (task 33) disables Restore; endpoints GET /revisions,
+  GET /revisions/compare?a=&b=, POST /revisions/:n/restore (task 20); Tailwind; Vitest + Testing Library.
+  Diff colors plus +/- markers (not color alone, NFR-10).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "History lists revisions newest first with all SR-11.2 fields"
+    verify: "npm test -- HistoryDrawer"
+  - id: AC2
+    behavior: "Comparing two revisions shows only changed sections expanded with +/- lines"
+    verify: "npm test -- HistoryDrawer"
+  - id: AC3
+    behavior: "Restore requires confirmation, calls the restore endpoint and triggers working copy reload"
+    verify: "npm test -- HistoryDrawer"
+
+risks_vulnerabilities: []
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-36): add version history compare and restore UI

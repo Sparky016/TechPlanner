@@ -1,0 +1,76 @@
+id: "19"
+title: "Working copy API: section edits, debounced audit and suggestion accept/reject"
+phase: 2
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["07", "13", "15"]
+status: PENDING
+source: "SPEC_DOC.md SR-4.3, SR-4.4, SR-4.5, SR-10.3, §7.3 working-copy & suggestions endpoints"
+
+objective: |
+  Expose the Working Copy over HTTP: read it, save Facilitator section edits (autosave target), list and
+  accept/reject AI suggestions, and emit the debounced user.edit and draft.updated audit records.
+
+scope:
+  in:
+    - "GET /api/sessions/:id/working-copy -> { version, sections: {name: {body, lastUserEditAt}}, pendingSuggestions }"
+    - "PATCH /api/sessions/:id/working-copy/sections/:section { body, expectedVersion } -> { version } | 409 version_conflict"
+    - "POST /api/sessions/:id/suggestions/:sid/accept { editedContent? }, POST /api/sessions/:id/suggestions/:sid/reject"
+    - "src/server/spec/editAudit.ts: debounced user.edit (per section per 30 s, with unified diff) and draft.updated (per session per 5 min)"
+    - "db/migrations/0003_edit_audit_state.sql for debounce state"
+  out:
+    - "Client autosave timing (task 34)"
+    - "Revisions (task 20)"
+
+files:
+  "src/app/api/sessions/[id]/working-copy/route.ts": "create"
+  "src/app/api/sessions/[id]/working-copy/sections/[section]/route.ts": "create"
+  "src/app/api/sessions/[id]/suggestions/[sid]/accept/route.ts": "create"
+  "src/app/api/sessions/[id]/suggestions/[sid]/reject/route.ts": "create"
+  "src/server/spec/editAudit.ts": "create"
+  "db/migrations/0003_edit_audit_state.sql": "create; table edit_audit_state(session_id, section, baseline_body, last_audit_at, primary key(session_id, section)) and column working_copy.last_draft_updated_audit_at"
+  "tests/integration/workingCopyApi.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; withApiHandler (task 13); requireSessionAccess + requireLock with 'x-tab-id' (task 15);
+  repository functions updateSectionByUser/acceptSuggestion/rejectSuggestion/getWorkingCopy from
+  src/server/spec/workingCopyRepo.ts (task 07); sectionFromSlug from src/lib/spec/sections.ts (task 05);
+  recordAudit (task 03); 'diff' npm createTwoFilesPatch for diffs; integration tests `npm run test:integration`.
+  :section is a slug; unknown slug -> 404. Body max 100 000 chars -> 413.
+  user.edit debounce: on each PATCH, if no edit_audit_state row, insert baseline_body = previous body and audit nothing yet
+  unless last_audit_at older than 30 s; when 30 s have elapsed since last_audit_at (or first edit), record user.edit with
+  details { section, diff: patch(baseline -> new) } and reset baseline to new body. A trailing edit is flushed by the next
+  PATCH or by flushEditAudits(sessionId) which revision save (task 20) and publish (task 27) call.
+  draft.updated: at most once per 5 min per session (SR-10.3), details { version }.
+  Accept/reject audit ai.suggestion.accepted / ai.suggestion.rejected with { suggestionId, section, edited: boolean }.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "PATCH with stale expectedVersion returns 409 code version_conflict; with current version returns new version"
+    verify: "npm run test:integration -- workingCopyApi"
+  - id: AC2
+    behavior: "Ten PATCHes to one section within 30 s produce at most one user.edit record until 30 s pass (fake clock); flushEditAudits writes the trailing diff"
+    verify: "npm run test:integration -- workingCopyApi"
+  - id: AC3
+    behavior: "draft.updated is written at most once per 5 minutes per session"
+    verify: "npm run test:integration -- workingCopyApi"
+  - id: AC4
+    behavior: "Accepting a suggestion with editedContent applies edited text and writes ai.suggestion.accepted"
+    verify: "npm run test:integration -- workingCopyApi"
+  - id: AC5
+    behavior: "PATCH without lock returns 423; without CSRF returns 403"
+    verify: "npm run test:integration -- workingCopyApi"
+
+risks_vulnerabilities:
+  - risk: "Audit flood from keystroke-level autosave"
+    mitigation: "Debounce per SR-4.4 / SR-10.3"
+
+knowledge_gaps:
+  - "Maximum section size unspecified. Fallback: 100 000 characters."
+
+commit_message: |
+  feat(task-19): add working copy API with debounced edit auditing and suggestions

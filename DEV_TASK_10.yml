@@ -1,0 +1,53 @@
+id: "10"
+title: "Record resolved decisions D-1..D-14 as ADRs and glossary as CONTEXT.md"
+phase: 1
+severity: low
+complexity: trivial
+model: haiku
+effort: low
+eval_model: haiku
+eval_effort: low
+depends_on: []
+status: PENDING
+source: "SPEC_DOC.md §0 Context & References, §2 Glossary, §9 Resolved Decisions"
+
+objective: |
+  SPEC_DOC §0 notes there are no ADRs or CONTEXT.md and §9 calls each decision an ADR candidate.
+  Create one ADR per decision D-1..D-14 and a CONTEXT.md glossary so later work cites stable documents.
+
+scope:
+  in:
+    - "docs/adr/0001-*.md .. docs/adr/0014-*.md, one per D-n, copying Gap, Decision, Rationale, Revisit-if from SPEC_DOC §9 verbatim"
+    - "Status 'Proposed' for D-1, D-2, D-8, D-9 (SPEC_DOC §12 requires stakeholder ratification); 'Accepted' for the rest"
+    - "docs/adr/README.md index table"
+    - "CONTEXT.md at repo root containing the SPEC_DOC §2 glossary table verbatim"
+  out:
+    - "Changing any decision content"
+    - "The Copilot SDK API ADR (task 12 writes docs/adr/0015-copilot-sdk-api.md)"
+
+files:
+  "docs/adr/README.md": "create"
+  "docs/adr/0001-tech-stack.md": "create (D-1); remaining files named 0002-llm-integration, 0003-single-facilitator, 0004-generated-specification-term, 0005-revision-granularity, 0006-readiness-score-and-gate, 0007-performance-targets, 0008-jira-multi-ticket-and-description, 0009-downstream-hook, 0010-source-ingestion-limits, 0011-oauth-scopes-and-tenancy, 0012-authorization-delegation, 0013-immutable-audit, 0014-monitoring-and-accessibility"
+  "CONTEXT.md": "create"
+
+implementation_notes: |
+  ADR format (MADR-lite): '# ADR-00NN: <title>', then 'Status:', 'Date: 2026-10-05', 'Source: SPEC_DOC.md §9 D-n',
+  '## Context' (the Gap column), '## Decision', '## Rationale', '## Revisit if'. Do not paraphrase — copy the table cells.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "14 ADR files exist, each referencing its D-n"
+    verify: "ls docs/adr/00*.md | wc -l == 14; grep -l 'D-' docs/adr/00*.md"
+  - id: AC2
+    behavior: "ADRs for D-1, D-2, D-8, D-9 have Status: Proposed; others Accepted"
+    verify: "grep -H '^Status' docs/adr/00*.md"
+  - id: AC3
+    behavior: "CONTEXT.md contains every glossary term from SPEC_DOC §2"
+    verify: "compare term list against SPEC_DOC.md §2"
+
+risks_vulnerabilities: []
+
+knowledge_gaps: []
+
+commit_message: |
+  docs(task-10): record resolved decisions as ADRs and add glossary
