@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-05 19:30
+updated: 2026-10-05 19:35
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -52,7 +52,7 @@ Phases:
 | 32 | 5 | [App shell, login page, data notice, session list and new-session form](DEV_TASK_32.yml) | high | medium | sonnet / medium | 11, 13, 18 | DONE | 2f0d8c5 |
 | 33 | 5 | [Session workspace layout, session lock UX and left panel (conversation, questions, notes, sources)](DEV_TASK_33.yml) | high | high | opus / medium | 15, 18, 25, 32 | DONE | c09c14a |
 | 34 | 5 | [Center panel: section editor, autosave, live AI patch highlight, pending suggestions, Save Draft](DEV_TASK_34.yml) | high | high | opus / medium | 19, 20, 33 | REWORK | — |
-| 35 | 5 | [Right panel: readiness, issues, action items, clarification control, publish with override and step status](DEV_TASK_35.yml) | high | high | opus / medium | 26, 27, 33 | IN_PROGRESS | — |
+| 35 | 5 | [Right panel: readiness, issues, action items, clarification control, publish with override and step status](DEV_TASK_35.yml) | high | high | opus / medium | 26, 27, 33 | EVAL | — |
 | 36 | 5 | [Version history UI: list, compare and restore](DEV_TASK_36.yml) | medium | medium | sonnet / medium | 20, 34 | PENDING | — |
 | 37 | 5 | [Audit trail view for a session](DEV_TASK_37.yml) | medium | low | haiku / medium | 22, 32 | DONE | e2cabd1 |
 | 38 | 6 | [Production Docker image (web + worker + pinned Copilot CLI), migrations on deploy, rollback runbook](DEV_TASK_38.yml) | high | high | opus / medium | 02, 08, 09, 12 | PENDING | — |
@@ -250,3 +250,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-05 19:28 | 34 | worker complete @ 7a58997 (self-amended own commit 6d2e461 after on-disk revert of page.tsx; textarea instead of CodeMirror/react-markdown due to orchestrator no-deps instruction) → eval dispatched (sonnet/medium)
 2026-10-05 19:28 | 35 | worker dispatched (opus/medium)
 2026-10-05 19:30 | 34 | eval FAIL (1 failure: textarea/pre instead of CodeMirror + react-markdown required by Scope In — caused by orchestrator no-deps instruction) → rework cycle 1 dispatched (opus/medium; deps allowed)
+2026-10-05 19:35 | 35 | worker complete @ 43de824 (section statuses unordered — JSONB key order) → eval dispatched (sonnet/medium)
