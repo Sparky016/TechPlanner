@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { ApiError, apiFetch } from '@/lib/api/client';
@@ -48,9 +49,9 @@ export default function SessionsPage() {
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">My sessions</h1>
-        <a href="/sessions/new" className="rounded bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800">
+        <Link href="/sessions/new" className="rounded bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800">
           New session
-        </a>
+        </Link>
       </div>
 
       <div className="flex flex-wrap gap-4">

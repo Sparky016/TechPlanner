@@ -58,12 +58,19 @@ async function send(path: string, init: RequestInit, method: string): Promise<Re
   return fetch(path, { ...init, method, headers, credentials: 'same-origin' });
 }
 
+export type ApiInit = Omit<RequestInit, 'body'> & { json?: unknown };
+
 // JSON in/out. `json` is serialised as the body. Throws ApiError on any non-2xx response; a 401 reauth_required
 // also sends the browser to /login.
-export async function apiFetch<T = unknown>(
-  path: string,
-  init: Omit<RequestInit, 'body'> & { json?: unknown } = {},
-): Promise<T> {
+export async function apiFetch<T = unknown>(path: string, init: ApiInit = {}): Promise<T> {
+  const res = await apiFetchResponse(path, init);
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+// Same headers, retry and error handling as apiFetch, but returns the successful Response unread (e.g. an SSE
+// stream).
+export async function apiFetchResponse(path: string, init: ApiInit = {}): Promise<Response> {
   const { json, ...rest } = init;
   const method = (rest.method ?? 'GET').toUpperCase();
   const withBody: RequestInit = json === undefined ? rest : { ...rest, body: JSON.stringify(json) };
@@ -82,6 +89,5 @@ export async function apiFetch<T = unknown>(
     }
     throw err;
   }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  return res;
 }

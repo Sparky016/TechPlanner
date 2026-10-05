@@ -1,4 +1,5 @@
 import { headers } from 'next/headers';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { DataNotice } from '@/components/DataNotice';
@@ -29,9 +30,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
-        <a href="/sessions" className="font-semibold">
+        <Link href="/sessions" className="font-semibold">
           Tech Planner
-        </a>
+        </Link>
         <div className="flex items-center gap-4 text-sm">
           <span>{user.displayName}</span>
           <form action="/auth/logout" method="post">
