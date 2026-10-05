@@ -11,7 +11,6 @@ const URL_PATTERN = /https?:\/\/[^\s<>"'\])]+/g;
 const TRAILING_PUNCTUATION = /[.,;:!?]+$/;
 const PAGE_PATH_PATTERN = /\/wiki\/spaces\/[^/\s]+\/pages\/(\d+)(?:[/?#]|$)/;
 const PAGE_ID_PARAM_PATTERN = /[?&]pageId=(\d+)(?:[&#]|$)/;
-const TINY_LINK_PATTERN = /\/wiki\/x\//;
 
 export type ConfluencePageRef =
   { url: string; pageId: string } | { url: string; pageId: null; reason: 'unsupported_link' };
@@ -54,13 +53,13 @@ export function discoverConfluencePageRefs(snapshot: JiraIssueSnapshot): Conflue
   const refs: ConfluencePageRef[] = [];
   const seen = new Set<string>();
 
-  const add = (url: string, includeUnresolved: boolean): void => {
+  const add = (url: string): void => {
     const pageId = extractPageId(url);
     if (pageId !== null) {
       if (seen.has(`id:${pageId}`)) return;
       seen.add(`id:${pageId}`);
       refs.push({ url, pageId });
-    } else if (includeUnresolved) {
+    } else {
       if (seen.has(`url:${url}`)) return;
       seen.add(`url:${url}`);
       refs.push({ url, pageId: null, reason: 'unsupported_link' });
@@ -68,11 +67,11 @@ export function discoverConfluencePageRefs(snapshot: JiraIssueSnapshot): Conflue
   };
 
   for (const link of snapshot.remoteLinks) {
-    if (link.url !== '' && link.applicationType?.toLowerCase().includes('confluence')) add(link.url, true);
+    if (link.url !== '' && link.applicationType?.toLowerCase().includes('confluence')) add(link.url);
   }
   const texts = [snapshot.descriptionText, ...snapshot.comments.map((c) => c.bodyText)];
   for (const text of texts) {
-    for (const url of confluenceUrlsIn(text, siteUrl)) add(url, TINY_LINK_PATTERN.test(url));
+    for (const url of confluenceUrlsIn(text, siteUrl)) add(url);
   }
   return refs;
 }

@@ -82,6 +82,16 @@ describe('discoverConfluencePageRefs', () => {
     ]);
   });
 
+  it('returns non-tiny unresolvable /wiki/ urls from description and comments as unsupported_link', () => {
+    const refs = discoverConfluencePageRefs(
+      snapshot({
+        descriptionText: `old style ${SITE}/wiki/display/SPACE/Title.`,
+        comments: [{ id: '1', author: null, created: '', bodyText: `dup ${SITE}/wiki/display/SPACE/Title` }],
+      }),
+    );
+    expect(refs).toEqual([{ url: `${SITE}/wiki/display/SPACE/Title`, pageId: null, reason: 'unsupported_link' }]);
+  });
+
   it('returns an empty list when nothing is linked', () => {
     expect(discoverConfluencePageRefs(snapshot())).toEqual([]);
   });
