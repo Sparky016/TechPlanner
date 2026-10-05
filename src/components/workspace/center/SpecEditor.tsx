@@ -7,6 +7,7 @@ import { ApiError, apiFetch } from '@/lib/api/client';
 import type { SectionStatus } from '@/lib/readiness/types';
 import { SECTION_NAMES, type SectionName, sectionSlug } from '@/lib/spec/sections';
 import type { Suggestion } from './PendingSuggestion';
+import { HistoryDrawer } from './HistoryDrawer';
 import { SectionEditor } from './SectionEditor';
 
 // Center panel (§6): the 27 Working Copy sections in SECTION_NAMES order, live AI patch highlighting, pending
@@ -41,6 +42,7 @@ export function SpecEditor() {
   const [draftBusy, setDraftBusy] = useState(false);
   const [draftMessage, setDraftMessage] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<ApiError | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const version = useRef(-1);
   const chain = useRef<Promise<unknown>>(Promise.resolve());
@@ -177,6 +179,14 @@ export function SpecEditor() {
           ) : null}
           <button
             type="button"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((o) => !o)}
+            className="rounded border border-slate-400 px-3 py-1 text-sm font-medium hover:bg-slate-100"
+          >
+            History
+          </button>
+          <button
+            type="button"
             disabled={readOnly || draftBusy || !wc}
             onClick={() => void saveDraft()}
             className="rounded border border-slate-400 px-3 py-1 text-sm font-medium hover:bg-slate-100 disabled:opacity-60"
@@ -185,6 +195,18 @@ export function SpecEditor() {
           </button>
         </div>
       </div>
+      {historyOpen ? (
+        <HistoryDrawer
+          sessionId={sessionId}
+          readOnly={readOnly}
+          onClose={() => setHistoryOpen(false)}
+          beforeRestore={async () => {
+            await Promise.all([...flushers.current].map((f) => f()));
+            await chain.current;
+          }}
+          onRestored={() => load([...SECTION_NAMES])}
+        />
+      ) : null}
       {draftError ? <ErrorBanner message={draftError.message} correlationId={draftError.correlationId} /> : null}
       {error ? <ErrorBanner message={error.message} correlationId={error.correlationId} /> : null}
       {wc ? (
