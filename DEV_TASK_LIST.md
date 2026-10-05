@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-05 22:51
+updated: 2026-10-05 22:55
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -259,3 +259,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-05 22:49 | 36 | worker complete @ bae6297 → eval dispatched (sonnet/low)
 2026-10-05 22:51 | 36 | eval PASS → DONE @ bae6297 (307 tests, build ok)
 2026-10-05 22:51 | phases 4+5 | all 11 tasks DONE → verification gate dispatched (haiku/low)
+2026-10-05 22:55 | phases 4+5 | gate PASS (lint, typecheck, build; unit 307, integration 135) → phase boundary pause before phase 6
