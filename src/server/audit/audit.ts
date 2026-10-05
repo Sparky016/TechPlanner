@@ -28,6 +28,7 @@ export async function recordAudit(input: AuditInput, client?: PoolClient): Promi
 }
 
 async function append(client: PoolClient, input: AuditInput): Promise<{ id: string; hash: string }> {
+  assertWellFormed(input);
   const payload: AuditHashPayload = {
     ts: new Date().toISOString(),
     userId: input.userId ?? null,
@@ -67,6 +68,21 @@ async function append(client: PoolClient, input: AuditInput): Promise<{ id: stri
     ],
   );
   return { id: inserted.rows[0].id, hash };
+}
+
+// node-pg stores a lone UTF-16 surrogate as U+FFFD, so its hash would not match the stored row. Reject such text
+// rather than silently rewriting an audit fact. (details is jsonb, which already rejects lone surrogates.)
+function assertWellFormed(input: AuditInput): void {
+  const fields: [string, string | null | undefined][] = [
+    ['userId', input.userId],
+    ['userDisplayName', input.userDisplayName],
+    ['sessionId', input.sessionId],
+    ['correlationId', input.correlationId],
+    ...(input.ticketIds ?? []).map((t): [string, string] => ['ticketIds', t]),
+  ];
+  for (const [name, value] of fields) {
+    if (typeof value === 'string' && !value.isWellFormed()) throw new Error(`${name} must be well-formed Unicode`);
+  }
 }
 
 // Postgres accepts uuids with braces, without hyphens, or in upper case, but always stores and returns the

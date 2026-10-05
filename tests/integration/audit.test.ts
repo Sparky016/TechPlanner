@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { recordAudit } from '@/server/audit/audit';
+import { type AuditInput, recordAudit } from '@/server/audit/audit';
 import { REDACTED } from '@/server/audit/hash';
 import { db, query, withTransaction } from '@/server/db/pool';
 import { verifyAuditChain } from '../../scripts/audit-verify';
@@ -139,6 +139,36 @@ describe('hash chain', () => {
       /sessionId must be a UUID/,
     );
     expect(await verifyAuditChain(db)).toEqual({ ok: true, count: 54 });
+  });
+
+  it('rejects text fields Postgres would not store verbatim and keeps the chain intact', async () => {
+    const bad: Partial<AuditInput>[] = [
+      { userId: '\uDC00' },
+      { userDisplayName: 'x\uD800y' },
+      { correlationId: 'c\uD83D' },
+      { ticketIds: ['ABC-1', 'A\uD800'] },
+    ];
+    for (const fields of bad) {
+      await expect(recordAudit({ action: 'draft.saved', result: 'success', ...fields })).rejects.toThrow(
+        /must be well-formed Unicode/,
+      );
+    }
+
+    const text = 'Zoë 😀';
+    const { id } = await recordAudit({
+      action: 'draft.saved',
+      result: 'success',
+      userId: text,
+      userDisplayName: text,
+      correlationId: text,
+      ticketIds: [text],
+    });
+    const [row] = await query<{ user_display_name: string; ticket_ids: string[] }>(
+      'SELECT user_display_name, ticket_ids FROM audit_record WHERE id = $1',
+      [id],
+    );
+    expect(row).toEqual({ user_display_name: text, ticket_ids: [text] });
+    expect(await verifyAuditChain(db)).toEqual({ ok: true, count: 55 });
   });
 
   it('reports the first tampered record', async () => {
