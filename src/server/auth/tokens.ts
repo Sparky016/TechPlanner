@@ -54,11 +54,13 @@ export async function storeTokens(client: PoolClient, userId: string, tokens: To
 }
 
 // Returns a usable access token for the user, refreshing it when it expires within 60 s.
+// `force` refreshes regardless of expiry (Atlassian rejected the stored token with 401).
 // Concurrent refreshes for one user are serialised; Atlassian rotates refresh tokens, so only one may win.
-export async function getValidAccessToken(userId: string): Promise<string> {
+export async function getValidAccessToken(userId: string, opts: { force?: boolean } = {}): Promise<string> {
+  const force = opts.force === true;
   const [row] = await query<TokenRow>(SELECT_TOKEN, [userId, REFRESH_MARGIN_SECONDS]);
   if (!row) throw new ReauthRequiredError();
-  if (row.fresh) return decryptSecret(row.enc_access_token);
+  if (row.fresh && !force) return decryptSecret(row.enc_access_token);
 
   // The failure path must commit (row deleted, audit written) before the error is thrown.
   const outcome = await withTransaction(async (client): Promise<{ token: string } | { reauth: true }> => {
@@ -67,7 +69,7 @@ export async function getValidAccessToken(userId: string): Promise<string> {
     const current = reread.rows[0];
     if (!current) return { reauth: true };
     // Another caller refreshed while we waited for the lock.
-    if (current.fresh) return { token: decryptSecret(current.enc_access_token) };
+    if (current.fresh && !force) return { token: decryptSecret(current.enc_access_token) };
 
     let refreshed: TokenSet | null = null;
     let reason = 'no_refresh_token';
