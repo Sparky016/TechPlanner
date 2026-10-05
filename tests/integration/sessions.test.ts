@@ -13,6 +13,7 @@ import { db, query, withTransaction } from '@/server/db/pool';
 import { CSRF_COOKIE, CSRF_HEADER, issueCsrfToken } from '@/server/http/csrf';
 import { clearAccessCacheForTests } from '@/server/sessions/access';
 import { acquireOrRenewLock } from '@/server/sessions/lock';
+import { MAX_DIFF_CHARS, unifiedDiffExcerpt } from '@/server/sessions/refreshSources';
 import { SECTION_NAMES } from '@/lib/spec/sections';
 
 // Atlassian is mocked by stubbing global fetch (undici is not a direct dependency of this project).
@@ -434,6 +435,16 @@ describe('POST /api/sessions/:id/refresh-sources', () => {
     ]);
     expect(msg.content).toContain('Added sources:');
     expect(msg.content).toContain('333');
+  });
+
+  it('caps the diff excerpt at 4000 chars including the truncation marker', () => {
+    const oldText = Array.from({ length: 2000 }, (_, i) => `old line ${i}`).join('\n');
+    const newText = Array.from({ length: 2000 }, (_, i) => `new line ${i}`).join('\n');
+    const excerpt = unifiedDiffExcerpt(oldText, newText);
+    expect(MAX_DIFF_CHARS).toBe(4000);
+    expect(excerpt.length).toBeLessThanOrEqual(4000);
+    expect(excerpt.endsWith('(diff truncated)')).toBe(true);
+    expect(unifiedDiffExcerpt('a', 'b')).toBe('@@ -1,1 +1,1 @@\n-a\n+b');
   });
 });
 

@@ -72,7 +72,10 @@ export function unifiedDiffExcerpt(oldText: string, newText: string, maxChars = 
     ...a.slice(aEnd, aEnd + after).map((l) => ` ${l}`),
   ];
   const diff = lines.join('\n');
-  return diff.length <= maxChars ? diff : `${diff.slice(0, maxChars)}\n… (diff truncated)`;
+  if (diff.length <= maxChars) return diff;
+  // The whole excerpt, marker included, must stay within maxChars.
+  const marker = '\n… (diff truncated)';
+  return `${diff.slice(0, Math.max(0, maxChars - marker.length))}${marker}`.slice(0, maxChars);
 }
 
 function describe(c: SourceChange): string {
