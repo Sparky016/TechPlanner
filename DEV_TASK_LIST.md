@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-05 22:46
+updated: 2026-10-05 22:49
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -53,7 +53,7 @@ Phases:
 | 33 | 5 | [Session workspace layout, session lock UX and left panel (conversation, questions, notes, sources)](DEV_TASK_33.yml) | high | high | opus / medium | 15, 18, 25, 32 | DONE | c09c14a |
 | 34 | 5 | [Center panel: section editor, autosave, live AI patch highlight, pending suggestions, Save Draft](DEV_TASK_34.yml) | high | high | opus / medium | 19, 20, 33 | DONE | 7a58997..e3433d6 |
 | 35 | 5 | [Right panel: readiness, issues, action items, clarification control, publish with override and step status](DEV_TASK_35.yml) | high | high | opus / medium | 26, 27, 33 | DONE | 43de824 |
-| 36 | 5 | [Version history UI: list, compare and restore](DEV_TASK_36.yml) | medium | medium | sonnet / medium | 20, 34 | IN_PROGRESS | — |
+| 36 | 5 | [Version history UI: list, compare and restore](DEV_TASK_36.yml) | medium | medium | sonnet / medium | 20, 34 | EVAL | — |
 | 37 | 5 | [Audit trail view for a session](DEV_TASK_37.yml) | medium | low | haiku / medium | 22, 32 | DONE | e2cabd1 |
 | 38 | 6 | [Production Docker image (web + worker + pinned Copilot CLI), migrations on deploy, rollback runbook](DEV_TASK_38.yml) | high | high | opus / medium | 02, 08, 09, 12 | PENDING | — |
 | 39 | 6 | [End-to-end Playwright suite with Atlassian, Copilot and webhook mocks](DEV_TASK_39.yml) | high | high | opus / medium | 27, 34, 35, 36, 37 | PENDING | — |
@@ -256,3 +256,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-05 22:44 | 34 | rework 1 complete @ e3433d6 (CodeMirror + react-markdown; CSP style-src already allows inline) → re-eval dispatched (sonnet/medium)
 2026-10-05 22:46 | 34 | re-eval PASS (rework cycle 1) → DONE @ 7a58997..e3433d6 (302 tests, build ok)
 2026-10-05 22:46 | 36 | worker dispatched (sonnet/medium)
+2026-10-05 22:49 | 36 | worker complete @ bae6297 → eval dispatched (sonnet/low)
