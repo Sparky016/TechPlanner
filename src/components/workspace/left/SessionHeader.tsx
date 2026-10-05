@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
 import { SourcesList } from '@/components/workspace/left/SourcesList';
@@ -39,7 +40,12 @@ export function SessionHeader() {
   return (
     <section aria-label="Session" className="space-y-2">
       <div>
-        <h1 className="text-lg font-semibold">{session.primaryTicketKey}</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold">{session.primaryTicketKey}</h1>
+          <Link href={`/sessions/${encodeURIComponent(sessionId)}/audit`} className="text-xs underline text-blue-600 hover:text-blue-800">
+            Audit trail
+          </Link>
+        </div>
         {session.ticketKeys.length > 1 ? (
           <p className="text-sm text-slate-600">Also: {session.ticketKeys.slice(1).join(', ')}</p>
         ) : null}
