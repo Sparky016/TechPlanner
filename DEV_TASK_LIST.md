@@ -51,7 +51,7 @@ Phases:
 | 31 | 4 | [Downstream webhook step (HMAC-signed, retried)](DEV_TASK_31.yml) | high | medium | sonnet / medium | 03, 28 | DONE | 90f4494 |
 | 32 | 5 | [App shell, login page, data notice, session list and new-session form](DEV_TASK_32.yml) | high | medium | sonnet / medium | 11, 13, 18 | DONE | 2f0d8c5 |
 | 33 | 5 | [Session workspace layout, session lock UX and left panel (conversation, questions, notes, sources)](DEV_TASK_33.yml) | high | high | opus / medium | 15, 18, 25, 32 | DONE | c09c14a |
-| 34 | 5 | [Center panel: section editor, autosave, live AI patch highlight, pending suggestions, Save Draft](DEV_TASK_34.yml) | high | high | opus / medium | 19, 20, 33 | REWORK | — |
+| 34 | 5 | [Center panel: section editor, autosave, live AI patch highlight, pending suggestions, Save Draft](DEV_TASK_34.yml) | high | high | opus / medium | 19, 20, 33 | EVAL | — |
 | 35 | 5 | [Right panel: readiness, issues, action items, clarification control, publish with override and step status](DEV_TASK_35.yml) | high | high | opus / medium | 26, 27, 33 | DONE | 43de824 |
 | 36 | 5 | [Version history UI: list, compare and restore](DEV_TASK_36.yml) | medium | medium | sonnet / medium | 20, 34 | PENDING | — |
 | 37 | 5 | [Audit trail view for a session](DEV_TASK_37.yml) | medium | low | haiku / medium | 22, 32 | DONE | e2cabd1 |
@@ -253,3 +253,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-05 19:35 | 35 | worker complete @ 43de824 (section statuses unordered — JSONB key order) → eval dispatched (sonnet/medium)
 2026-10-05 22:42 | 34,35 | rework-34 worker and eval-35 killed by usage limit (HTTP 429); rework 34 left uncommitted partial changes (deps installed, SectionEditor + tests edited) → fresh worker dispatched to finish cycle 1 from tree state; eval 35 re-dispatched
 2026-10-05 22:44 | 35 | eval PASS → DONE @ 43de824 (isolated copy: 301 tests, build ok; confluenceAction matches retry API)
+2026-10-05 22:44 | 34 | rework 1 complete @ e3433d6 (CodeMirror + react-markdown; CSP style-src already allows inline) → re-eval dispatched (sonnet/medium)
