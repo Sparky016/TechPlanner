@@ -1,0 +1,30 @@
+id: invoice-pdf
+domain: billing
+releaseAc3: true
+ticket:
+  key: BILL-404
+  summary: Generate PDF invoices for each monthly charge
+  description: |
+    Customers need a PDF invoice for every monthly subscription charge, downloadable from the billing page
+    and attached to the receipt email. Invoices must include our VAT number and the customer's billing address.
+draft:
+  Problem Statement: Customers cannot get compliant invoices for their charges.
+  Scope: PDF invoice per monthly charge, downloadable and emailed.
+  Functional Requirements: |
+    - Generate an invoice PDF when a charge succeeds.
+    - Show a download link on the billing page.
+  Technical Design: A worker renders HTML templates to PDF and stores them in object storage.
+  Non-functional Requirements: Invoices should look professional.
+seededCriticalGaps:
+  - id: acceptance-criteria
+    section: Acceptance Criteria
+    keywords: [acceptance criteria, definition of done, how will we verify, done when]
+  - id: invoice-numbering
+    section: Data Model
+    keywords: [invoice number, sequential, numbering, gapless]
+vagueStatements:
+  - section: Non-functional Requirements
+    text: Invoices should look professional.
+replies:
+  - We charge in EUR and GBP; VAT rules differ per country.
+  - I can't answer that yet. What else is open?

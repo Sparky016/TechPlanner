@@ -1,0 +1,34 @@
+id: iot-firmware
+domain: iot
+ticket:
+  key: IOT-204
+  summary: Over-the-air firmware updates for smart thermostats
+  description: |
+    Firmware updates currently require a technician visit. Deliver firmware updates over the air to the
+    thermostat fleet from our cloud backend.
+  comments:
+    - author: Sven (Hardware)
+      body: Devices have dual flash banks.
+draft:
+  Problem Statement: Firmware fixes need costly technician visits.
+  Scope: OTA firmware delivery to the thermostat fleet.
+  Functional Requirements: |
+    - Devices check for and download new firmware.
+    - Devices install and reboot into the new firmware.
+  Technical Design: Devices poll a firmware manifest endpoint and download images from the CDN.
+  Deployment Strategy: Roll out updates carefully.
+  Acceptance Criteria: |
+    - A device on version N installs version N+1 without user action.
+seededCriticalGaps:
+  - id: firmware-signing
+    section: Security
+    keywords: [signing, signature, signed firmware, tamper, secure boot]
+  - id: failed-update-recovery
+    section: Rollback Strategy
+    keywords: [brick, rollback, roll back, failed update, previous bank]
+vagueStatements:
+  - section: Deployment Strategy
+    text: Roll out updates carefully.
+replies:
+  - The fleet is about 120,000 devices on home Wi-Fi.
+  - That's open. What else do you need?

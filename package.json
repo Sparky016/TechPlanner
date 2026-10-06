@@ -17,7 +17,7 @@
     "migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts",
     "worker": "tsx --env-file-if-exists=.env src/worker/index.ts",
     "audit:verify": "tsx --env-file-if-exists=.env scripts/audit-verify.ts",
-    "eval:llm": "tsx scripts/not-implemented.ts eval:llm",
+    "eval:llm": "tsx --env-file-if-exists=.env evals/run.ts",
     "format": "prettier --write ."
   },
   "dependencies": {
@@ -61,6 +61,7 @@
     "prettier": "^3.9.9",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "yaml": "^2.9.1"
   }
 }

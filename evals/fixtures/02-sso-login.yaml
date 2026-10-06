@@ -1,0 +1,34 @@
+id: sso-login
+domain: identity
+ticket:
+  key: IAM-42
+  summary: Support SAML single sign-on for enterprise tenants
+  description: |
+    Enterprise customers require SAML 2.0 SSO with their own identity provider (Okta, Azure AD).
+    Tenant admins upload IdP metadata. Users of SSO tenants must not be able to log in with passwords.
+  comments:
+    - author: Lena (Sales)
+      body: Three deals are blocked on this.
+draft:
+  Problem Statement: Enterprise tenants cannot enforce their own identity provider.
+  Scope: SAML 2.0 SP-initiated login for tenants with uploaded IdP metadata.
+  Functional Requirements: |
+    - Tenant admin uploads IdP metadata XML.
+    - Password login disabled for SSO tenants.
+  Technical Design: Use a maintained SAML library behind a new /sso/acs endpoint.
+  Security: The login flow should be secure.
+  Acceptance Criteria: |
+    - A user of an SSO tenant is redirected to the IdP and signed in on return.
+seededCriticalGaps:
+  - id: user-provisioning
+    section: Data Model
+    keywords: [provision, just-in-time, account creation, attribute mapping]
+  - id: lockout-recovery
+    section: Rollback Strategy
+    keywords: [lockout, locked out, break-glass, recover, misconfigur]
+vagueStatements:
+  - section: Security
+    text: The login flow should be secure.
+replies:
+  - Okta and Azure AD are the first two IdPs we must support; both send email as NameID.
+  - I don't have more details on that, what else is missing?

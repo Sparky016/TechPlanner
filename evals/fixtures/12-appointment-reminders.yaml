@@ -1,0 +1,35 @@
+id: appointment-reminders
+domain: healthcare
+heldOut: true
+ticket:
+  key: CLIN-140
+  summary: SMS reminders for upcoming patient appointments
+  description: |
+    No-shows cost clinics a lot. Send patients an SMS reminder 24 hours before an appointment with a link to
+    confirm or cancel.
+  comments:
+    - author: Dr. Okafor
+      body: Reminders must not reveal the type of appointment.
+draft:
+  Problem Statement: Missed appointments waste clinic capacity.
+  Scope: SMS reminder 24 hours before each appointment with confirm/cancel link.
+  Functional Requirements: |
+    - Send SMS 24 hours before the appointment.
+    - Patient can confirm or cancel via link.
+  Technical Design: Scheduler enqueues reminders; an SMS provider sends them.
+  Security: Patient data should be protected appropriately.
+  Acceptance Criteria: |
+    - A patient with an appointment tomorrow receives one SMS today.
+seededCriticalGaps:
+  - id: consent
+    section: Business Context
+    keywords: [consent, opt in, opt-in, opt out, regulation]
+  - id: time-zones
+    section: Functional Requirements
+    keywords: [time zone, timezone, local time, daylight saving]
+vagueStatements:
+  - section: Security
+    text: Patient data should be protected appropriately.
+replies:
+  - Clinics are in the UK and Ireland for now.
+  - I don't have an answer for that. What's next?

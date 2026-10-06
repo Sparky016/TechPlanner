@@ -1,0 +1,34 @@
+id: video-transcoding
+domain: media
+ticket:
+  key: MED-23
+  summary: Transcode uploaded videos to adaptive HLS
+  description: |
+    Course creators upload MP4 lectures which we serve as-is; learners on slow connections buffer constantly.
+    Transcode uploads to HLS with multiple renditions and serve them through the CDN.
+  comments:
+    - author: Raj (Content)
+      body: Some uploads are 4K and over 10 GB.
+draft:
+  Problem Statement: Single-bitrate MP4 playback buffers on slow connections.
+  Scope: Transcode new uploads to multi-rendition HLS and serve via CDN.
+  Functional Requirements: |
+    - Produce 360p, 720p and 1080p renditions.
+    - Player switches to HLS when available.
+  Technical Design: Upload triggers a transcoding job on a managed media service; output stored in object storage.
+  Performance: Transcoding should not take too long.
+  Acceptance Criteria: |
+    - A newly uploaded lecture plays as HLS with at least three renditions.
+seededCriticalGaps:
+  - id: transcoding-cost
+    section: Risks
+    keywords: [cost, budget, per minute pricing, spend]
+  - id: existing-library-backfill
+    section: Migration Strategy
+    keywords: [existing videos, backfill, back catalogue, already uploaded]
+vagueStatements:
+  - section: Performance
+    text: Transcoding should not take too long.
+replies:
+  - We have roughly 50,000 existing lectures.
+  - That hasn't been discussed. Anything else?

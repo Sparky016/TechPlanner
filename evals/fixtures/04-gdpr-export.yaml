@@ -1,0 +1,32 @@
+id: gdpr-export
+domain: compliance
+ticket:
+  key: PRIV-77
+  summary: Self-service personal data export (GDPR Article 15)
+  description: |
+    Users must be able to request an export of all personal data we hold about them.
+    Today legal handles this by email and it takes weeks. Provide a button in account settings that produces a
+    downloadable archive.
+draft:
+  Problem Statement: Subject access requests are manual and slow.
+  Scope: Self-service export of personal data from account settings.
+  Functional Requirements: |
+    - "Export my data" button in account settings.
+    - User receives a download link when the archive is ready.
+  Technical Design: An async job gathers data from each service and zips it.
+  Data Model: Export everything relevant about the user.
+  Acceptance Criteria: |
+    - A user can download an archive of their data from account settings.
+seededCriticalGaps:
+  - id: archive-access-control
+    section: Security
+    keywords: [link expir, signed url, re-authenticat, access control, encrypt]
+  - id: data-inventory
+    section: Dependencies
+    keywords: [which services, data inventory, data sources, owning team]
+vagueStatements:
+  - section: Data Model
+    text: Export everything relevant about the user.
+replies:
+  - Legal says we have 30 days to respond, but we want it under 24 hours.
+  - I'm not sure, can you list what else is open?

@@ -1,0 +1,36 @@
+id: refund-api
+domain: payments
+ticket:
+  key: PAY-101
+  summary: Add partial refund endpoint to the payments API
+  description: |
+    Merchants want to refund part of a captured payment from the dashboard and via the public API.
+    Add POST /payments/{id}/refunds accepting an amount. The card processor already supports partial refunds.
+  comments:
+    - author: Priya (Product)
+      body: Dashboard work is a separate ticket; this one is API only.
+    - author: Tom (Eng)
+      body: We should reuse the existing processor client.
+draft:
+  Problem Statement: Merchants cannot issue partial refunds, so support processes them manually.
+  Scope: Public API endpoint for partial refunds of captured card payments.
+  Functional Requirements: |
+    - POST /payments/{id}/refunds with an amount in minor units.
+    - Multiple partial refunds allowed up to the captured amount.
+  Technical Design: Reuse the processor client; persist a refund record per request.
+  Performance: Refunds should be processed quickly.
+  Acceptance Criteria: |
+    - A refund of 500 on a 2000 capture leaves 1500 refundable.
+seededCriticalGaps:
+  - id: idempotency
+    section: APIs
+    keywords: [idempoten, duplicate request, double refund]
+  - id: refund-failure-handling
+    section: Error Handling
+    keywords: [processor fail, declined, timeout, refund fails]
+vagueStatements:
+  - section: Performance
+    text: Refunds should be processed quickly.
+replies:
+  - The amount is always in the payment's original currency. Only the merchant's API key can refund.
+  - We have not thought about anything beyond the happy path yet; tell me what else you need.

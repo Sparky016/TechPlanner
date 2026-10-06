@@ -1,0 +1,32 @@
+id: multi-currency
+domain: e-commerce
+heldOut: true
+ticket:
+  key: SHOP-512
+  summary: Display prices in the shopper's local currency
+  description: |
+    International shoppers see prices in EUR only. Show prices in the shopper's local currency based on
+    their location, with checkout still charging in EUR.
+draft:
+  Problem Statement: Non-EUR shoppers abandon carts because of unclear prices.
+  Scope: Local-currency price display; checkout remains in EUR.
+  Functional Requirements: |
+    - Detect shopper country and currency.
+    - Show converted prices on product and cart pages.
+  Technical Design: A pricing service converts EUR prices using daily exchange rates.
+  External Integrations: Exchange rates come from a reliable provider.
+  Acceptance Criteria: |
+    - A shopper in the UK sees GBP prices on product pages.
+seededCriticalGaps:
+  - id: rounding-and-mismatch
+    section: Functional Requirements
+    keywords: [rounding, charged amount, mismatch, differs, final price]
+  - id: rate-staleness
+    section: Error Handling
+    keywords: [stale rate, rate unavailable, provider down, fallback rate, outdated]
+vagueStatements:
+  - section: External Integrations
+    text: Exchange rates come from a reliable provider.
+replies:
+  - We start with GBP, USD and SEK.
+  - Haven't thought about it. Continue please.

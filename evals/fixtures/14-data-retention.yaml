@@ -1,0 +1,30 @@
+id: data-retention
+domain: data-platform
+ticket:
+  key: DATA-66
+  summary: Automatically delete event logs older than the retention period
+  description: |
+    The events table grows by 200 GB a month and holds personal data. Delete events older than the
+    retention period with a nightly job.
+draft:
+  Problem Statement: Unbounded event retention increases cost and privacy exposure.
+  Scope: Nightly deletion of events older than the retention period.
+  Functional Requirements: |
+    - Nightly job deletes expired events.
+  Technical Design: Partition the events table by month and drop old partitions.
+  Business Context: Data should be kept for an appropriate amount of time.
+  Acceptance Criteria: |
+    - After the job runs, no event older than the retention period remains.
+seededCriticalGaps:
+  - id: legal-hold
+    section: Risks
+    keywords: [legal hold, litigation, exempt]
+  - id: downstream-consumers
+    section: Dependencies
+    keywords: [downstream, consumer, reporting, warehouse, analytics]
+vagueStatements:
+  - section: Business Context
+    text: Data should be kept for an appropriate amount of time.
+replies:
+  - Finance wants to keep the order events longer than click events.
+  - We haven't checked that. What else?

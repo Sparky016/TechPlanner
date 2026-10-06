@@ -1,0 +1,34 @@
+id: inventory-sync
+domain: retail
+ticket:
+  key: INV-310
+  summary: Sync warehouse stock levels to the storefront every few minutes
+  description: |
+    Storefront stock is updated nightly, so customers order items that are out of stock.
+    Pull stock levels from the warehouse management system (WMS) REST API and update the storefront catalogue.
+  comments:
+    - author: Marco (Ops)
+      body: The WMS has about 40k SKUs.
+draft:
+  Problem Statement: Nightly stock updates cause overselling.
+  Scope: Periodic pull of stock levels from the WMS into the storefront catalogue.
+  Functional Requirements: |
+    - Fetch stock per SKU from the WMS API.
+    - Update storefront availability.
+  Technical Design: A scheduled worker polls the WMS and writes to the catalogue DB.
+  Performance: Sync should be near real-time and handle a lot of SKUs.
+  Acceptance Criteria: |
+    - A stock change in the WMS appears on the storefront within the sync interval.
+seededCriticalGaps:
+  - id: wms-rate-limits
+    section: External Integrations
+    keywords: [rate limit, throttl, quota, pagination]
+  - id: sync-monitoring
+    section: Monitoring
+    keywords: [monitor, alert, stale, sync lag, dashboard]
+vagueStatements:
+  - section: Performance
+    text: Sync should be near real-time and handle a lot of SKUs.
+replies:
+  - The WMS API is owned by a third party; we have a sandbox account.
+  - Not decided yet. What else do you need to know?

@@ -1,0 +1,35 @@
+id: chat-support
+domain: customer-support
+heldOut: true
+ticket:
+  key: SUP-301
+  summary: Live chat widget for customer support
+  description: |
+    Add a live chat widget on the help centre so customers can talk to support agents in real time.
+    Agents use the existing ticketing tool.
+  comments:
+    - author: Mia (Support lead)
+      body: We have 12 agents working 8am to 8pm CET.
+draft:
+  Problem Statement: Email support is slow for urgent questions.
+  Scope: Chat widget on the help centre connected to the agent ticketing tool.
+  Functional Requirements: |
+    - Customers start a chat from the help centre.
+    - Agents answer from the ticketing tool.
+  Technical Design: WebSocket gateway between the widget and the ticketing tool's chat API.
+  Non-functional Requirements: Chat should feel responsive.
+  Acceptance Criteria: |
+    - A customer message appears in the agent's queue.
+seededCriticalGaps:
+  - id: offline-hours
+    section: User Flows
+    keywords: [outside hours, offline, no agent available, after hours, queue full]
+  - id: transcript-retention
+    section: Data Model
+    keywords: [transcript, chat history, retention, stored]
+vagueStatements:
+  - section: Non-functional Requirements
+    text: Chat should feel responsive.
+replies:
+  - The ticketing tool's chat API supports webhooks.
+  - Not sure. Next question?
