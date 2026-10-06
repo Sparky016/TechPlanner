@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-05 22:55
+updated: 2026-10-06 09:00
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -55,8 +55,8 @@ Phases:
 | 35 | 5 | [Right panel: readiness, issues, action items, clarification control, publish with override and step status](DEV_TASK_35.yml) | high | high | opus / medium | 26, 27, 33 | DONE | 43de824 |
 | 36 | 5 | [Version history UI: list, compare and restore](DEV_TASK_36.yml) | medium | medium | sonnet / medium | 20, 34 | DONE | bae6297 |
 | 37 | 5 | [Audit trail view for a session](DEV_TASK_37.yml) | medium | low | haiku / medium | 22, 32 | DONE | e2cabd1 |
-| 38 | 6 | [Production Docker image (web + worker + pinned Copilot CLI), migrations on deploy, rollback runbook](DEV_TASK_38.yml) | high | high | opus / medium | 02, 08, 09, 12 | PENDING | — |
-| 39 | 6 | [End-to-end Playwright suite with Atlassian, Copilot and webhook mocks](DEV_TASK_39.yml) | high | high | opus / medium | 27, 34, 35, 36, 37 | PENDING | — |
+| 38 | 6 | [Production Docker image (web + worker + pinned Copilot CLI), migrations on deploy, rollback runbook](DEV_TASK_38.yml) | high | high | opus / medium | 02, 08, 09, 12 | IN_PROGRESS | — |
+| 39 | 6 | [End-to-end Playwright suite with Atlassian, Copilot and webhook mocks](DEV_TASK_39.yml) | high | high | opus / medium | 27, 34, 35, 36, 37 | IN_PROGRESS | — |
 | 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | PENDING | — |
 | 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | PENDING | — |
 | 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | PENDING | — |
@@ -260,3 +260,6 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-05 22:51 | 36 | eval PASS → DONE @ bae6297 (307 tests, build ok)
 2026-10-05 22:51 | phases 4+5 | all 11 tasks DONE → verification gate dispatched (haiku/low)
 2026-10-05 22:55 | phases 4+5 | gate PASS (lint, typecheck, build; unit 307, integration 135) → phase boundary pause before phase 6
+2026-10-06 09:00 | phase 6 | started on user instruction (/orchestrate re-invoked); no .env → no COPILOT_GITHUB_TOKEN (40 AC2/AC4 expected partial); 40 held until 38/39 land (may add YAML dep)
+2026-10-06 09:00 | 38 | worker dispatched (opus/medium)
+2026-10-06 09:00 | 39 | worker dispatched (opus/medium)
