@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-06 10:05
+updated: 2026-10-06 11:00
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -56,8 +56,8 @@ Phases:
 | 36 | 5 | [Version history UI: list, compare and restore](DEV_TASK_36.yml) | medium | medium | sonnet / medium | 20, 34 | DONE | bae6297 |
 | 37 | 5 | [Audit trail view for a session](DEV_TASK_37.yml) | medium | low | haiku / medium | 22, 32 | DONE | e2cabd1 |
 | 38 | 6 | [Production Docker image (web + worker + pinned Copilot CLI), migrations on deploy, rollback runbook](DEV_TASK_38.yml) | high | high | opus / medium | 02, 08, 09, 12 | DONE | f1ec3e9 |
-| 39 | 6 | [End-to-end Playwright suite with Atlassian, Copilot and webhook mocks](DEV_TASK_39.yml) | high | high | opus / medium | 27, 34, 35, 36, 37 | IN_PROGRESS | — |
-| 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | PENDING | — |
+| 39 | 6 | [End-to-end Playwright suite with Atlassian, Copilot and webhook mocks](DEV_TASK_39.yml) | high | high | opus / medium | 27, 34, 35, 36, 37 | EVAL | — |
+| 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | IN_PROGRESS | — |
 | 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | PENDING | — |
 | 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | PENDING | — |
 
@@ -99,7 +99,7 @@ Phases:
 
 All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 
-- [ ] **Stakeholder ratification of D-1, D-2, D-8 and D-9** (blocks: none; annotates 01, 12, 30, 31). D-1 is the stack, D-2 is Copilot, D-8 is the Jira description block and D-9 is the downstream webhook.
+- [x] **Stakeholder ratification of D-1, D-2, D-8 and D-9** (blocks: none; annotates 01, 12, 30, 31). All four decisions ratified on 2026-10-06.
 - [ ] **Copilot SDK API names.** These are the APIs for tool registration, built-in tool disable, streaming events, session resume and image input. Task 12 resolves them in a spike and records them in ADR 0015. (blocks: none; resolved inside 12)
 - [ ] **Copilot-entitled `COPILOT_GITHUB_TOKEN`** for real-model runs. (blocks: 40 AC2/AC4, 41 real-LLM mode, 38 AC3 with the real model)
 - [ ] **Atlassian OAuth app** (client id/secret, redirect URI, cloud id) and a **Confluence space/parent page** for manual verification. Automated tests use mocks. (blocks: none)
@@ -265,3 +265,5 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-06 09:00 | 39 | worker dispatched (opus/medium)
 2026-10-06 09:40 | 38 | worker complete @ f1ec3e9 (standalone @github/copilot@1.0.90 CLI; esbuild-bundled worker/migrate; optional BuildKit npm_ca secret; worker flags 39's undeclared edits break 27 unit tests in shared tree) → eval dispatched (sonnet/medium, detached worktree)
 2026-10-06 10:05 | 38 | eval PASS → DONE @ f1ec3e9 (detached worktree: 307 tests, compose stack healthy; real-model copilot check is knowledge gap)
+2026-10-06 11:00 | 39 | worker complete @ bdee320 (35 files: +LLM_FAKE_SCRIPT loader & delay step, 6 unit-test config mocks, 3 product bug fixes — readiness status shape, readiness.evaluated ticket_ids, auth.logout display name; next dev on :3100) → eval dispatched (sonnet/medium, detached worktree)
+2026-10-06 11:00 | 40 | worker dispatched (opus/medium; may add YAML dep — 39 eval isolated in own worktree)
