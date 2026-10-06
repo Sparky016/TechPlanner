@@ -4,10 +4,19 @@ import { getConfig } from '@/server/config';
 // Server-only: never import from src/lib or client components.
 // Atlassian OAuth 2.0 (3LO) protocol calls. Error messages never include codes, verifiers or tokens.
 
+// The real-host URLs, used when ATLASSIAN_AUTH_BASE_URL / ATLASSIAN_API_BASE_URL are unset.
 export const AUTHORIZE_URL = 'https://auth.atlassian.com/authorize';
 export const TOKEN_URL = 'https://auth.atlassian.com/oauth/token';
 export const ACCESSIBLE_RESOURCES_URL = 'https://api.atlassian.com/oauth/token/accessible-resources';
 export const ME_URL = 'https://api.atlassian.com/me';
+
+const authorizeUrl = () => `${getConfig().ATLASSIAN_AUTH_BASE_URL}/authorize`;
+const tokenUrl = () => `${getConfig().ATLASSIAN_AUTH_BASE_URL}/oauth/token`;
+const meUrl = () => `${getConfig().ATLASSIAN_API_BASE_URL}/me`;
+
+export function accessibleResourcesUrl(): string {
+  return `${getConfig().ATLASSIAN_API_BASE_URL}/oauth/token/accessible-resources`;
+}
 
 // SR-1.3
 export const OAUTH_SCOPES = [
@@ -69,7 +78,7 @@ export function codeChallengeFor(verifier: string): string {
 
 export function buildAuthorizeUrl(state: string, codeVerifier: string): string {
   const config = getConfig();
-  const url = new URL(AUTHORIZE_URL);
+  const url = new URL(authorizeUrl());
   url.searchParams.set('audience', 'api.atlassian.com');
   url.searchParams.set('client_id', config.ATLASSIAN_CLIENT_ID);
   url.searchParams.set('scope', OAUTH_SCOPES.join(' '));
@@ -105,7 +114,7 @@ export async function refreshTokens(refreshToken: string): Promise<TokenSet> {
 }
 
 export async function getAccessibleResources(accessToken: string): Promise<AccessibleResource[]> {
-  const body = await getJson(ACCESSIBLE_RESOURCES_URL, accessToken, 'accessible-resources');
+  const body = await getJson(accessibleResourcesUrl(), accessToken, 'accessible-resources');
   if (!Array.isArray(body)) throw new AtlassianOAuthError('accessible-resources response is not a list');
   return body
     .filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null && typeof r.id === 'string')
@@ -117,7 +126,7 @@ export async function getAccessibleResources(accessToken: string): Promise<Acces
 }
 
 export async function getProfile(accessToken: string): Promise<AtlassianProfile> {
-  const body = (await getJson(ME_URL, accessToken, 'me')) as Record<string, unknown> | null;
+  const body = (await getJson(meUrl(), accessToken, 'me')) as Record<string, unknown> | null;
   if (!body || typeof body.account_id !== 'string' || body.account_id === '') {
     throw new AtlassianOAuthError('me response has no account_id');
   }
@@ -132,7 +141,7 @@ export async function getProfile(accessToken: string): Promise<AtlassianProfile>
 async function tokenRequest(params: Record<string, string>): Promise<TokenSet> {
   let response: Response;
   try {
-    response = await fetch(TOKEN_URL, {
+    response = await fetch(tokenUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(params),

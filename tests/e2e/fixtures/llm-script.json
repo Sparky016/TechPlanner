@@ -1,0 +1,675 @@
+{
+  "$comment": "FakeLlmClient scenarios for the E2E suite (LLM_FAKE_SCRIPT). The first rule whose kind matches and whose 'match' occurs in the run's last user message supplies the steps. Facilitator rules key on the facilitator's message; evaluator rules key on a marker planted in the Executive Summary. The unmatched evaluator run reports nothing, so every section is missing and the mandatory critical issues fire.",
+  "rules": [
+    {
+      "kind": "facilitator",
+      "match": "#stream",
+      "steps": [
+        {
+          "type": "text-delta",
+          "text": "Streaming the first part of the answer. "
+        },
+        {
+          "type": "delay",
+          "ms": 400
+        },
+        {
+          "type": "text-delta",
+          "text": "Now updating the Executive Summary. "
+        },
+        {
+          "type": "delay",
+          "ms": 400
+        },
+        {
+          "type": "tool-call",
+          "name": "apply_section_patch",
+          "args": {
+            "section": "Executive Summary",
+            "op": "replace",
+            "content": "E2E live patch: users export the report as CSV."
+          }
+        },
+        {
+          "type": "delay",
+          "ms": 400
+        },
+        {
+          "type": "text-delta",
+          "text": "The Executive Summary is updated."
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "kind": "facilitator",
+      "match": "#precedence",
+      "steps": [
+        {
+          "type": "text-delta",
+          "text": "Reviewing the scope while you edit. "
+        },
+        {
+          "type": "delay",
+          "ms": 8000
+        },
+        {
+          "type": "tool-call",
+          "name": "apply_section_patch",
+          "args": {
+            "section": "Scope",
+            "op": "replace",
+            "content": "AI proposed scope: CSV export only."
+          }
+        },
+        {
+          "type": "text-delta",
+          "text": "I proposed a Scope change."
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "kind": "facilitator",
+      "match": "#ask",
+      "steps": [
+        {
+          "type": "text-delta",
+          "text": "One question about limits."
+        },
+        {
+          "type": "tool-call",
+          "name": "ask_question",
+          "args": {
+            "text": "E2E question: what is the maximum export size?",
+            "section": "Scope"
+          }
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "kind": "facilitator",
+      "match": "#fill-ready",
+      "steps": [
+        {
+          "type": "text-delta",
+          "text": "Recording the agreed specification."
+        },
+        {
+          "type": "tool-call",
+          "name": "apply_section_patch",
+          "args": {
+            "section": "Executive Summary",
+            "op": "replace",
+            "content": "Agreed specification for CSV export. Marker: #ready"
+          }
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "kind": "facilitator",
+      "match": "#fill-fixture",
+      "steps": [
+        {
+          "type": "text-delta",
+          "text": "Recording the readiness fixture."
+        },
+        {
+          "type": "tool-call",
+          "name": "apply_section_patch",
+          "args": {
+            "section": "Executive Summary",
+            "op": "replace",
+            "content": "Readiness fixture specification. Marker: #fixture"
+          }
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "kind": "facilitator",
+      "steps": [
+        {
+          "type": "text-delta",
+          "text": "Noted."
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "kind": "evaluator",
+      "match": "#ready",
+      "steps": [
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Executive Summary",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Problem Statement",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Business Context",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Scope",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Out of Scope",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Functional Requirements",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Non-functional Requirements",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "User Flows",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Technical Design",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Data Model",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "APIs",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "External Integrations",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Security",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Performance",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Error Handling",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Monitoring",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Logging",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Risks",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Dependencies",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Assumptions",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Migration Strategy",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Deployment Strategy",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Rollback Strategy",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Testing Strategy",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Acceptance Criteria",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Open Questions",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Future Improvements",
+            "status": "complete",
+            "reason": "Specified and testable"
+          }
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "kind": "evaluator",
+      "match": "#fixture",
+      "steps": [
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Executive Summary",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Problem Statement",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Business Context",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Scope",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Out of Scope",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Functional Requirements",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Non-functional Requirements",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "User Flows",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Technical Design",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Data Model",
+            "status": "missing",
+            "reason": "Fixture: not specified"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "APIs",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "External Integrations",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Security",
+            "status": "partial",
+            "reason": "Fixture: partially specified"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Performance",
+            "status": "partial",
+            "reason": "Fixture: partially specified"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Error Handling",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Monitoring",
+            "status": "partial",
+            "reason": "Fixture: partially specified"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Logging",
+            "status": "partial",
+            "reason": "Fixture: partially specified"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Risks",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Dependencies",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Assumptions",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Migration Strategy",
+            "status": "missing",
+            "reason": "Fixture: not specified"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Deployment Strategy",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Rollback Strategy",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Testing Strategy",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Acceptance Criteria",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Open Questions",
+            "status": "complete",
+            "reason": "Fixture: complete"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "report_section_status",
+          "args": {
+            "section": "Future Improvements",
+            "status": "missing",
+            "reason": "Fixture: not specified"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "raise_issue",
+          "args": {
+            "severity": "warning",
+            "section": "Performance",
+            "description": "Performance targets lack p95 numbers"
+          }
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "kind": "evaluator",
+      "steps": [
+        {
+          "type": "done"
+        }
+      ]
+    }
+  ]
+}

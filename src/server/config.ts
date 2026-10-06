@@ -17,6 +17,10 @@ const jsonString = <T extends z.ZodTypeAny>(schema: T) =>
     }
   }).pipe(schema);
 
+// Origin-style base URL without a trailing slash (tests point these at a local mock).
+const baseUrl = (fallback: string) =>
+  z.preprocess(emptyToUndefined, z.string().url().default(fallback)).transform((s) => s.replace(/\/+$/, ''));
+
 const encryptionKey = z.string().refine((s) => {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(s)) return false;
   return Buffer.from(s, 'base64').length === 32;
@@ -33,6 +37,9 @@ const envSchema = z
     ATLASSIAN_CLIENT_ID: required,
     ATLASSIAN_CLIENT_SECRET: required,
     ATLASSIAN_CLOUD_ID: required,
+    // Overrides for the Atlassian hosts; unset means the real auth.atlassian.com / api.atlassian.com.
+    ATLASSIAN_AUTH_BASE_URL: baseUrl('https://auth.atlassian.com'),
+    ATLASSIAN_API_BASE_URL: baseUrl('https://api.atlassian.com'),
     OAUTH_REDIRECT_URI: z.string().url(),
     TOKEN_ENCRYPTION_KEY: encryptionKey,
     DATABASE_URL: z.string().url(),
@@ -42,6 +49,8 @@ const envSchema = z
     EVALUATOR_MODEL: required,
     // '1' swaps the Copilot client for FakeLlmClient (tests only).
     LLM_FAKE: optional(z.enum(['0', '1'])),
+    // With LLM_FAKE=1: path to a JSON scenario file scripting the fake (tests/e2e/fixtures/llm-script.json).
+    LLM_FAKE_SCRIPT: optional(z.string().min(1)),
     CONTEXT_TOKEN_BUDGET: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(150000)),
     CONFLUENCE_SPACE_KEY: required,
     CONFLUENCE_PARENT_PAGE_ID: required,

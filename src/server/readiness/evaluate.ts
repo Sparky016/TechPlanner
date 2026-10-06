@@ -193,7 +193,10 @@ export async function evaluateSession(sessionId: string, opts: EvaluateOptions):
 
   const result = await withTransaction(async (client) => {
     // Serialises concurrent evaluations of one session (the issue fingerprint is unique per session).
-    await client.query('SELECT id FROM planning_session WHERE id = $1 FOR UPDATE', [sessionId]);
+    const locked = await client.query<{ ticket_keys: string[] }>(
+      'SELECT ticket_keys FROM planning_session WHERE id = $1 FOR UPDATE',
+      [sessionId],
+    );
     const issues = await applyReconciliation(client, sessionId, reported);
     const { rows } = await client.query<{ id: string }>(
       'INSERT INTO evaluation (session_id, section_statuses, score) VALUES ($1, $2, $3) RETURNING id',
@@ -208,6 +211,7 @@ export async function evaluateSession(sessionId: string, opts: EvaluateOptions):
         userId: opts.userId,
         userDisplayName: opts.userDisplayName ?? null,
         sessionId,
+        ticketIds: locked.rows[0]?.ticket_keys ?? [],
         correlationId: opts.correlationId ?? null,
         details: { evaluationId, score, statuses: plain, counts: countBySeverity(issues), gatePasses: passes },
       },

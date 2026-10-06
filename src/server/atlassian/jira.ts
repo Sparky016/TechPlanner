@@ -1,3 +1,4 @@
+import { accessibleResourcesUrl } from '@/server/auth/atlassianOAuth';
 import { getValidAccessToken } from '@/server/auth/tokens';
 import { getConfig } from '@/server/config';
 import { AtlassianApiError, atlassianJson } from './client';
@@ -9,7 +10,6 @@ import { adfToText } from './adfToText';
 const ISSUE_FIELDS =
   'summary,description,issuetype,status,priority,assignee,reporter,labels,components,fixVersions,parent,issuelinks,attachment,comment';
 const COMMENT_PAGE_SIZE = 100;
-const ACCESSIBLE_RESOURCES_URL = 'https://api.atlassian.com/oauth/token/accessible-resources';
 const ISSUE_KEY_PATTERN = /^[A-Z][A-Z0-9_]+-[1-9]\d*$/;
 
 export interface JiraIssueSnapshot {
@@ -129,7 +129,7 @@ async function lookupSiteUrl(userId: string): Promise<string> {
   const token = await getValidAccessToken(userId);
   let res: Response;
   try {
-    res = await fetch(ACCESSIBLE_RESOURCES_URL, {
+    res = await fetch(accessibleResourcesUrl(), {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
       signal: AbortSignal.timeout(30_000),
     });

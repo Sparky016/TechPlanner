@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const config = vi.hoisted(() => ({
   ATLASSIAN_CLOUD_ID: 'cloud-123',
+  ATLASSIAN_API_BASE_URL: 'https://api.atlassian.com',
   CONFLUENCE_SPACE_KEY: 'ENG',
   CONFLUENCE_PARENT_PAGE_ID: '100',
   CONFLUENCE_PROJECT_OVERRIDES: undefined as Record<string, { spaceKey: string; parentPageId: string }> | undefined,

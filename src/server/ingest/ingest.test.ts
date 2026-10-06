@@ -10,7 +10,7 @@ import { extractText } from './extract';
 // Atlassian is mocked by stubbing global fetch (undici is not a project dependency).
 
 vi.mock('@/server/config', () => ({
-  getConfig: () => ({ ATLASSIAN_CLOUD_ID: 'cloud-123' }),
+  getConfig: () => ({ ATLASSIAN_CLOUD_ID: 'cloud-123', ATLASSIAN_API_BASE_URL: 'https://api.atlassian.com' }),
 }));
 
 vi.mock('@/server/auth/tokens', () => {

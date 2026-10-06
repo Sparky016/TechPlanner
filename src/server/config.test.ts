@@ -36,6 +36,28 @@ describe('getConfig', () => {
     expect(getConfig()).toBe(cfg);
   });
 
+  it('targets the real Atlassian hosts unless the base URLs are overridden', () => {
+    const cfg = getConfig();
+    expect(cfg.ATLASSIAN_AUTH_BASE_URL).toBe('https://auth.atlassian.com');
+    expect(cfg.ATLASSIAN_API_BASE_URL).toBe('https://api.atlassian.com');
+
+    resetConfigForTests();
+    process.env.ATLASSIAN_AUTH_BASE_URL = '';
+    process.env.ATLASSIAN_API_BASE_URL = '';
+    expect(getConfig().ATLASSIAN_API_BASE_URL).toBe('https://api.atlassian.com');
+
+    resetConfigForTests();
+    process.env.ATLASSIAN_AUTH_BASE_URL = 'http://localhost:4010/';
+    process.env.ATLASSIAN_API_BASE_URL = 'http://localhost:4010';
+    const overridden = getConfig();
+    expect(overridden.ATLASSIAN_AUTH_BASE_URL).toBe('http://localhost:4010');
+    expect(overridden.ATLASSIAN_API_BASE_URL).toBe('http://localhost:4010');
+
+    resetConfigForTests();
+    process.env.ATLASSIAN_API_BASE_URL = 'not a url';
+    expect(() => getConfig()).toThrow(/ATLASSIAN_API_BASE_URL/);
+  });
+
   it('treats empty optional values as unset', () => {
     process.env.COPILOT_CLI_PATH = '';
     process.env.SECTION_WEIGHTS = '';

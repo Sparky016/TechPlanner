@@ -9,7 +9,6 @@ import { countAtlassianApiError } from '@/server/observability/metrics';
 
 export type AtlassianProduct = 'jira' | 'confluence';
 
-const API_BASE = 'https://api.atlassian.com/ex';
 const MAX_BACKOFF_RETRIES = 3;
 const MAX_WAIT_MS = 30_000;
 const DEFAULT_WAITS_MS = [1_000, 2_000, 4_000];
@@ -32,7 +31,8 @@ export class AtlassianApiError extends Error {
 }
 
 function buildUrl(product: AtlassianProduct, path: string): string {
-  return `${API_BASE}/${product}/${getConfig().ATLASSIAN_CLOUD_ID}${path}`;
+  const config = getConfig();
+  return `${config.ATLASSIAN_API_BASE_URL}/ex/${product}/${config.ATLASSIAN_CLOUD_ID}${path}`;
 }
 
 function buildHeaders(init: RequestInit, token: string): Headers {
