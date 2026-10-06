@@ -5,7 +5,8 @@ import { join } from 'node:path';
 
 export const APP_PORT = 3100;
 export const APP_URL = `http://localhost:${APP_PORT}`;
-export const ATLASSIAN_MOCK_PORT = 4010;
+// Overridable so the perf run (scripts/perf/run.ts) can run its own mock beside a running E2E suite.
+export const ATLASSIAN_MOCK_PORT = Number(process.env.ATLASSIAN_MOCK_PORT ?? 4010);
 export const ATLASSIAN_MOCK_URL = `http://localhost:${ATLASSIAN_MOCK_PORT}`;
 export const WEBHOOK_PORT = 4020;
 export const WEBHOOK_URL = `http://localhost:${WEBHOOK_PORT}`;

@@ -18,6 +18,7 @@
     "worker": "tsx --env-file-if-exists=.env src/worker/index.ts",
     "audit:verify": "tsx --env-file-if-exists=.env scripts/audit-verify.ts",
     "eval:llm": "tsx --env-file-if-exists=.env evals/run.ts",
+    "perf": "tsx --env-file-if-exists=.env scripts/perf/run.ts",
     "format": "prettier --write ."
   },
   "dependencies": {
