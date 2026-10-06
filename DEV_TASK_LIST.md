@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-06 12:50
+updated: 2026-10-06 13:30
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -58,8 +58,8 @@ Phases:
 | 38 | 6 | [Production Docker image (web + worker + pinned Copilot CLI), migrations on deploy, rollback runbook](DEV_TASK_38.yml) | high | high | opus / medium | 02, 08, 09, 12 | DONE | f1ec3e9 |
 | 39 | 6 | [End-to-end Playwright suite with Atlassian, Copilot and webhook mocks](DEV_TASK_39.yml) | high | high | opus / medium | 27, 34, 35, 36, 37 | DONE | bdee320 |
 | 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | DONE | c8195de |
-| 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | PENDING | — |
-| 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | IN_PROGRESS | — |
+| 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | IN_PROGRESS | — |
+| 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | EVAL | — |
 
 ## Execution notes
 
@@ -271,3 +271,5 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-06 12:30 | 40 | worker complete @ c8195de (+yaml devDep; 20 fixtures; AC2/AC4 not run — no COPILOT_GITHUB_TOKEN, no baseline fabricated) → eval dispatched (sonnet/medium, detached worktree)
 2026-10-06 12:30 | 42 | worker dispatched (sonnet/medium; adds @axe-core/playwright; 41 held — both edit package.json)
 2026-10-06 12:50 | 40 | eval PASS → DONE @ c8195de (AC1/AC3 reproduced, unit 308; AC2/AC4 unverifiable — no COPILOT_GITHUB_TOKEN; code-reading correct; baseline-report.json pending a real run)
+2026-10-06 13:30 | 42 | worker complete @ 74e6a0b (axe: 0 serious/critical; keyboard fixes: CodeMirror Tab trap, override-dialog focus return in PublishPanel; e2e 14/14) → eval dispatched (sonnet/low, detached worktree)
+2026-10-06 13:30 | 41 | worker dispatched (sonnet/medium)
