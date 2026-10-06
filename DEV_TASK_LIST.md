@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-06 11:30
+updated: 2026-10-06 12:30
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -57,9 +57,9 @@ Phases:
 | 37 | 5 | [Audit trail view for a session](DEV_TASK_37.yml) | medium | low | haiku / medium | 22, 32 | DONE | e2cabd1 |
 | 38 | 6 | [Production Docker image (web + worker + pinned Copilot CLI), migrations on deploy, rollback runbook](DEV_TASK_38.yml) | high | high | opus / medium | 02, 08, 09, 12 | DONE | f1ec3e9 |
 | 39 | 6 | [End-to-end Playwright suite with Atlassian, Copilot and webhook mocks](DEV_TASK_39.yml) | high | high | opus / medium | 27, 34, 35, 36, 37 | DONE | bdee320 |
-| 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | IN_PROGRESS | — |
+| 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | EVAL | — |
 | 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | PENDING | — |
-| 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | PENDING | — |
+| 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | IN_PROGRESS | — |
 
 ## Execution notes
 
@@ -268,3 +268,5 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-06 11:00 | 39 | worker complete @ bdee320 (35 files: +LLM_FAKE_SCRIPT loader & delay step, 6 unit-test config mocks, 3 product bug fixes — readiness status shape, readiness.evaluated ticket_ids, auth.logout display name; next dev on :3100) → eval dispatched (sonnet/medium, detached worktree)
 2026-10-06 11:00 | 40 | worker dispatched (opus/medium; may add YAML dep — 39 eval isolated in own worktree)
 2026-10-06 11:30 | 39 | eval PASS → DONE @ bdee320 (worktree: e2e 12/12, unit 308, integration 135; extras + 3 bug fixes accepted; noise: stale pgboss readiness jobs after DB reset). 41/42 eligible but held — 40 in flight edits package.json; then 42 before 41 (both edit package.json)
+2026-10-06 12:30 | 40 | worker complete @ c8195de (+yaml devDep; 20 fixtures; AC2/AC4 not run — no COPILOT_GITHUB_TOKEN, no baseline fabricated) → eval dispatched (sonnet/medium, detached worktree)
+2026-10-06 12:30 | 42 | worker dispatched (sonnet/medium; adds @axe-core/playwright; 41 held — both edit package.json)
