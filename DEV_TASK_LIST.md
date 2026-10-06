@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-06 13:30
+updated: 2026-10-06 13:50
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -59,7 +59,7 @@ Phases:
 | 39 | 6 | [End-to-end Playwright suite with Atlassian, Copilot and webhook mocks](DEV_TASK_39.yml) | high | high | opus / medium | 27, 34, 35, 36, 37 | DONE | bdee320 |
 | 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | DONE | c8195de |
 | 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | IN_PROGRESS | — |
-| 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | EVAL | — |
+| 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | DONE | 74e6a0b |
 
 ## Execution notes
 
@@ -273,3 +273,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-06 12:50 | 40 | eval PASS → DONE @ c8195de (AC1/AC3 reproduced, unit 308; AC2/AC4 unverifiable — no COPILOT_GITHUB_TOKEN; code-reading correct; baseline-report.json pending a real run)
 2026-10-06 13:30 | 42 | worker complete @ 74e6a0b (axe: 0 serious/critical; keyboard fixes: CodeMirror Tab trap, override-dialog focus return in PublishPanel; e2e 14/14) → eval dispatched (sonnet/low, detached worktree)
 2026-10-06 13:30 | 41 | worker dispatched (sonnet/medium)
+2026-10-06 13:50 | 42 | eval PASS → DONE @ 74e6a0b (worktree: a11y AC1-3, e2e 14/14, unit 308)
