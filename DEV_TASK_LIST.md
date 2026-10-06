@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-06 15:30
+updated: 2026-10-06 16:00
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -277,3 +277,5 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-06 15:00 | 41 | worker complete @ a3b00e2 (+env.ts mock-port override; NFR-5 FAIL — pool exhaustion deadlock: messages route holds a pool conn per streamed turn, pg pool default 10, no acquire timeout; real-LLM NFR-1/2 not measured) → eval dispatched (sonnet/low, detached worktree)
 2026-10-06 15:30 | 41 | eval PASS → DONE @ a3b00e2 (perf + shortened concurrency re-run, unit 308; NFR-5 deadlock diagnosis plausible — product follow-up needed, not a task-41 failure)
 2026-10-06 15:30 | phase 6 | all 5 tasks DONE → final verification gate dispatched (haiku/low)
+2026-10-06 16:00 | phase 6 | gate: lint, typecheck, unit 308, integration 135, e2e 14, eval --validate-only PASS; build FAIL (ENOENT .next/server/pages-manifest.json) traced to stale .next from next dev/perf runs — orchestrator clean rebuild (rm -rf .next) PASS → gate PASS
+2026-10-06 16:00 | run | ALL 42 TASKS DONE. Open: NFR-5 pool-exhaustion deadlock (follow-up task needed); token-gated 40 AC2/AC4, 41 real-LLM, 38 real-model health check; user's uncommitted ADR 0001/0002/0008/0009 status edits
