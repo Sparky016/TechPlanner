@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
 import { OverrideDialog, type OpenCriticalIssue } from '@/components/workspace/right/OverrideDialog';
@@ -76,6 +76,15 @@ export function PublishPanel() {
   const [override, setOverride] = useState<OpenCriticalIssue[] | null>(null);
   const [overrideError, setOverrideError] = useState<ApiError | null>(null);
   const base = `/api/sessions/${encodeURIComponent(sessionId)}/publish`;
+  const publishButton = useRef<HTMLButtonElement>(null);
+  const overrideWasOpen = useRef(false);
+
+  // The Publish button is disabled while the gate check runs, so the dialog cannot capture it as its opener:
+  // return focus to it explicitly when the dialog closes (NFR-10).
+  useEffect(() => {
+    if (override === null && overrideWasOpen.current) publishButton.current?.focus();
+    overrideWasOpen.current = override !== null;
+  }, [override]);
 
   // Show the session's latest run once the detail arrives (e.g. after a reload mid-publish).
   const initialRunId = latestRunId(detail?.publish);
@@ -161,6 +170,7 @@ export function PublishPanel() {
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-medium">Publish</h2>
         <button
+          ref={publishButton}
           type="button"
           disabled={readOnly || busy || running}
           onClick={() => void startPublish({}, false)}

@@ -183,6 +183,7 @@ export function SectionEditor(props: SectionEditorProps) {
               extensions={extensions}
               editable={!readOnly}
               readOnly={readOnly}
+              indentWithTab={false} // Tab must leave the editor, or keyboard users are trapped (WCAG 2.1.2).
               basicSetup={{ lineNumbers: false, foldGutter: false }}
               onChange={(value) => {
                 setText(value);
