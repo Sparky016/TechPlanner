@@ -1,0 +1,86 @@
+# Production example: one image, three roles. See docs/runbook.md.
+#
+#   docker build -t techplanner .
+#   docker compose --env-file prod.env -f docker-compose.prod.example.yml up -d
+#
+# Order is enforced by depends_on: postgres healthy -> migrate (one-shot) completes -> worker and web start.
+# In production, point DATABASE_URL at the managed database and drop the postgres service.
+# Required variables use ${VAR:?}: compose refuses to start without them, and no secret has a default here.
+
+name: techplanner-prod
+
+x-app-env: &app-env
+  ATLASSIAN_CLIENT_ID: ${ATLASSIAN_CLIENT_ID:?}
+  ATLASSIAN_CLIENT_SECRET: ${ATLASSIAN_CLIENT_SECRET:?}
+  ATLASSIAN_CLOUD_ID: ${ATLASSIAN_CLOUD_ID:?}
+  OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:?}
+  TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?}
+  DATABASE_URL: ${DATABASE_URL:?}
+  APP_BASE_URL: ${APP_BASE_URL:?}
+  COPILOT_GITHUB_TOKEN: ${COPILOT_GITHUB_TOKEN:?}
+  FACILITATOR_MODEL: ${FACILITATOR_MODEL:?}
+  EVALUATOR_MODEL: ${EVALUATOR_MODEL:?}
+  CONTEXT_TOKEN_BUDGET: ${CONTEXT_TOKEN_BUDGET:-150000}
+  CONFLUENCE_SPACE_KEY: ${CONFLUENCE_SPACE_KEY:?}
+  CONFLUENCE_PARENT_PAGE_ID: ${CONFLUENCE_PARENT_PAGE_ID:?}
+  CONFLUENCE_PROJECT_OVERRIDES: ${CONFLUENCE_PROJECT_OVERRIDES:-}
+  DOWNSTREAM_WEBHOOK_URL: ${DOWNSTREAM_WEBHOOK_URL:-}
+  DOWNSTREAM_WEBHOOK_SECRET: ${DOWNSTREAM_WEBHOOK_SECRET:-}
+  SECTION_WEIGHTS: ${SECTION_WEIGHTS:-}
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
+  # '1' only for smoke tests without a Copilot-entitled token; never in production.
+  LLM_FAKE: ${LLM_FAKE:-0}
+
+services:
+  # Local stand-in for the managed database. Not published on the host.
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-techplanner}
+      POSTGRES_USER: ${POSTGRES_USER:-techplanner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - techplanner-prod-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    image: ${TECHPLANNER_IMAGE:-techplanner}
+    environment:
+      <<: *app-env
+      ROLE: migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  worker:
+    image: ${TECHPLANNER_IMAGE:-techplanner}
+    environment:
+      <<: *app-env
+      ROLE: worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  web:
+    image: ${TECHPLANNER_IMAGE:-techplanner}
+    environment:
+      <<: *app-env
+      ROLE: web
+    ports:
+      - '${WEB_PORT:-3000}:3000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      worker:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  techplanner-prod-pgdata:
