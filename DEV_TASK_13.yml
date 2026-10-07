@@ -1,0 +1,85 @@
+id: "13"
+title: "API handler wrapper, CSRF protection and security headers"
+phase: 2
+severity: critical
+complexity: critical
+model: opus
+effort: high
+eval_model: opus
+eval_effort: medium
+depends_on: ["03", "09", "11"]
+status: PENDING
+source: "SPEC_DOC.md NFR-6, §7.3 (all endpoints authenticated), §8 Error handling"
+
+objective: |
+  Provide withApiHandler(), the single wrapper every API route uses: authentication, CSRF validation for
+  state-changing methods, correlation ID context, uniform JSON errors with correlation IDs and `error` audit
+  records. Add global security headers (CSP, HSTS, frame-ancestors, etc.). Built before any feature endpoint so
+  nothing is retrofitted.
+
+scope:
+  in:
+    - "src/server/http/handler.ts: withApiHandler(options, handler)"
+    - "src/server/http/csrf.ts: issueCsrfToken / verifyCsrf (double-submit cookie 'tp_csrf' + header 'x-csrf-token' + Origin check against APP_BASE_URL)"
+    - "src/app/api/csrf/route.ts: GET returns { token } and sets tp_csrf cookie"
+    - "src/middleware.ts: security headers on every response incl. per-request CSP nonce"
+    - "Unit/integration tests"
+  out:
+    - "Session-level access checks and locks (task 15)"
+    - "Rate limiting (not in spec)"
+
+files:
+  "src/server/http/handler.ts": "create"
+  "src/server/http/csrf.ts": "create"
+  "src/server/http/handler.test.ts": "create"
+  "src/app/api/csrf/route.ts": "create"
+  "src/middleware.ts": "create"
+  "src/middleware.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; HttpError from src/server/http/errors.ts and getCurrentUser from src/server/auth/session.ts
+  (task 11); recordAudit from src/server/audit/audit.ts (task 03); runWithContext/newCorrelationId/logger from
+  src/server/observability (task 09); config via getConfig() (APP_BASE_URL).
+  Signature (all later API routes use it):
+    type ApiContext<P> = { req: NextRequest; params: P; user: { accountId: string; displayName: string } | null; correlationId: string }
+    function withApiHandler<P>(opts: { auth?: boolean /* default true */; csrf?: boolean /* default true for non-GET/HEAD */ },
+      handler: (ctx: ApiContext<P>) => Promise<Response>): (req: NextRequest, route: { params: Promise<P> }) => Promise<Response>
+  Behaviour: auth required -> 401 {error:{message:'Not authenticated', code:'unauthenticated', correlationId}};
+  ReauthRequiredError -> 401 code 'reauth_required'; HttpError -> its status; zod errors -> 400 with field list;
+  anything else -> 500 'Unexpected error', logged with stack, and recordAudit({action:'error', result:'failure',
+  details:{route, status, code, correlationId}}). Every error JSON body includes correlationId (§8 Error handling).
+  Response header 'x-correlation-id' always set. Observe http_request_duration_seconds.
+  Headers (middleware): Content-Security-Policy "default-src 'self'; script-src 'self' 'nonce-<n>' 'strict-dynamic';
+  style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.atlassian.net; connect-src 'self'; frame-ancestors 'none';
+  base-uri 'self'; form-action 'self' https://auth.atlassian.com"; Strict-Transport-Security max-age=63072000; includeSubDomains;
+  X-Content-Type-Options nosniff; Referrer-Policy strict-origin-when-cross-origin; Permissions-Policy camera=(), microphone=(), geolocation=().
+  Pass the nonce to Next.js via the 'x-nonce' request header per Next.js CSP docs.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "POST through withApiHandler without a valid x-csrf-token or with a foreign Origin returns 403; with both valid returns handler response"
+    verify: "npm test -- handler"
+  - id: AC2
+    behavior: "Unauthenticated request to an auth:true handler returns 401 JSON with correlationId; ReauthRequiredError yields code reauth_required"
+    verify: "npm test -- handler"
+  - id: AC3
+    behavior: "Unhandled exception returns 500 with correlationId, sets x-correlation-id and writes one 'error' audit record with that correlationId"
+    verify: "npm test -- handler"
+  - id: AC4
+    behavior: "Every response from middleware carries CSP with a nonce, HSTS, nosniff, Referrer-Policy and frame-ancestors 'none'"
+    verify: "npm test -- middleware"
+  - id: AC5
+    behavior: "Lint/typecheck pass"
+    verify: "npm run lint && npm run typecheck"
+
+risks_vulnerabilities:
+  - risk: "Cross-site request forgery on state-changing endpoints (NFR-6)"
+    mitigation: "Double-submit token + Origin check + SameSite=Lax session cookie"
+  - risk: "Error responses leak internals"
+    mitigation: "Generic 500 message; details only in logs"
+
+knowledge_gaps:
+  - "NFR-6 requires 'CSP set' without a policy. Fallback: the policy above; adjust img-src if Atlassian media hosts differ."
+
+commit_message: |
+  feat(task-13): add API handler wrapper, CSRF protection and security headers

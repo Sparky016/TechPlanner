@@ -1,0 +1,27 @@
+# Secrets: configuration comes from the environment only.
+.env*
+!.env.example
+
+# Build output and dependencies are produced inside the image.
+node_modules
+.next
+dist
+*.tsbuildinfo
+
+# Not needed to build the image.
+.git
+.github
+.ai
+ai-logs
+tests
+evals
+test-results
+playwright-report
+coverage
+docs
+DEV_TASK_*.yml
+DEV_TASK_LIST.md
+*.md
+docker-compose*.yml
+Dockerfile
+.dockerignore

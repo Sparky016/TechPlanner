@@ -1,0 +1,69 @@
+id: "39"
+title: "End-to-end Playwright suite with Atlassian, Copilot and webhook mocks"
+phase: 6
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["27", "34", "35", "36", "37"]
+status: PENDING
+source: "SPEC_DOC.md §8 Testing strategy (E2E), §10 Acceptance Criteria 1, 2, 4–13"
+
+objective: |
+  Prove the release acceptance criteria end to end in a browser against the real app, database and worker,
+  with Atlassian, the LLM and the downstream webhook replaced by deterministic mocks.
+
+scope:
+  in:
+    - "tests/e2e/mocks/atlassianMock.ts: local HTTP server emulating the auth.atlassian.com and api.atlassian.com endpoints the app uses (authorize redirect, token, accessible-resources, me, Jira issue/comments/remotelinks/attachments/description/labels/comments POST, Confluence spaces/pages GET/POST/PUT) with fault injection"
+    - "tests/e2e/mocks/webhookReceiver.ts verifying X-Signature"
+    - "Base-URL overrides ATLASSIAN_AUTH_BASE_URL and ATLASSIAN_API_BASE_URL (default to real hosts) added to config and used by tasks 11/14 modules"
+    - "LLM_FAKE=1 with a scripted scenario file tests/e2e/fixtures/llm-script.json"
+    - "Specs covering: login (AC1), create session (AC2), streaming + live patch (AC4), edit precedence (AC5), 27 sections (AC6), readiness score fixture (AC7), override publish (AC8), save/compare/restore (AC9), audit fields + immutability + chain verify (AC10), full publish (AC11), Confluence failure + retry (AC12), end clarification (AC13)"
+    - "playwright.config.ts webServer starting migrate, web and worker with test env"
+  out:
+    - "Real-model behaviour (task 40)"
+    - "Performance (task 41)"
+
+files:
+  "tests/e2e/mocks/atlassianMock.ts": "create"
+  "tests/e2e/mocks/webhookReceiver.ts": "create"
+  "tests/e2e/fixtures/llm-script.json": "create"
+  "tests/e2e/*.spec.ts": "create; one file per acceptance area"
+  "playwright.config.ts": "update"
+  "src/server/config.ts": "update; ATLASSIAN_AUTH_BASE_URL, ATLASSIAN_API_BASE_URL"
+  "src/server/auth/atlassianOAuth.ts": "update; use base URL config"
+  "src/server/atlassian/client.ts": "update; use base URL config"
+
+implementation_notes: |
+  Conventions: Playwright (npm run test:e2e); dev DB via docker compose; FakeLlmClient (task 12) selected by LLM_FAKE=1 and
+  loading a script path from env LLM_FAKE_SCRIPT; audit verify via npm run audit:verify (task 03).
+  Measure the patch-visible latency in AC4 using performance timestamps (≤1 s after the patch SSE event).
+  For AC10 run SQL UPDATE on audit_record via a test DB connection and assert failure; then run audit:verify and assert OK.
+  Each spec starts from resetDatabase() and resets mock state.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "npm run test:e2e passes all specs locally against mocks"
+    verify: "npm run test:e2e"
+  - id: AC2
+    behavior: "Spec files exist covering SPEC_DOC §10 criteria 1, 2, 4–13 (each test title references its criterion number)"
+    verify: "grep -rn 'AC-' tests/e2e/*.spec.ts"
+  - id: AC3
+    behavior: "Confluence failure spec asserts no duplicate Jira attachments/comments after retry (mock call counts)"
+    verify: "inspect tests/e2e publish retry spec"
+  - id: AC4
+    behavior: "Default config still targets real Atlassian hosts when overrides are unset"
+    verify: "npm test -- config"
+
+risks_vulnerabilities:
+  - risk: "Mocks drift from real Atlassian API shapes"
+    mitigation: "Reuse fixture JSON from tasks 16/17 unit tests"
+
+knowledge_gaps:
+  - "Release AC3 (AI asks about missing acceptance criteria) depends on real model behaviour and is covered by task 40, not here."
+
+commit_message: |
+  test(task-39): add end-to-end suite with Atlassian, LLM and webhook mocks

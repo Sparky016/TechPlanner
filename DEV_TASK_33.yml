@@ -1,0 +1,75 @@
+id: "33"
+title: "Session workspace layout, session lock UX and left panel (conversation, questions, notes, sources)"
+phase: 5
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["15", "18", "25", "32"]
+status: PENDING
+source: "SPEC_DOC.md §6 Left panel & Session lock, SR-2.4, SR-2.6, SR-3.5–SR-3.7"
+
+objective: |
+  Build the three-panel workspace page and its left panel: session header with tickets and sources (ingested,
+  listed, unavailable, truncated) and Refresh sources; streaming conversation; AI Questions list with dismiss;
+  Notes input. Acquire and renew the session lock, show read-only mode with Take over.
+
+scope:
+  in:
+    - "src/app/(app)/sessions/[id]/page.tsx: 3-column grid (min width 1280 px), center and right panels as placeholders slots for tasks 34/35"
+    - "src/components/workspace/WorkspaceProvider.tsx: session state, event bus for patch/question/suggestion events, lock state"
+    - "Lock: POST /api/sessions/:id/lock on mount and every 20 s; read-only banner with 'Take over' when holder is other"
+    - "src/components/workspace/left/*: SessionHeader, SourcesList, Conversation (streaming), QuestionsList, NotesInput"
+    - "src/lib/api/sse.ts: parse SSE from fetch ReadableStream"
+  out:
+    - "Center and right panels (tasks 34, 35)"
+
+files:
+  "src/app/(app)/sessions/[id]/page.tsx": "create"
+  "src/components/workspace/WorkspaceProvider.tsx": "create"
+  "src/components/workspace/left/SessionHeader.tsx": "create"
+  "src/components/workspace/left/SourcesList.tsx": "create"
+  "src/components/workspace/left/Conversation.tsx": "create"
+  "src/components/workspace/left/QuestionsList.tsx": "create"
+  "src/components/workspace/left/NotesInput.tsx": "create"
+  "src/lib/api/sse.ts": "create"
+  "src/lib/api/sse.test.ts": "create"
+  "src/components/workspace/left/*.test.tsx": "create"
+
+implementation_notes: |
+  Conventions: TS strict; apiFetch and tabId from src/lib/api (task 32); endpoints: GET /api/sessions/:id (task 18),
+  POST /api/sessions/:id/refresh-sources (task 18), POST /lock and /lock/take-over (task 15), GET/POST /messages,
+  POST /notes, GET /questions, POST /questions/:qid/dismiss (task 25); Tailwind; Vitest + Testing Library.
+  SSE events: token, patch, suggestion, question, done, error (FacilitatorEvent from task 23). Render tokens incrementally;
+  publish patch/suggestion/question events on the WorkspaceProvider bus so center/right panels react (≤1 s, NFR-1).
+  While a turn streams disable the send button; show 'AI unavailable' on error code ai_unavailable while keeping editing enabled (LLM-9).
+  Read-only mode: all mutating controls disabled in every panel via provider flag.
+  Notes are visually distinct from messages and labelled 'context only'. Sources list shows each item's ingest_status and reason.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "parseSse handles chunk boundaries splitting events and ignores ping comments"
+    verify: "npm test -- sse"
+  - id: AC2
+    behavior: "Conversation renders streamed tokens incrementally and shows an error with correlationId on error event"
+    verify: "npm test -- Conversation"
+  - id: AC3
+    behavior: "When lock response is holder 'other', banner with Take over appears and send/notes controls are disabled"
+    verify: "npm test -- workspace"
+  - id: AC4
+    behavior: "QuestionsList shows open/answered/dismissed and dismiss sends reason"
+    verify: "npm test -- QuestionsList"
+  - id: AC5
+    behavior: "SourcesList displays not-ingested and truncated items with reasons"
+    verify: "npm test -- SourcesList"
+
+risks_vulnerabilities:
+  - risk: "Rendering untrusted AI/Jira text as HTML (XSS)"
+    mitigation: "Render as text or sanitized markdown (react-markdown without raw HTML)"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-33): add session workspace layout, lock UX and left panel

@@ -1,0 +1,72 @@
+id: "26"
+title: "Readiness scheduling and API: debounced evaluation, evaluate now, end clarification, accepted risk"
+phase: 3
+severity: high
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["08", "13", "15", "24"]
+status: PENDING
+source: "SPEC_DOC.md SR-6.2, SR-6.5, SR-7.4, SR-8.2, §7.3 evaluate/end-clarification endpoints"
+
+objective: |
+  Run readiness evaluation automatically (debounced to once per 20 s per session) and on demand, expose the
+  readiness state the right panel needs, let the Facilitator end clarification, and mark warnings/informational
+  issues as accepted risk.
+
+scope:
+  in:
+    - "src/server/readiness/schedule.ts: scheduleEvaluation(sessionId) enqueuing JOB_NAMES.readinessEvaluate with singletonKey sessionId, startAfter 20"
+    - "Worker handler registered in src/worker/handlers.ts calling evaluateSession"
+    - "POST /api/sessions/:id/evaluate -> runs evaluateSession synchronously, returns EvaluationResult"
+    - "GET /api/sessions/:id/readiness -> { score, statuses, issues, openQuestions, gatePasses, clarificationEnded, evaluatedAt, evaluationPending }"
+    - "POST /api/sessions/:id/end-clarification -> sets clarification_ended=true"
+    - "POST /api/sessions/:id/issues/:issueId/accept-risk -> warning/informational only; audit issue.accepted_risk"
+  out:
+    - "Evaluator logic (task 24)"
+    - "Pre-publish mandatory evaluation (task 27 calls evaluateSession directly)"
+
+files:
+  "src/server/readiness/schedule.ts": "create"
+  "src/server/readiness/jobHandler.ts": "create"
+  "src/worker/handlers.ts": "update; import jobHandler"
+  "src/app/api/sessions/[id]/evaluate/route.ts": "create"
+  "src/app/api/sessions/[id]/readiness/route.ts": "create"
+  "src/app/api/sessions/[id]/end-clarification/route.ts": "create"
+  "src/app/api/sessions/[id]/issues/[issueId]/accept-risk/route.ts": "create"
+  "tests/integration/readinessApi.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; enqueue/JOB_NAMES/registerHandler (task 08); evaluateSession (task 24); withApiHandler (task 13);
+  requireSessionAccess/requireLock (task 15); recordAudit (task 03); tests `npm run test:integration` with LLM_FAKE=1.
+  evaluationPending = a queued/active pg-boss job exists for the session's singletonKey.
+  Background evaluations run as the session's facilitator (userId from planning_session.facilitator_id) for audit attribution.
+  Accept-risk on a critical issue -> 400 code 'critical_requires_override' (SR-7.4). end-clarification is idempotent;
+  it is recorded in the next ai.suggestion context, no dedicated audit action exists in SR-12.1 (see knowledge_gaps).
+  The UI polls GET /readiness every 5 s while evaluationPending or after a turn (task 35).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Five scheduleEvaluation calls within 20 s result in one evaluateSession execution"
+    verify: "npm run test:integration -- readinessApi"
+  - id: AC2
+    behavior: "POST /evaluate returns a fresh EvaluationResult and GET /readiness reflects it"
+    verify: "npm run test:integration -- readinessApi"
+  - id: AC3
+    behavior: "accept-risk on a warning sets status accepted-risk and audits issue.accepted_risk; on a critical returns 400"
+    verify: "npm run test:integration -- readinessApi"
+  - id: AC4
+    behavior: "end-clarification sets clarification_ended=true and GET /readiness reports it"
+    verify: "npm run test:integration -- readinessApi"
+
+risks_vulnerabilities:
+  - risk: "Evaluation cost runaway from frequent turns"
+    mitigation: "20 s singleton debounce"
+
+knowledge_gaps:
+  - "SR-12.1 has no audit action for 'End clarification'. Fallback: no dedicated record; state visible via session row and the next ai.suggestion details."
+
+commit_message: |
+  feat(task-26): add readiness scheduling and readiness API endpoints

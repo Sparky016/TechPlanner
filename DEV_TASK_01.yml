@@ -1,0 +1,113 @@
+id: "01"
+title: "Project scaffold, toolchain and validated configuration"
+phase: 1
+severity: critical
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: []
+status: PENDING
+source: "SPEC_DOC.md §7.1, §7.5, §8 Testing strategy, D-1"
+
+objective: |
+  Create the greenfield TypeScript/Next.js (App Router) project that every other task builds on:
+  directory layout, npm scripts, lint/typecheck/test tooling, a dev PostgreSQL via docker compose,
+  and a single validated configuration module. Every later task assumes the paths and script
+  names defined here, so they must match exactly. Severity is critical because every task depends on it.
+
+scope:
+  in:
+    - "package.json (Node 22, npm) with scripts: dev, build, start, lint, typecheck, test, test:integration, test:e2e, migrate, worker, audit:verify, eval:llm (placeholders may print 'not implemented' and exit 0 until their task lands)"
+    - "Next.js (App Router) + React + TypeScript strict; ESLint; Prettier"
+    - "Vitest: unit tests colocated src/**/*.test.ts (npm test); integration tests tests/integration/**/*.test.ts (npm run test:integration, separate config vitest.integration.config.ts, runs files sequentially)"
+    - "Playwright installed and configured with testDir tests/e2e (npm run test:e2e)"
+    - "docker-compose.dev.yml with postgres:16 on port 5432 (db/user/password: techplanner)"
+    - ".env.example listing every variable from SPEC_DOC §7.5"
+    - "src/server/config.ts exporting getConfig() validated with zod"
+    - "Minimal src/app/layout.tsx and src/app/page.tsx placeholder"
+    - "README.md section 'Development' with setup commands"
+  out:
+    - "Database schema/migrations (task 02)"
+    - "Any auth, UI or LLM code"
+    - "Production Dockerfile (task 38)"
+
+files:
+  "package.json": "create; scripts listed in scope.in"
+  "tsconfig.json": "create; strict true, path alias @/* -> src/*"
+  "next.config.ts": "create"
+  "eslint.config.mjs": "create"
+  "vitest.config.ts": "create; include src/**/*.test.ts"
+  "vitest.integration.config.ts": "create; include tests/integration/**/*.test.ts, fileParallelism false"
+  "playwright.config.ts": "create; testDir tests/e2e"
+  "docker-compose.dev.yml": "create; postgres:16"
+  ".env.example": "create"
+  ".gitignore": "create; node_modules, .next, .env*, !.env.example, test-results, playwright-report"
+  "scripts/not-implemented.ts": "create; prints the script name passed as argv and exits 0"
+  "src/server/config.ts": "create; getConfig()"
+  "src/server/config.test.ts": "create"
+  "src/app/layout.tsx": "create"
+  "src/app/page.tsx": "create; placeholder"
+  "README.md": "create"
+
+implementation_notes: |
+  Project layout (every later task relies on this — do not deviate):
+    src/app/                Next.js pages and route handlers (API under src/app/api/...)
+    src/components/         React components
+    src/lib/                isomorphic code (no Node-only imports)
+    src/server/<domain>/    server-only modules (add `import 'server-only'` at top of entry files)
+    src/worker/             background worker entry (task 08)
+    db/migrations/          SQL migrations NNNN_name.sql (task 02)
+    scripts/                CLI scripts run with tsx
+    tests/integration/      DB-backed tests
+    tests/e2e/              Playwright
+    evals/                  LLM behaviour evals (task 40)
+    docs/adr/               ADRs (task 10)
+  Run TS scripts with tsx. Final script targets (until each lands, point at scripts/not-implemented.ts):
+    migrate -> tsx scripts/migrate.ts; worker -> tsx src/worker/index.ts;
+    audit:verify -> tsx scripts/audit-verify.ts; eval:llm -> tsx evals/run.ts.
+  getConfig(): parse process.env once (memoized) with zod; export type AppConfig and resetConfigForTests().
+  Variables (SPEC_DOC §7.5):
+    ATLASSIAN_CLIENT_ID, ATLASSIAN_CLIENT_SECRET, ATLASSIAN_CLOUD_ID, OAUTH_REDIRECT_URI (url),
+    TOKEN_ENCRYPTION_KEY (base64 that decodes to exactly 32 bytes), DATABASE_URL (url),
+    COPILOT_GITHUB_TOKEN, COPILOT_CLI_PATH (optional), FACILITATOR_MODEL, EVALUATOR_MODEL,
+    CONTEXT_TOKEN_BUDGET (int, default 150000), CONFLUENCE_SPACE_KEY, CONFLUENCE_PARENT_PAGE_ID,
+    CONFLUENCE_PROJECT_OVERRIDES (optional JSON {"<JIRA_PROJECT_KEY>": {"spaceKey": "...", "parentPageId": "..."}}),
+    DOWNSTREAM_WEBHOOK_URL (optional url), DOWNSTREAM_WEBHOOK_SECRET (required iff URL set),
+    SECTION_WEIGHTS (optional JSON object section-name -> positive number),
+    APP_BASE_URL (url; used for links and CSRF origin checks — see knowledge_gaps).
+  Validation failure throws one Error listing every invalid variable NAME, never a value.
+  Config is server-only; never import it from src/lib or client components.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Clean install lints, typechecks and builds"
+    verify: "npm ci && npm run lint && npm run typecheck && npm run build"
+  - id: AC2
+    behavior: "npm test runs Vitest and passes, including config tests"
+    verify: "npm test"
+  - id: AC3
+    behavior: "getConfig() rejects a TOKEN_ENCRYPTION_KEY that is not 32 bytes, rejects DOWNSTREAM_WEBHOOK_URL without secret, and its error message contains variable names but no values"
+    verify: "inspect src/server/config.test.ts; npm test -- config"
+  - id: AC4
+    behavior: ".env.example contains every variable named in SPEC_DOC §7.5 plus CONFLUENCE_PROJECT_OVERRIDES and APP_BASE_URL"
+    verify: "grep each variable name in .env.example"
+  - id: AC5
+    behavior: "Every npm script listed in scope.in exists"
+    verify: "node -e \"const s=require('./package.json').scripts;for(const k of ['dev','build','start','lint','typecheck','test','test:integration','test:e2e','migrate','worker','audit:verify','eval:llm'])if(!s[k])throw new Error(k)\""
+  - id: AC6
+    behavior: "Dev database starts and accepts connections"
+    verify: "docker compose -f docker-compose.dev.yml up -d && docker compose -f docker-compose.dev.yml exec -T db pg_isready"
+
+risks_vulnerabilities:
+  - risk: "Secrets echoed in config validation errors"
+    mitigation: "Error lists names only; covered by AC3"
+
+knowledge_gaps:
+  - "Next.js major version not specified (D-1 says Next.js App Router). Fallback: latest stable 15.x."
+  - "Shape of per-Jira-project Confluence overrides is unspecified in §7.5. Fallback: CONFLUENCE_PROJECT_OVERRIDES JSON as above; document in README."
+  - "APP_BASE_URL is not in §7.5 but needed for absolute links and CSRF origin checks. Fallback: add it as required; flag in DEV_TASK_LIST open gaps."
+
+commit_message: |
+  chore(task-01): scaffold Next.js project, tooling and validated config

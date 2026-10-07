@@ -1,0 +1,50 @@
+id: "42"
+title: "Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)"
+phase: 6
+severity: medium
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["39"]
+status: PENDING
+source: "SPEC_DOC.md NFR-10, D-14"
+
+objective: |
+  Verify every screen is keyboard-operable and meets WCAG 2.1 AA contrast, and fix violations found.
+
+scope:
+  in:
+    - "tests/e2e/a11y.spec.ts using @axe-core/playwright on login, sessions list, new session, workspace (all panels, override dialog, history drawer) and audit pages"
+    - "Keyboard-only flow test: create session, send message, edit a section, save draft, open override dialog and cancel"
+    - "Fix all serious/critical axe violations in components"
+  out:
+    - "Full WCAG audit beyond automated checks and the keyboard flow"
+
+files:
+  "tests/e2e/a11y.spec.ts": "create"
+  "src/components/**": "update as needed to fix violations"
+  "package.json": "add @axe-core/playwright"
+
+implementation_notes: |
+  Conventions: Playwright suite and mocks from task 39 (npm run test:e2e); Tailwind components in src/components.
+  Configure axe with tags wcag2a, wcag2aa, wcag21a, wcag21aa. Fail on 'serious' or 'critical' impact.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "axe reports zero serious/critical violations on every listed page/state"
+    verify: "npm run test:e2e -- a11y"
+  - id: AC2
+    behavior: "Keyboard-only flow completes without a mouse"
+    verify: "npm run test:e2e -- a11y"
+  - id: AC3
+    behavior: "Override dialog traps focus and returns focus to the Publish button on close"
+    verify: "npm run test:e2e -- a11y"
+
+risks_vulnerabilities: []
+
+knowledge_gaps: []
+
+commit_message: |
+  test(task-42): add accessibility checks and fix violations

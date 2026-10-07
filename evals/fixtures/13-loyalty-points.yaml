@@ -1,0 +1,34 @@
+id: loyalty-points
+domain: e-commerce
+ticket:
+  key: LOY-9
+  summary: Award loyalty points on purchases
+  description: |
+    Customers earn 1 point per euro spent and can redeem 100 points for a 5 euro voucher.
+    Points show in the account page.
+  comments:
+    - author: Elif (Marketing)
+      body: Launch is planned for Black Friday.
+draft:
+  Problem Statement: We lack a retention incentive for repeat customers.
+  Scope: Earn points on purchases and redeem them for vouchers.
+  Functional Requirements: |
+    - 1 point per euro spent.
+    - 100 points redeem for a 5 euro voucher.
+  Technical Design: A points ledger service listens to order events.
+  Data Model: Points are stored per customer in a suitable way.
+  Acceptance Criteria: |
+    - A 42 euro order adds 42 points to the customer's balance.
+seededCriticalGaps:
+  - id: returns-and-cancellations
+    section: Functional Requirements
+    keywords: [returned, order return, refund, cancellation, cancelled order, claw back, reverse points]
+  - id: points-expiry
+    section: Business Context
+    keywords: [expir, expire, liability, accounting]
+vagueStatements:
+  - section: Data Model
+    text: Points are stored per customer in a suitable way.
+replies:
+  - Points cannot be transferred between customers.
+  - Not sure about that. Please continue.

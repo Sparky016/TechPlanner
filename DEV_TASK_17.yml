@@ -1,0 +1,66 @@
+id: "17"
+title: "Linked Confluence page discovery and retrieval"
+phase: 2
+severity: high
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["14", "16"]
+status: PENDING
+source: "SPEC_DOC.md SR-2.3, D-10"
+
+objective: |
+  Discover Confluence pages linked from a Jira ticket (remote links plus Confluence URLs in description and
+  comments), fetch each one level deep as the acting user, and convert storage format to Markdown for the AI context.
+
+scope:
+  in:
+    - "src/server/atlassian/confluence.ts: discoverConfluencePageRefs(snapshot), getPageMarkdown(userId, pageId)"
+    - "src/server/atlassian/storageToMarkdown.ts: storageToMarkdown(xhtml) using turndown (+ GFM tables plugin)"
+    - "Unit tests"
+  out:
+    - "Following links inside Confluence pages (one level only per SR-2.3)"
+    - "Publishing to Confluence (task 29)"
+
+files:
+  "src/server/atlassian/confluence.ts": "create"
+  "src/server/atlassian/storageToMarkdown.ts": "create"
+  "src/server/atlassian/confluence.test.ts": "create"
+  "src/server/atlassian/storageToMarkdown.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; server-only; atlassianJson from src/server/atlassian/client.ts (task 14);
+  JiraIssueSnapshot type from src/server/atlassian/jira.ts (task 16); Vitest colocated (npm test).
+  Page ref extraction: from remoteLinks whose applicationType mentions 'confluence', and from URLs in descriptionText
+  and comment bodyText matching `${siteUrl}/wiki/spaces/<SPACE>/pages/<id>` (id = digits) or containing 'pageId=<id>'.
+  De-duplicate by page id; preserve first-seen order. Unresolvable URLs (e.g. /wiki/x/<tiny>) are returned as
+  { url, pageId: null, reason: 'unsupported_link' } so session creation can list them as unavailable.
+  Fetch: GET /wiki/api/v2/pages/{id}?body-format=storage -> { id, title, version.number, body.storage.value, _links.webui }.
+  Return { pageId, title, url, version, markdown }. Confluence macros: render known code/panel macros' bodies as text;
+  drop other macros, leaving '[macro: <name>]'.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "discoverConfluencePageRefs finds pages from remote links, description and comments, de-duplicated"
+    verify: "npm test -- confluence"
+  - id: AC2
+    behavior: "Tiny links are returned with reason unsupported_link, not dropped"
+    verify: "npm test -- confluence"
+  - id: AC3
+    behavior: "storageToMarkdown converts headings, tables, lists, code macro and links"
+    verify: "npm test -- storageToMarkdown"
+  - id: AC4
+    behavior: "getPageMarkdown calls the v2 pages endpoint with body-format=storage as the given user"
+    verify: "npm test -- confluence"
+
+risks_vulnerabilities:
+  - risk: "Following link chains explodes fetch volume"
+    mitigation: "One level only; no recursion"
+
+knowledge_gaps:
+  - "Resolving Confluence tiny links (/wiki/x/...) is not specified. Fallback: list as unavailable with reason unsupported_link."
+
+commit_message: |
+  feat(task-17): add linked Confluence page discovery and markdown conversion

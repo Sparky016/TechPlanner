@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: techplanner
+      POSTGRES_USER: techplanner
+      POSTGRES_PASSWORD: techplanner
+    ports:
+      - '5432:5432'
+    volumes:
+      - techplanner-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U techplanner -d techplanner']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  techplanner-pgdata:

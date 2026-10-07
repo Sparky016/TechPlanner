@@ -1,0 +1,7 @@
+# Cached by /checkpoint — edit freely; delete to force re-discovery.
+projects:
+  - name: tech-planner
+    cwd: .
+    build: npm run build
+    lint: npm run lint
+    test: npm test

@@ -1,0 +1,71 @@
+id: "34"
+title: "Center panel: section editor, autosave, live AI patch highlight, pending suggestions, Save Draft"
+phase: 5
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["19", "20", "33"]
+status: PENDING
+source: "SPEC_DOC.md §6 Center panel, SR-4.2–SR-4.5, SR-10.1, NFR-1, NFR-4"
+
+objective: |
+  Render the 27-section Working Copy with inline markdown editing, autosave within 5 s, live highlighting of
+  AI patches, inline pending AI suggestions (accept / reject / edit-then-accept), per-section status badges and Save Draft.
+
+scope:
+  in:
+    - "src/components/workspace/center/SpecEditor.tsx: collapsible sections in SECTION_NAMES order with status badge"
+    - "SectionEditor: CodeMirror markdown editor + preview toggle; autosave debounce 1 s via PATCH with expectedVersion"
+    - "Version conflict (409): keep local text, show 'Updated elsewhere' with reload/overwrite choice"
+    - "AI patch events: refetch section, 3 s highlight"
+    - "PendingSuggestion inline: diff view, Accept, Edit & accept, Reject"
+    - "Save Draft button -> POST /revisions; toast with revision number"
+  out:
+    - "Version history drawer (task 36)"
+    - "Right panel (task 35)"
+
+files:
+  "src/components/workspace/center/SpecEditor.tsx": "create"
+  "src/components/workspace/center/SectionEditor.tsx": "create"
+  "src/components/workspace/center/PendingSuggestion.tsx": "create"
+  "src/components/workspace/center/useAutosave.ts": "create"
+  "src/components/workspace/center/*.test.tsx": "create"
+  "src/app/(app)/sessions/[id]/page.tsx": "update; mount center panel"
+
+implementation_notes: |
+  Conventions: TS strict; apiFetch (task 32); WorkspaceProvider bus/readOnly flag (task 33); endpoints GET working-copy,
+  PATCH sections/:slug, POST suggestions/:sid/accept|reject (task 19), POST revisions (task 20); readiness statuses from
+  GET /api/sessions/:id/readiness (task 26); SECTION_NAMES/sectionSlug (task 05); @uiw/react-codemirror + @codemirror/lang-markdown;
+  react-markdown (no raw HTML) for preview; Vitest + Testing Library with fake timers.
+  useAutosave: debounce 1 s after last keystroke, max 5 s between saves during continuous typing (NFR-4); serialize saves per section;
+  flush on blur and beforeunload. Show saving/saved/error indicator.
+  Status badge colors must not rely on color alone (text label Complete/Partial/Missing) (NFR-10).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Continuous typing for 12 s triggers at least 2 saves (≤5 s apart); stopping triggers a save 1 s later"
+    verify: "npm test -- useAutosave"
+  - id: AC2
+    behavior: "Receiving a patch event highlights the section and shows the new content"
+    verify: "npm test -- SpecEditor"
+  - id: AC3
+    behavior: "Edit & accept sends editedContent; reject removes the suggestion"
+    verify: "npm test -- PendingSuggestion"
+  - id: AC4
+    behavior: "409 version_conflict keeps the user's text and shows the conflict choice"
+    verify: "npm test -- SectionEditor"
+  - id: AC5
+    behavior: "All 27 sections render in order with text status labels"
+    verify: "npm test -- SpecEditor"
+
+risks_vulnerabilities:
+  - risk: "Data loss on tab close"
+    mitigation: "Flush on beforeunload; server persists every PATCH"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-34): add specification editor with autosave and AI suggestions

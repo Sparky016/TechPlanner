@@ -1,0 +1,90 @@
+id: "27"
+title: "Publish orchestration: mandatory evaluation, gate/override, published revision, step runner and retry"
+phase: 4
+severity: critical
+complexity: critical
+model: opus
+effort: high
+eval_model: opus
+eval_effort: medium
+depends_on: ["08", "20", "24", "28", "29", "30", "31"]
+status: PENDING
+source: "SPEC_DOC.md SR-9.1–SR-9.3, SR-13.1–SR-13.5, FR-13, D-6, D-8, D-9"
+
+objective: |
+  Implement Publish end to end: run a mandatory evaluation, enforce the advisory gate with an audited Override,
+  create the published Revision, execute the external steps in the worker with persisted per-step state,
+  compute session publish status, and allow retrying failed steps (including Confluence overwrite/cancel).
+
+scope:
+  in:
+    - "POST /api/sessions/:id/publish { overrideJustification?: string, confirmOverride?: boolean } -> 202 { runId } | 409 gate_failed { openCriticalIssues }"
+    - "GET /api/sessions/:id/publish/:runId -> run with step states"
+    - "POST /api/sessions/:id/publish/:runId/retry { confluenceAction?: 'overwrite' | 'cancel' }"
+    - "src/server/publish/orchestrator.ts: startPublish, executeRun (worker), retryRun"
+    - "Worker handler for JOB_NAMES.publishRun"
+  out:
+    - "Individual step implementations (tasks 29, 30, 31) and converters (task 28)"
+    - "Publish UI (task 35)"
+
+files:
+  "src/server/publish/orchestrator.ts": "create"
+  "src/server/publish/jobHandler.ts": "create"
+  "src/worker/handlers.ts": "update; import publish jobHandler"
+  "src/app/api/sessions/[id]/publish/route.ts": "create"
+  "src/app/api/sessions/[id]/publish/[runId]/route.ts": "create"
+  "src/app/api/sessions/[id]/publish/[runId]/retry/route.ts": "create"
+  "tests/integration/publish.test.ts": "create; all Atlassian/webhook calls mocked"
+
+implementation_notes: |
+  Conventions: TS strict; withApiHandler (task 13); requireSessionAccess/requireLock (task 15); evaluateSession (task 24);
+  createRevision (task 20); flushEditAudits (task 19); enqueue/JOB_NAMES/registerHandler (task 08); PublishStep contract,
+  renderPublishedMarkdown from src/server/publish (task 28); steps confluenceStep (task 29), jiraAttachStep, jiraDescriptionStep,
+  jiraCommentStep, jiraLabelStep (task 30), downstreamStep (task 31); recordAudit (task 03); tests `npm run test:integration`.
+  startPublish (SR-13.1): flushEditAudits -> evaluateSession -> if !gatePasses: require confirmOverride===true and
+  overrideJustification.trim().length >= 20 else 409 { code:'gate_failed', openCriticalIssues } (SR-9.1);
+  when overriding audit readiness.override { justification, openCriticalIssues } (SR-9.2).
+  Then in one transaction: createRevision(trigger 'publish', published true); insert publish_run (status 'running',
+  override_justification, steps = each step {status:'pending', attempts:0}); audit publish.started; enqueue publishRun {runId}.
+  Override applies to this run only (SR-9.3) — stored on the run, never on the session.
+  Step order & dependencies: confluence; jira_attach; jira_label (independent); jira_description and jira_comment wait for confluence
+  success (they embed its URL) — status 'waiting' if confluence failed; downstream only after all five succeeded (SR-13.2 step 6).
+  Persist each step's status ('pending'|'running'|'success'|'failed'|'waiting'|'cancelled'), attempts, lastError, result (ids) after
+  every transition. Run status: all success -> 'completed', session.status 'published', audit publish.completed; otherwise
+  'failed', session.status 'partially_published', audit publish.failed { failedSteps } (SR-13.3, SR-13.4).
+  Retry: re-run steps in failed/waiting state only, passing confluenceAction through ctx.options; successful steps never re-run.
+  Republish (SR-13.5) creates a new revision and run; Confluence step updates the same page.
+  Instrumentation (SPEC_DOC §11): on startPublish increment publish_total{project: primary key's project, override: 'true'|'false'}
+  and observe readiness_score_at_publish (metrics from task 09).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Publish with an open critical issue and no override returns 409 gate_failed; with confirmOverride and a 20+ char justification it proceeds and writes readiness.override"
+    verify: "npm run test:integration -- publish"
+  - id: AC2
+    behavior: "Successful publish creates a revision with trigger publish and published=true, runs all six steps in order, sets session status published and writes publish.started and publish.completed"
+    verify: "npm run test:integration -- publish"
+  - id: AC3
+    behavior: "Confluence failure leaves jira_attach/jira_label success, description/comment waiting, downstream pending, run failed, session partially_published"
+    verify: "npm run test:integration -- publish"
+  - id: AC4
+    behavior: "Retry after fixing Confluence runs only the non-successful steps and does not create duplicate attachments or comments"
+    verify: "npm run test:integration -- publish"
+  - id: AC5
+    behavior: "A second publish without override after a previous overridden publish re-checks the gate"
+    verify: "npm run test:integration -- publish"
+  - id: AC6
+    behavior: "Publish without session lock returns 423; without CSRF 403"
+    verify: "npm run test:integration -- publish"
+
+risks_vulnerabilities:
+  - risk: "Partial external state with no visibility"
+    mitigation: "Per-step persisted state, retry endpoint, audit per step"
+  - risk: "Duplicate external writes on worker retries"
+    mitigation: "Steps are idempotent (tasks 29-31) and successful steps are skipped"
+
+knowledge_gaps:
+  - "SR-13.2 calls all steps independent, yet the Jira description block and comment must contain the Confluence link. Fallback: description and comment wait for Confluence success; attachment and label run independently. Flag for confirmation."
+
+commit_message: |
+  feat(task-27): add publish orchestration with gate override and retryable steps

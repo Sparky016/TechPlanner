@@ -1,0 +1,49 @@
+{
+  "key": "ABC-123",
+  "fields": {
+    "summary": "Export report as CSV",
+    "description": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        { "type": "heading", "attrs": { "level": 2 }, "content": [{ "type": "text", "text": "Goal" }] },
+        { "type": "paragraph", "content": [{ "type": "text", "text": "Users can export the report." }] }
+      ]
+    },
+    "issuetype": { "name": "Story" },
+    "status": { "name": "In Progress" },
+    "priority": { "name": "High" },
+    "assignee": { "displayName": "Alice Dev" },
+    "reporter": { "displayName": "Bob PM" },
+    "labels": ["export", "reporting"],
+    "components": [{ "name": "Reports" }],
+    "fixVersions": [{ "name": "1.4.0" }],
+    "parent": { "key": "ABC-100", "fields": { "summary": "Reporting epic" } },
+    "issuelinks": [
+      {
+        "type": { "name": "Blocks", "inward": "is blocked by", "outward": "blocks" },
+        "outwardIssue": { "key": "ABC-200", "fields": { "summary": "Publish docs" } }
+      },
+      {
+        "type": { "name": "Blocks", "inward": "is blocked by", "outward": "blocks" },
+        "inwardIssue": { "key": "ABC-50", "fields": { "summary": "Build data layer" } }
+      }
+    ],
+    "attachment": [
+      {
+        "id": "10001",
+        "filename": "mock.png",
+        "mimeType": "image/png",
+        "size": 2048,
+        "content": "https://example.atlassian.net/rest/api/3/attachment/content/10001"
+      }
+    ],
+    "comment": { "comments": [], "total": 0 }
+  },
+  "remoteLinks": [
+    {
+      "object": { "url": "https://example.com/design", "title": "Design doc" },
+      "application": { "type": "com.figma", "name": "Figma" }
+    }
+  ]
+}

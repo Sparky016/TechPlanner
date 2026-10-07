@@ -1,0 +1,67 @@
+id: "08"
+title: "Background job queue and worker process"
+phase: 1
+severity: high
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["02"]
+status: PENDING
+source: "SPEC_DOC.md §7.1 Backend (background job worker), SR-6.2, SR-13.2"
+
+objective: |
+  Provide a PostgreSQL-backed job queue and a worker process (`npm run worker`) so readiness evaluation
+  (debounced) and publish steps run outside request handlers. Later tasks register handlers by name.
+
+scope:
+  in:
+    - "src/server/jobs/queue.ts: getQueue() singleton, enqueue(name, data, opts) supporting singletonKey and startAfter seconds"
+    - "src/server/jobs/names.ts: JOB_NAMES constant { readinessEvaluate: 'readiness.evaluate', publishRun: 'publish.run' }"
+    - "src/server/jobs/registry.ts: registerHandler(name, fn) and getHandlers()"
+    - "src/worker/index.ts: starts the queue, subscribes all registered handlers (imported via src/worker/handlers.ts barrel), graceful shutdown on SIGTERM/SIGINT"
+    - "Point npm run worker at src/worker/index.ts"
+  out:
+    - "Actual evaluation/publish handlers (tasks 26, 27)"
+
+files:
+  "src/server/jobs/queue.ts": "create"
+  "src/server/jobs/names.ts": "create"
+  "src/server/jobs/registry.ts": "create"
+  "src/worker/index.ts": "create"
+  "src/worker/handlers.ts": "create; empty barrel later tasks append imports to"
+  "tests/integration/jobs.test.ts": "create"
+  "package.json": "update worker script; add pg-boss dependency"
+
+implementation_notes: |
+  Conventions: TS strict; config via getConfig().DATABASE_URL (src/server/config.ts); integration tests with
+  `npm run test:integration`.
+  Use pg-boss (stores jobs in its own 'pgboss' schema in the same database). Debounce semantics used by task 26:
+  enqueue(JOB_NAMES.readinessEvaluate, {sessionId}, { singletonKey: sessionId, startAfter: 20 }) must not create a
+  second queued job while one is pending for the same key.
+  Handler errors: log and let pg-boss retry (retryLimit 3, retryBackoff true) unless the handler throws NonRetryableJobError.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "A registered handler receives an enqueued job's data when the worker runs"
+    verify: "npm run test:integration -- jobs"
+  - id: AC2
+    behavior: "Two enqueues with the same singletonKey while the first is pending produce one execution"
+    verify: "npm run test:integration -- jobs"
+  - id: AC3
+    behavior: "NonRetryableJobError fails the job without retry; other errors are retried"
+    verify: "npm run test:integration -- jobs"
+  - id: AC4
+    behavior: "Worker stops cleanly on SIGTERM (no unhandled rejection)"
+    verify: "inspect src/worker/index.ts shutdown handler"
+
+risks_vulnerabilities:
+  - risk: "Duplicate publish step execution"
+    mitigation: "Publish steps are idempotent by design (task 27); queue singletonKey reduces duplicates"
+
+knowledge_gaps:
+  - "SPEC_DOC §7.1 names a background worker but no queue mechanism. Fallback: pg-boss on the existing PostgreSQL (no new infrastructure)."
+
+commit_message: |
+  feat(task-08): add pg-boss job queue and worker process

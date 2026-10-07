@@ -1,0 +1,74 @@
+id: "05"
+title: "Generated Specification template module (27 sections, markdown rendering)"
+phase: 1
+severity: high
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["01"]
+status: PENDING
+source: "SPEC_DOC.md SR-5.1–SR-5.4, §2 Glossary"
+
+objective: |
+  Define the canonical Generated Specification structure once: the 27 FR-5 section names in order,
+  URL slugs, an empty-document factory, validation, and deterministic Markdown rendering with the
+  SR-5.3 header. The working copy, evaluator, revisions, converters and UI all import from here.
+
+scope:
+  in:
+    - "src/lib/spec/sections.ts: SECTION_NAMES (readonly tuple of the 27 names in SR-5.1 order), type SectionName, sectionSlug(name), sectionFromSlug(slug)"
+    - "src/lib/spec/document.ts: type SpecSections = Record<SectionName, string>; emptySections(); validateSections(obj) (exactly the 27 keys, string values); isNotApplicable(body)"
+    - "src/lib/spec/render.ts: renderSpecMarkdown(sections, header) producing the full document"
+    - "Unit tests"
+  out:
+    - "Persistence (task 07) and conversion to Confluence/ADF (task 28)"
+    - "Readiness scoring (task 06)"
+
+files:
+  "src/lib/spec/sections.ts": "create"
+  "src/lib/spec/document.ts": "create"
+  "src/lib/spec/render.ts": "create"
+  "src/lib/spec/spec.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; src/lib is isomorphic (no node: imports); Vitest colocated tests (npm test).
+  Section names exactly, in order (SR-5.1): Executive Summary; Problem Statement; Business Context; Scope;
+  Out of Scope; Functional Requirements; Non-functional Requirements; User Flows; Technical Design; Data Model;
+  APIs; External Integrations; Security; Performance; Error Handling; Monitoring; Logging; Risks; Dependencies;
+  Assumptions; Migration Strategy; Deployment Strategy; Rollback Strategy; Testing Strategy; Acceptance Criteria;
+  Open Questions; Future Improvements.
+  Slugs: lowercase kebab-case ('Non-functional Requirements' -> 'non-functional-requirements', 'APIs' -> 'apis').
+  Header type: { title: string; tickets: { key: string; url: string }[]; facilitator: string; sessionId: string;
+  revision: number | null; readinessScore: number | null; overrideJustification?: string | null }.
+  renderSpecMarkdown output: '# <title>' then a header table (Tickets as links, Facilitator, Session ID, Revision,
+  Readiness Score, and an 'Override justification' row only when present), then '## <Section>' + body for each
+  section in order. Empty body renders '_Not yet specified._'. Output must be byte-identical for identical input.
+  isNotApplicable: true when trimmed body starts with 'Not applicable — ' or 'Not applicable - ' followed by a non-empty reason (SR-5.2).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "SECTION_NAMES has exactly 27 entries in SR-5.1 order"
+    verify: "npm test -- spec"
+  - id: AC2
+    behavior: "sectionFromSlug(sectionSlug(n)) === n for every section; unknown slug returns null"
+    verify: "npm test -- spec"
+  - id: AC3
+    behavior: "validateSections rejects missing, extra or non-string sections"
+    verify: "npm test -- spec"
+  - id: AC4
+    behavior: "renderSpecMarkdown emits the header (with override row only when set) and all 27 '## ' headings in order"
+    verify: "npm test -- spec (snapshot test)"
+  - id: AC5
+    behavior: "isNotApplicable accepts 'Not applicable — no data stored' and rejects 'Not applicable' without a reason"
+    verify: "npm test -- spec"
+
+risks_vulnerabilities:
+  - risk: "Section names drift between modules"
+    mitigation: "Single exported tuple; all other tasks import SECTION_NAMES"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-05): add Generated Specification template and markdown renderer

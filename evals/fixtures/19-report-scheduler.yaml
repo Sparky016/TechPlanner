@@ -1,0 +1,33 @@
+id: report-scheduler
+domain: analytics
+ticket:
+  key: BI-73
+  summary: Schedule dashboard reports by email
+  description: |
+    Users want dashboards emailed as PDF on a schedule (daily, weekly, monthly) to a list of recipients.
+  comments:
+    - author: Noor (Analytics)
+      body: Some dashboards take a minute to render.
+draft:
+  Problem Statement: Stakeholders without accounts cannot see dashboards regularly.
+  Scope: Scheduled PDF email of a dashboard to recipients.
+  Functional Requirements: |
+    - Create a schedule with frequency and recipients.
+    - Email a PDF snapshot at the scheduled time.
+  Technical Design: A scheduler triggers headless rendering and sends the PDF by email.
+  Monitoring: We will keep an eye on the scheduled jobs.
+  Acceptance Criteria: |
+    - A weekly schedule sends one email per week with the dashboard PDF.
+seededCriticalGaps:
+  - id: external-recipient-data-leak
+    section: Security
+    keywords: [external recipient, data leak, permission, row-level, access rights, sensitive]
+  - id: render-failure
+    section: Error Handling
+    keywords: [render fail, timeout, retry, notify owner, failed delivery]
+vagueStatements:
+  - section: Monitoring
+    text: We will keep an eye on the scheduled jobs.
+replies:
+  - Recipients can be any email address.
+  - No answer yet. What else?

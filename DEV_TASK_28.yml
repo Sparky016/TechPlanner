@@ -1,0 +1,84 @@
+id: "28"
+title: "Publish foundations: step contract, published markdown, Confluence storage and Jira ADF builders"
+phase: 4
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["05"]
+status: PENDING
+source: "SPEC_DOC.md SR-5.3, SR-5.4, SR-9.2, SR-13.2, D-8"
+
+objective: |
+  Provide the pure building blocks every publish step uses: the PublishStep contract, the rendered published
+  document (with SR-5.3 header and override), Markdown -> Confluence storage conversion, and Jira ADF builders,
+  including the non-destructive delimited description block (D-8).
+
+scope:
+  in:
+    - "src/server/publish/types.ts: PublishStepName, PublishStep, PublishContext, StepResult"
+    - "src/server/publish/render.ts: renderPublishedMarkdown(input)"
+    - "src/server/publish/toConfluenceStorage.ts: markdownToConfluenceStorage(md)"
+    - "src/server/publish/adf.ts: buildSpecBlockNodes(info), buildPublishCommentAdf(info), upsertSpecBlock(descriptionAdf, nodes)"
+    - "Unit tests"
+  out:
+    - "HTTP calls to Atlassian (tasks 29, 30)"
+
+files:
+  "src/server/publish/types.ts": "create"
+  "src/server/publish/render.ts": "create"
+  "src/server/publish/toConfluenceStorage.ts": "create"
+  "src/server/publish/adf.ts": "create"
+  "src/server/publish/publishFoundations.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; server-only; renderSpecMarkdown and header type from src/lib/spec/render.ts (task 05); Vitest colocated (npm test).
+  Contract (tasks 27, 29, 30, 31 use verbatim):
+    type PublishStepName = 'confluence' | 'jira_attach' | 'jira_description' | 'jira_comment' | 'jira_label' | 'downstream'
+    interface PublishContext { runId: string; sessionId: string; ticketKeys: string[]; primaryTicketKey: string;
+      facilitator: { accountId: string; displayName: string }; revisionNumber: number; readinessScore: number;
+      overrideJustification: string | null; markdown: string; title: string; confluencePageUrl: string | null;
+      previousResult: Record<string, unknown> | null; options: { confluenceAction?: 'overwrite' | 'cancel' } }
+    type StepResult = { status: 'success' | 'failed' | 'cancelled'; result?: Record<string, unknown>; error?: { code: string; message: string } }
+    interface PublishStep { name: PublishStepName; run(ctx: PublishContext): Promise<StepResult> }
+  renderPublishedMarkdown: header includes tickets, facilitator, session id, revision, readiness score and
+  'Override justification' when present (SR-5.3, SR-9.2).
+  markdownToConfluenceStorage: marked -> XHTML; fenced code -> <ac:structured-macro ac:name="code"> with language param and CDATA body;
+  tables, lists, headings, links, emphasis supported; output is well-formed XHTML (self-closing void tags); raw HTML in markdown is escaped.
+  Spec block (D-8): start marker paragraph text 'TECH-PLANNER-SPEC-START — Technical Specification (managed by Tech Planner; edits here are overwritten)'
+  and end marker paragraph 'TECH-PLANNER-SPEC-END'. Block content: Confluence link, revision, readiness score, override flag (yes/no).
+  upsertSpecBlock: if both markers exist, replace nodes between and including them; else append to end; nodes outside are never changed;
+  null description -> new doc containing only the block.
+  buildPublishCommentAdf: publisher, revision, score, Confluence link, override justification if any, and a final paragraph
+  'tech-planner-run:<runId>' used for idempotency (task 30).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "upsertSpecBlock on a description without block appends it and leaves original nodes deep-equal; calling again replaces only the block (idempotent)"
+    verify: "npm test -- publishFoundations"
+  - id: AC2
+    behavior: "markdownToConfluenceStorage output parses as XML and renders code blocks as code macros"
+    verify: "npm test -- publishFoundations"
+  - id: AC3
+    behavior: "Raw HTML/script in markdown is escaped in storage output"
+    verify: "npm test -- publishFoundations"
+  - id: AC4
+    behavior: "renderPublishedMarkdown includes override justification only when set"
+    verify: "npm test -- publishFoundations"
+  - id: AC5
+    behavior: "Comment ADF contains the tech-planner-run marker and override justification when set"
+    verify: "npm test -- publishFoundations"
+
+risks_vulnerabilities:
+  - risk: "Destroying original ticket description (violates D-8)"
+    mitigation: "Marker-based replace; deep-equality test of untouched nodes"
+  - risk: "Stored XSS into Confluence"
+    mitigation: "Escape raw HTML during conversion"
+
+knowledge_gaps:
+  - "Markdown converter libraries are unspecified. Fallback: marked + custom renderer for storage format; hand-built ADF for the small block and comment."
+
+commit_message: |
+  feat(task-28): add publish step contract and Confluence/ADF builders

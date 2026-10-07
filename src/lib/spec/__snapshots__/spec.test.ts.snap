@@ -1,0 +1,122 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderSpecMarkdown > emits header and all 27 headings in order 1`] = `
+"# Checkout redesign
+
+| Field | Value |
+| --- | --- |
+| Tickets | [ABC-1](https://example.atlassian.net/browse/ABC-1) |
+| Facilitator | Ruan |
+| Session ID | sess-1 |
+| Revision | 2 |
+| Readiness Score | 80 |
+
+## Executive Summary
+
+_Not yet specified._
+
+## Problem Statement
+
+_Not yet specified._
+
+## Business Context
+
+_Not yet specified._
+
+## Scope
+
+In scope: checkout
+
+## Out of Scope
+
+_Not yet specified._
+
+## Functional Requirements
+
+_Not yet specified._
+
+## Non-functional Requirements
+
+_Not yet specified._
+
+## User Flows
+
+_Not yet specified._
+
+## Technical Design
+
+_Not yet specified._
+
+## Data Model
+
+_Not yet specified._
+
+## APIs
+
+_Not yet specified._
+
+## External Integrations
+
+_Not yet specified._
+
+## Security
+
+_Not yet specified._
+
+## Performance
+
+_Not yet specified._
+
+## Error Handling
+
+_Not yet specified._
+
+## Monitoring
+
+_Not yet specified._
+
+## Logging
+
+_Not yet specified._
+
+## Risks
+
+_Not yet specified._
+
+## Dependencies
+
+_Not yet specified._
+
+## Assumptions
+
+_Not yet specified._
+
+## Migration Strategy
+
+_Not yet specified._
+
+## Deployment Strategy
+
+_Not yet specified._
+
+## Rollback Strategy
+
+_Not yet specified._
+
+## Testing Strategy
+
+_Not yet specified._
+
+## Acceptance Criteria
+
+_Not yet specified._
+
+## Open Questions
+
+_Not yet specified._
+
+## Future Improvements
+
+_Not yet specified._
+"
+`;

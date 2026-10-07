@@ -1,0 +1,68 @@
+id: "16"
+title: "Jira ticket retrieval and normalisation"
+phase: 2
+severity: high
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["14"]
+status: PENDING
+source: "SPEC_DOC.md SR-2.1, SR-2.2"
+
+objective: |
+  Fetch everything SR-2.2 lists for a Jira ticket as the acting user and normalise it into a JiraIssueSnapshot
+  (plain-text description and comments) that session creation and the AI context use.
+
+scope:
+  in:
+    - "src/server/atlassian/jira.ts: isValidIssueKey(key), getIssueSnapshot(userId, key)"
+    - "src/server/atlassian/adfToText.ts: adfToText(adf) producing readable plain text/markdown (headings, paragraphs, lists, code, tables, links, mentions)"
+    - "Unit tests with fixture JSON"
+  out:
+    - "Writing to Jira (task 30)"
+    - "Attachment content download (task 21) — metadata only here"
+    - "Confluence fetching (task 17)"
+
+files:
+  "src/server/atlassian/jira.ts": "create"
+  "src/server/atlassian/adfToText.ts": "create"
+  "src/server/atlassian/jira.test.ts": "create"
+  "src/server/atlassian/adfToText.test.ts": "create"
+  "src/server/atlassian/__fixtures__/issue.json": "create"
+
+implementation_notes: |
+  Conventions: TS strict; server-only; atlassianJson from src/server/atlassian/client.ts (task 14); Vitest colocated (npm test).
+  isValidIssueKey: /^[A-Z][A-Z0-9_]+-[1-9]\d*$/.
+  Calls: GET /rest/api/3/issue/{key}?fields=summary,description,issuetype,status,priority,assignee,reporter,labels,components,fixVersions,parent,issuelinks,attachment,comment
+  then page through GET /rest/api/3/issue/{key}/comment?startAt=&maxResults=100 until all comments retrieved;
+  GET /rest/api/3/issue/{key}/remotelink.
+  JiraIssueSnapshot: { key, url (`${siteUrl}/browse/${key}`), summary, descriptionText, issueType, status, priority,
+  assignee, reporter, labels, components, fixVersions, parent: {key, summary}|null, issueLinks: {type, direction, key, summary}[],
+  comments: {id, author, created, bodyText}[], attachments: {id, filename, mimeType, size, contentUrl}[],
+  remoteLinks: {url, title, applicationType}[] }. siteUrl from GET https://api.atlassian.com/oauth/token/accessible-resources
+  entry for the cloudId — cache per process (helper getSiteUrl in client or jira module).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "getIssueSnapshot maps every SR-2.2 field from the fixture"
+    verify: "npm test -- jira"
+  - id: AC2
+    behavior: "Comments are fetched across multiple pages (fixture with 150 comments yields 150)"
+    verify: "npm test -- jira"
+  - id: AC3
+    behavior: "adfToText renders headings, nested lists, code blocks, tables and links to readable text"
+    verify: "npm test -- adfToText"
+  - id: AC4
+    behavior: "isValidIssueKey accepts ABC-123 and rejects abc-1, ABC-0, ABC123"
+    verify: "npm test -- jira"
+
+risks_vulnerabilities:
+  - risk: "Huge tickets blow the context window"
+    mitigation: "Budgeting handled in task 21; this task returns full data"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-16): add Jira issue snapshot retrieval and ADF-to-text

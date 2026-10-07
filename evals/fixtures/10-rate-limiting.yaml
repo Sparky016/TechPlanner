@@ -1,0 +1,34 @@
+id: rate-limiting
+domain: api-platform
+ticket:
+  key: API-501
+  summary: Rate limit the public REST API per API key
+  description: |
+    A few customers send bursts that degrade the API for everyone. Add per-API-key rate limits
+    with limits configurable per plan.
+draft:
+  Problem Statement: Bursty clients degrade the API for all customers.
+  Scope: Per-key rate limiting on the public REST API, configurable per plan.
+  Functional Requirements: |
+    - Limits configurable per plan.
+    - Requests over the limit are rejected.
+  Technical Design: Token bucket in Redis checked by the API gateway.
+  Non-functional Requirements: Limits should be reasonable for normal usage.
+  Acceptance Criteria: |
+    - Exceeding the plan limit returns HTTP 429.
+seededCriticalGaps:
+  - id: client-communication
+    section: APIs
+    keywords: [retry-after, rate limit header, x-ratelimit, remaining requests]
+  - id: redis-failure
+    section: Error Handling
+    keywords: [redis down, redis unavailable, fail open, fail closed, outage]
+  - id: limit-rollout
+    section: Deployment Strategy
+    keywords: [rollout, shadow mode, log only, gradual, notify customers]
+vagueStatements:
+  - section: Non-functional Requirements
+    text: Limits should be reasonable for normal usage.
+replies:
+  - Plans are Free, Team and Enterprise.
+  - I don't know yet, keep going.

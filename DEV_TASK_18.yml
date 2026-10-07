@@ -1,0 +1,83 @@
+id: "18"
+title: "Planning session creation, listing, source snapshots and refresh API"
+phase: 2
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["03", "07", "15", "16", "17", "21"]
+status: PENDING
+source: "SPEC_DOC.md SR-2.1, SR-2.5–SR-2.8, §7.3 sessions endpoints, §8 Error handling"
+
+objective: |
+  Let a Facilitator create a Planning Session from Jira keys, list their sessions, open one with its sources,
+  and refresh sources (diffs injected as a system message for the AI). Partial source failures never fail creation.
+
+scope:
+  in:
+    - "src/server/sessions/createSession.ts: createSession(user, ticketKeys, { confirmDuplicate })"
+    - "src/server/sessions/refreshSources.ts: refreshSources(user, sessionId)"
+    - "POST /api/sessions { ticketKeys: string[], confirmDuplicate?: boolean }"
+    - "GET /api/sessions?status=&ticket= (sessions where facilitator_id = current user)"
+    - "GET /api/sessions/:id (session row, sources list with ingest_status, clarification_ended, publish status)"
+    - "POST /api/sessions/:id/refresh-sources"
+  out:
+    - "Conversation, working-copy edits, revisions (tasks 19, 20, 25)"
+    - "UI (tasks 32, 33)"
+
+files:
+  "src/server/sessions/createSession.ts": "create"
+  "src/server/sessions/refreshSources.ts": "create"
+  "src/server/sessions/sources.ts": "create; persist/load source_snapshot rows"
+  "src/app/api/sessions/route.ts": "create; GET list, POST create"
+  "src/app/api/sessions/[id]/route.ts": "create; GET detail"
+  "src/app/api/sessions/[id]/refresh-sources/route.ts": "create"
+  "tests/integration/sessions.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; all routes use withApiHandler (src/server/http/handler.ts, task 13); session reads use
+  requireSessionAccess and mutations requireLock (src/server/sessions/access.ts, lock.ts, task 15); recordAudit
+  (task 03); getIssueSnapshot/isValidIssueKey (task 16); discoverConfluencePageRefs/getPageMarkdown (task 17);
+  ingestAttachments + applyContextBudget (task 21); initWorkingCopy (task 07); zod for bodies; integration tests
+  `npm run test:integration` with Atlassian mocked via undici MockAgent.
+  Create flow: validate 1..10 keys (format) -> 400 listing invalid keys; uppercase + de-duplicate preserving order; first = primary (D-8).
+  Fetch every ticket; any 403/404 -> 422 { unreadable: [keys] } (SR-2.1). If a session exists with the same primary_ticket_key
+  and !confirmDuplicate -> 409 { existingSessionIds } (SR-2.7). Then fetch Confluence pages and attachments; a failure for one
+  page/attachment stores a source_snapshot with ingest_status 'unavailable' and detail.reason (§8). Apply budget
+  (CONTEXT_TOKEN_BUDGET) and mark truncated items. In one transaction insert planning_session, snapshots, working copy
+  (emptySections) and recordAudit({action:'draft.created', ticketIds, sessionId}).
+  Refresh: refetch everything, compare content_text per (kind, ref); insert new snapshots; append a conversation_message
+  role 'system' summarising added/removed/changed sources with a unified diff excerpt (max 4000 chars per source, using 'diff' npm).
+  Facilitator-only sessions: GET list returns sessions where facilitator_id = user; any user with Jira access may open by id (D-12).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "POST /api/sessions with two readable keys creates the session (primary = first key), snapshots, an empty 27-section working copy and a draft.created audit record"
+    verify: "npm run test:integration -- sessions"
+  - id: AC2
+    behavior: "An unreadable key returns 422 listing it; invalid format returns 400"
+    verify: "npm run test:integration -- sessions"
+  - id: AC3
+    behavior: "Existing session for same primary ticket returns 409 with its id; confirmDuplicate=true creates a second"
+    verify: "npm run test:integration -- sessions"
+  - id: AC4
+    behavior: "A failing Confluence page fetch yields ingest_status 'unavailable' while creation succeeds"
+    verify: "npm run test:integration -- sessions"
+  - id: AC5
+    behavior: "refresh-sources with a changed description appends one system conversation_message containing the change"
+    verify: "npm run test:integration -- sessions"
+  - id: AC6
+    behavior: "All routes reject missing CSRF on POST and unauthenticated requests"
+    verify: "npm run test:integration -- sessions"
+
+risks_vulnerabilities:
+  - risk: "Long creation latency (NFR-3 ≤30 s p95)"
+    mitigation: "Fetch tickets, pages and attachments with bounded concurrency (p-limit 5)"
+
+knowledge_gaps:
+  - "Maximum number of ticket keys per session is unspecified. Fallback: 10."
+
+commit_message: |
+  feat(task-18): add planning session creation, listing and source refresh

@@ -1,0 +1,66 @@
+id: "40"
+title: "LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK"
+phase: 6
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["23", "24"]
+status: PENDING
+source: "SPEC_DOC.md §8 Testing strategy (LLM behaviour evals), §10 Acceptance Criterion 3, SR-3.3, PRD §10"
+
+objective: |
+  Measure whether the facilitator and evaluator behave as specified on a fixture set of at least 20 tickets with
+  known gaps, using the real GitHub Copilot SDK/CLI, and produce a pass/fail report.
+
+scope:
+  in:
+    - "evals/fixtures/*.yaml: ≥20 synthetic tickets, each with summary/description/comments, seededCriticalGaps [{ id, section, keywords[] }], vagueStatements[], and scripted facilitator replies"
+    - "evals/run.ts (npm run eval:llm): runs facilitator turns via runFacilitatorTurn and evaluations via evaluateSession on a scratch DB"
+    - "Checks: (a) facilitator asks about each seeded critical gap within 3 turns; (b) evaluator raises a critical issue for each seeded gap; (c) evaluator never marks a section containing a seeded vague statement as complete; (d) fixture with missing acceptance criteria -> question about acceptance criteria within 2 turns and critical issue on Acceptance Criteria (release AC3)"
+    - "evals/report.json and console summary; non-zero exit if any check's pass rate < threshold"
+  out:
+    - "Prompt tuning beyond fixing clear failures (iterate in follow-up tasks)"
+    - "Running in CI by default (requires Copilot token)"
+
+files:
+  "evals/fixtures/": "create ≥20 YAML fixtures"
+  "evals/run.ts": "create"
+  "evals/matchers.ts": "create; keyword/section matching, optional LLM-judge via evaluator model"
+  "evals/README.md": "create; how to run, thresholds, cost note"
+  "package.json": "update eval:llm script"
+
+implementation_notes: |
+  Conventions: TS strict; runFacilitatorTurn (task 23); evaluateSession (task 24); getLlmClient real (LLM_FAKE unset) with
+  COPILOT_GITHUB_TOKEN; resetDatabase (tests/integration/setup.ts) on a dedicated eval database; insert sessions/snapshots directly.
+  Matching a 'question about gap X': question.section equals the gap section OR question text contains any gap keyword
+  (case-insensitive). Thresholds (see knowledge_gaps): (a) ≥ 90 %, (b) ≥ 90 %, (c) 100 %, (d) must pass.
+  Run each fixture once by default; --repeat N for variance.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "At least 20 fixtures exist, each with ≥1 seeded critical gap and ≥1 vague statement"
+    verify: "ls evals/fixtures/*.yaml | wc -l; inspect fixture schema validation in evals/run.ts"
+  - id: AC2
+    behavior: "npm run eval:llm writes evals/report.json with per-check pass rates and exits non-zero below thresholds"
+    verify: "npm run eval:llm (with COPILOT_GITHUB_TOKEN set)"
+  - id: AC3
+    behavior: "Fixture validation runs without a token: npm run eval:llm -- --validate-only checks all fixtures"
+    verify: "npm run eval:llm -- --validate-only"
+  - id: AC4
+    behavior: "Report from one real run is committed as evals/baseline-report.json"
+    verify: "inspect evals/baseline-report.json"
+
+risks_vulnerabilities:
+  - risk: "Overfitting prompts to fixtures"
+    mitigation: "Synthetic fixtures span varied domains; keep a held-out subset of 5"
+
+knowledge_gaps:
+  - "Pass-rate thresholds are not specified (§8 lists criteria only). Fallback: 90 % / 90 % / 100 % / must-pass; flag for stakeholder confirmation."
+  - "No real historical tickets are available. Fallback: synthetic fixtures authored by the worker."
+  - "Requires a Copilot-entitled COPILOT_GITHUB_TOKEN for AC2/AC4. If unavailable, deliver AC1/AC3 and mark the task BLOCKED on the token."
+
+commit_message: |
+  test(task-40): add LLM behaviour eval harness with seeded-gap fixtures

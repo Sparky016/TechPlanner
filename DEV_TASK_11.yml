@@ -1,0 +1,93 @@
+id: "11"
+title: "Atlassian OAuth 2.0 (3LO) login, app sessions and token refresh"
+phase: 2
+severity: critical
+complexity: critical
+model: opus
+effort: high
+eval_model: opus
+eval_effort: medium
+depends_on: ["02", "03", "04", "09"]
+status: PENDING
+source: "SPEC_DOC.md SR-1.1–SR-1.7, D-11, D-12, §7.3 auth routes"
+
+objective: |
+  Users sign in with Atlassian OAuth 2.0 (3LO). The app binds to the configured Atlassian site, stores
+  tokens encrypted server-side, issues an opaque httpOnly session cookie, refreshes tokens transparently,
+  and audits authentication events. No shared credentials or PATs exist anywhere.
+
+scope:
+  in:
+    - "GET /auth/login: builds the authorize URL (state + PKCE verifier stored in a short-lived httpOnly cookie) and redirects"
+    - "GET /auth/callback: validates state, exchanges code, checks accessible-resources includes ATLASSIAN_CLOUD_ID, fetches /me, upserts app_user, stores encrypted tokens, creates app_session, sets cookie, redirects to /sessions"
+    - "POST /auth/logout: deletes app_session row, clears cookie, audits auth.logout"
+    - "src/server/auth/session.ts: getCurrentUser(request) -> { accountId, displayName } | null; requireUser(request) throws HttpError 401"
+    - "src/server/auth/tokens.ts: getValidAccessToken(userId) refreshing when expiring within 60 s; ReauthRequiredError on refresh failure"
+    - "Audit events auth.login, auth.failure, auth.logout, auth.refresh_failed"
+  out:
+    - "CSRF and security headers (task 13)"
+    - "Login page UI (task 32) — routes only here"
+    - "Generic Atlassian REST client (task 14)"
+
+files:
+  "src/server/auth/atlassianOAuth.ts": "create; authorize URL, code exchange, refresh, accessible-resources, /me"
+  "src/server/auth/session.ts": "create"
+  "src/server/auth/tokens.ts": "create"
+  "src/server/http/errors.ts": "create; HttpError(status, message, code?) shared by later tasks"
+  "src/app/auth/login/route.ts": "create"
+  "src/app/auth/callback/route.ts": "create"
+  "src/app/auth/logout/route.ts": "create"
+  "tests/integration/auth.test.ts": "create; mock Atlassian endpoints with undici MockAgent"
+
+implementation_notes: |
+  Conventions: TS strict; server-only modules; DB via src/server/db/pool.ts (task 02); audit via
+  recordAudit() from src/server/audit/audit.ts (task 03); encryption via encryptSecret/decryptSecret from
+  src/server/crypto/secrets.ts (task 04); logger/correlation from src/server/observability (task 09);
+  config via getConfig(); integration tests `npm run test:integration`.
+  Endpoints: authorize https://auth.atlassian.com/authorize (audience=api.atlassian.com, response_type=code,
+  prompt=consent, scope = SR-1.3 list space-separated); token https://auth.atlassian.com/oauth/token;
+  resources https://api.atlassian.com/oauth/token/accessible-resources; identity https://api.atlassian.com/me.
+  Scopes (SR-1.3): read:me read:jira-work write:jira-work read:jira-user read:confluence-content.all
+  read:confluence-space.summary write:confluence-content write:confluence-file search:confluence offline_access.
+  Site binding (SR-1.4): if no resource id equals ATLASSIAN_CLOUD_ID -> audit auth.failure (details.reason='site_not_granted'),
+  redirect to /login?error=site.
+  Cookie 'tp_session': 32 random bytes base64url; DB stores SHA-256 (app_session.id_hash); httpOnly, Secure (except
+  NODE_ENV=development), SameSite=Lax, Path=/. Sliding idle expiry 8 h, absolute 7 days (see knowledge_gaps).
+  Refresh: Atlassian rotates refresh tokens — persist the new refresh token in the same transaction. Serialize
+  concurrent refreshes per user with pg_advisory_xact_lock(hashtext('refresh:'||userId)) and re-read after acquiring.
+  On refresh failure: delete oauth_token row, audit auth.refresh_failed, throw ReauthRequiredError (task 13 maps to 401
+  with code 'reauth_required'; working copy is untouched so SR-1.6 preservation holds).
+  Never log or audit tokens, codes or verifiers.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Successful callback stores encrypted (non-plaintext) tokens, creates app_user and app_session, sets tp_session cookie with HttpOnly and SameSite=Lax, and writes auth.login"
+    verify: "npm run test:integration -- auth"
+  - id: AC2
+    behavior: "Callback with mismatched state or a grant without ATLASSIAN_CLOUD_ID is rejected and writes auth.failure"
+    verify: "npm run test:integration -- auth"
+  - id: AC3
+    behavior: "getValidAccessToken refreshes an expiring token once under 10 concurrent calls and persists the rotated refresh token"
+    verify: "npm run test:integration -- auth"
+  - id: AC4
+    behavior: "Refresh failure deletes the token row, writes auth.refresh_failed and throws ReauthRequiredError"
+    verify: "npm run test:integration -- auth"
+  - id: AC5
+    behavior: "Logout deletes the session row and clears the cookie; the old cookie no longer authenticates"
+    verify: "npm run test:integration -- auth"
+  - id: AC6
+    behavior: "No source file reads a PAT or shared Atlassian credential env var; grep finds no token values in logger/audit calls"
+    verify: "grep -rn 'logger\\.' src/server/auth; inspect for token fields"
+
+risks_vulnerabilities:
+  - risk: "Login CSRF / code injection"
+    mitigation: "state + PKCE verifier bound to a short-lived httpOnly cookie"
+  - risk: "Refresh-token race invalidates rotated tokens"
+    mitigation: "Per-user advisory lock and re-read"
+
+knowledge_gaps:
+  - "Whether Atlassian 3LO accepts PKCE parameters is unverified (SR-1.1 requires PKCE). Fallback: send code_challenge anyway; if Atlassian rejects it, use confidential-client flow with state only and record the deviation in docs/adr/0016-oauth-pkce.md."
+  - "Session lifetime is not specified. Fallback: 8 h sliding idle, 7 d absolute."
+
+commit_message: |
+  feat(task-11): add Atlassian OAuth login, encrypted token storage and app sessions

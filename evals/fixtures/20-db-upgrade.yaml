@@ -1,0 +1,36 @@
+id: db-upgrade
+domain: infrastructure
+heldOut: true
+ticket:
+  key: OPS-990
+  summary: Upgrade the primary PostgreSQL cluster from 12 to 16
+  description: |
+    PostgreSQL 12 is out of support. Upgrade the primary cluster (2 TB, one primary, two replicas) to 16.
+  comments:
+    - author: Ines (DBA)
+      body: Several services still use an old ORM version.
+draft:
+  Problem Statement: PostgreSQL 12 no longer receives security fixes.
+  Scope: Upgrade the primary cluster and its replicas to PostgreSQL 16.
+  Functional Requirements: |
+    - All services keep working against PostgreSQL 16.
+  Technical Design: Logical replication to a new 16 cluster, then switch connection strings.
+  Risks: There might be some downtime.
+  Acceptance Criteria: |
+    - All services run against the PostgreSQL 16 cluster with no data loss.
+seededCriticalGaps:
+  - id: maintenance-window
+    section: Deployment Strategy
+    keywords: [maintenance window, downtime budget, switchover, cutover time]
+  - id: fallback-to-12
+    section: Rollback Strategy
+    keywords: [rollback, roll back, fall back, reverse replication]
+  - id: compatibility-testing
+    section: Testing Strategy
+    keywords: [compatib, ORM version, regression, test against, staging]
+vagueStatements:
+  - section: Risks
+    text: There might be some downtime.
+replies:
+  - The cluster serves 14 services.
+  - We haven't decided. Next?

@@ -1,0 +1,109 @@
+id: "02"
+title: "Database migration runner and full schema"
+phase: 1
+severity: critical
+complexity: critical
+model: opus
+effort: high
+eval_model: opus
+eval_effort: medium
+depends_on: ["01"]
+status: PENDING
+source: "SPEC_DOC.md §7.2, D-1, D-13, SR-1.5"
+
+objective: |
+  Provide a forward-only SQL migration runner, the initial PostgreSQL 16 schema for every table in
+  SPEC_DOC §7.2, and the shared DB access module. All persistence in later tasks uses these tables and
+  this module. Append-only enforcement of audit_record is task 03 (separate migration).
+
+scope:
+  in:
+    - "scripts/migrate.ts: applies db/migrations/*.sql in filename order, each in its own transaction together with its schema_migrations(filename text pk, applied_at timestamptz) insert; re-run is a no-op"
+    - "db/migrations/0001_init.sql creating: app_user, oauth_token, app_session, planning_session, source_snapshot, conversation_message, working_copy, pending_suggestion, revision, evaluation, issue, ai_question, publish_run, audit_record"
+    - "src/server/db/pool.ts exporting db (pg Pool), query<T>(), withTransaction(fn)"
+    - "tests/integration/setup.ts exporting resetDatabase() (drop/recreate schema public, run migrations)"
+    - "Point npm run migrate at scripts/migrate.ts"
+  out:
+    - "Audit append-only trigger and hash chain (task 03)"
+    - "Service or business logic"
+    - "ORM adoption — use node-postgres (pg) with plain SQL"
+
+files:
+  "scripts/migrate.ts": "create"
+  "db/migrations/0001_init.sql": "create"
+  "src/server/db/pool.ts": "create"
+  "tests/integration/setup.ts": "create"
+  "tests/integration/schema.test.ts": "create"
+  "package.json": "update migrate script"
+
+implementation_notes: |
+  Conventions: Node 22, TS strict; server modules in src/server/<domain>; config via getConfig() from
+  src/server/config.ts (task 01); integration tests need `docker compose -f docker-compose.dev.yml up -d`
+  then `npm run test:integration`.
+  Tables (SPEC_DOC §7.2; `user` renamed app_user because user is reserved). Use timestamptz everywhere, default now():
+    app_user(atlassian_account_id text pk, display_name text not null, email text, data_notice_ack_at timestamptz, created_at)
+    oauth_token(user_id text pk references app_user, enc_access_token bytea not null, enc_refresh_token bytea, expires_at timestamptz not null, scopes text[] not null, updated_at)
+    app_session(id_hash bytea pk, user_id text references app_user, created_at, last_seen_at, expires_at not null)
+    planning_session(id uuid pk default gen_random_uuid(), primary_ticket_key text not null, ticket_keys text[] not null,
+      facilitator_id text references app_user, status text not null default 'draft' check (status in ('draft','published','partially_published')),
+      clarification_ended bool not null default false, confluence_page_id text, confluence_page_version int,
+      lock_holder text, lock_expires_at timestamptz, created_at, updated_at); index on primary_ticket_key
+    source_snapshot(id bigserial pk, session_id uuid references planning_session on delete cascade,
+      kind text check (kind in ('jira_issue','confluence_page','attachment')), ref text not null, title text,
+      content_text text, ingest_status text check (ingest_status in ('ingested','listed','unavailable','truncated')),
+      detail jsonb not null default '{}', retrieved_at timestamptz not null)
+    conversation_message(session_id uuid references planning_session on delete cascade, seq int,
+      role text check (role in ('facilitator','ai','note','system')), content text not null, created_at; primary key(session_id, seq))
+    working_copy(session_id uuid pk references planning_session on delete cascade, sections jsonb not null, version int not null default 0, updated_at)
+    pending_suggestion(id uuid pk default gen_random_uuid(), session_id uuid references planning_session on delete cascade, section text not null,
+      patch jsonb not null, status text not null default 'pending' check (status in ('pending','accepted','rejected')), created_at, decided_at timestamptz)
+    revision(session_id uuid references planning_session, number int, sections jsonb not null,
+      trigger text check (trigger in ('save','restore','publish')), readiness_score int, published bool not null default false,
+      author_id text references app_user, restored_from int, created_at; primary key(session_id, number))
+    evaluation(id uuid pk default gen_random_uuid(), session_id uuid references planning_session on delete cascade, section_statuses jsonb not null, score int not null, created_at)
+    issue(id uuid pk default gen_random_uuid(), session_id uuid references planning_session on delete cascade,
+      severity text check (severity in ('critical','warning','informational')), section text not null, description text not null,
+      fingerprint text not null, status text not null default 'open' check (status in ('open','resolved','accepted-risk')),
+      created_at, resolved_at timestamptz, unique(session_id, fingerprint))
+    ai_question(id uuid pk default gen_random_uuid(), session_id uuid references planning_session on delete cascade, issue_id uuid references issue,
+      section text, text text not null, status text not null default 'open' check (status in ('open','answered','dismissed')), dismiss_reason text, created_at)
+    publish_run(id uuid pk default gen_random_uuid(), session_id uuid references planning_session, revision_number int not null,
+      override_justification text, steps jsonb not null, status text check (status in ('running','completed','failed')),
+      created_by text references app_user, created_at, updated_at)
+    audit_record(id bigserial pk, ts timestamptz not null, user_id text, user_display_name text, session_id uuid, ticket_ids text[],
+      action text not null, result text not null check (result in ('success','failure')), details jsonb not null default '{}',
+      correlation_id text, prev_hash bytea, hash bytea not null)   -- deliberately no foreign keys
+  Enable extension pgcrypto. working_copy.version is the optimistic-concurrency counter used by tasks 07/19.
+  withTransaction(fn: (client: PoolClient) => Promise<T>) does BEGIN/COMMIT, ROLLBACK on throw, always releases.
+  Revisions are immutable: add trigger rejecting UPDATE on revision except setting published from false to true.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "npm run migrate applies 0001_init.sql to an empty DB and a second run applies nothing"
+    verify: "npm run migrate && npm run migrate"
+  - id: AC2
+    behavior: "All 14 tables exist and check constraints reject invalid enums (e.g. planning_session.status='bogus')"
+    verify: "npm run test:integration -- schema"
+  - id: AC3
+    behavior: "withTransaction rolls back on thrown error and releases the client"
+    verify: "npm run test:integration -- schema"
+  - id: AC4
+    behavior: "Updating revision.sections fails; updating revision.published false->true succeeds"
+    verify: "npm run test:integration -- schema"
+  - id: AC5
+    behavior: "Lint and typecheck pass"
+    verify: "npm run lint && npm run typecheck"
+
+risks_vulnerabilities:
+  - risk: "Partially applied migration leaves schema inconsistent"
+    mitigation: "Each file plus its schema_migrations row commit in one transaction"
+  - risk: "Audit records lost through cascading deletes"
+    mitigation: "audit_record has no foreign keys"
+
+knowledge_gaps:
+  - "SPEC_DOC §7.2 has no table for the browser session required by SR-1.5. Fallback: app_session storing SHA-256 of an opaque random cookie value."
+  - "app_user.data_notice_ack_at supports the NFR-7 first-login notice but is not in §7.2. Fallback: include it."
+  - "Migration tool not specified. Fallback: the hand-rolled runner above (no extra dependency)."
+
+commit_message: |
+  feat(task-02): add migration runner and initial PostgreSQL schema

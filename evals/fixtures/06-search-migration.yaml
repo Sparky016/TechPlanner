@@ -1,0 +1,33 @@
+id: search-migration
+domain: search
+ticket:
+  key: SRCH-58
+  summary: Migrate product search from Solr to OpenSearch
+  description: |
+    Solr 6 is end-of-life. Move product search to a managed OpenSearch cluster with feature parity
+    (facets, typo tolerance, synonyms).
+  comments:
+    - author: Dev (Platform)
+      body: The OpenSearch cluster is already provisioned in staging.
+draft:
+  Problem Statement: Solr 6 is unsupported and blocks OS patching.
+  Scope: Replace Solr with OpenSearch for product search, same features.
+  Functional Requirements: |
+    - Facets, typo tolerance and synonyms behave as today.
+  Technical Design: New indexer writes to OpenSearch; search API switches client.
+  Testing Strategy: We will test the search thoroughly.
+  Acceptance Criteria: |
+    - Top 100 queries return comparable results on OpenSearch.
+seededCriticalGaps:
+  - id: cutover-plan
+    section: Migration Strategy
+    keywords: [cutover, dual write, backfill, reindex, shadow traffic]
+  - id: rollback-to-solr
+    section: Rollback Strategy
+    keywords: [rollback, roll back, switch back, revert]
+vagueStatements:
+  - section: Testing Strategy
+    text: We will test the search thoroughly.
+replies:
+  - The product catalogue is around 2 million documents.
+  - Haven't planned that part, what else should we cover?

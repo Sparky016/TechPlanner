@@ -1,0 +1,34 @@
+id: feature-flags
+domain: platform
+ticket:
+  key: PLAT-12
+  summary: Introduce a feature flag service for gradual rollouts
+  description: |
+    Teams ship big-bang releases. Introduce a feature flag service so features can be enabled per tenant
+    or percentage of users. Backend services and the web app must both read flags.
+  comments:
+    - author: Kai (SRE)
+      body: Must not add a network call to every request.
+draft:
+  Problem Statement: Releases are all-or-nothing and risky.
+  Scope: Flag service with per-tenant and percentage targeting for backend and web.
+  Functional Requirements: |
+    - Create, update and archive flags.
+    - Evaluate flags by tenant and percentage.
+  Technical Design: SDKs cache flag definitions locally and refresh periodically.
+  Performance: Flag evaluation should have minimal overhead.
+  Acceptance Criteria: |
+    - A flag at 10% enables the feature for roughly 10% of users.
+seededCriticalGaps:
+  - id: flag-service-outage
+    section: Error Handling
+    keywords: [outage, unavailable, default value, stale cache, fail open, fail closed]
+  - id: flag-change-audit
+    section: Logging
+    keywords: [audit, who changed, change history]
+vagueStatements:
+  - section: Performance
+    text: Flag evaluation should have minimal overhead.
+replies:
+  - Around 30 services will integrate in the first quarter.
+  - Not sure; please carry on with your other questions.

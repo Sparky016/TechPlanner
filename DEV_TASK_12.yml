@@ -1,0 +1,102 @@
+id: "12"
+title: "GitHub Copilot SDK/CLI LlmClient with locked-down tools (includes SDK API spike + ADR)"
+phase: 2
+severity: critical
+complexity: critical
+model: opus
+effort: high
+eval_model: opus
+eval_effort: medium
+depends_on: ["01", "09"]
+status: PENDING
+source: "SPEC_DOC.md §7.6 LLM-1–LLM-10, NFR-7, NFR-8, D-2, §12"
+
+objective: |
+  Provide the only path to a model: an LlmClient interface implemented on the GitHub Copilot SDK
+  (@github/copilot-sdk) driving the pinned Copilot CLI over JSON-RPC, with only application-defined tools
+  enabled, streaming events, model availability checks, crash restart and retry policy, plus a deterministic
+  fake for tests. First confirm the SDK's exact TypeScript APIs and record them in an ADR (SPEC_DOC §12).
+
+scope:
+  in:
+    - "Spike: read the @github/copilot-sdk TypeScript reference/source and write docs/adr/0015-copilot-sdk-api.md naming the exact APIs for: custom tool registration, disabling built-in tools / permission handler, streaming event types, session create/resume, model listing, image input support"
+    - "src/server/llm/types.ts: LlmClient, LlmToolDefinition, LlmEvent, LlmRunOptions"
+    - "src/server/llm/copilotClient.ts: CopilotLlmClient implementing LlmClient"
+    - "src/server/llm/fakeClient.ts: FakeLlmClient replaying scripted events (used by all non-eval tests)"
+    - "src/server/llm/index.ts: getLlmClient() returning Copilot client, or the fake when LLM_FAKE=1"
+    - "Health check 'copilot' registered via registerHealthCheck (task 09): CLI reachable, authenticated, FACILITATOR_MODEL and EVALUATOR_MODEL available"
+    - "Metrics via observeLlmRequest / llm_tokens_total / llm_errors_total (task 09)"
+  out:
+    - "Facilitator and evaluator prompts and tool semantics (tasks 23, 24)"
+    - "Installing the CLI in Docker (task 38) — document the required CLI version in the ADR"
+
+files:
+  "docs/adr/0015-copilot-sdk-api.md": "create"
+  "src/server/llm/types.ts": "create"
+  "src/server/llm/copilotClient.ts": "create"
+  "src/server/llm/fakeClient.ts": "create"
+  "src/server/llm/index.ts": "create"
+  "src/server/llm/copilotClient.test.ts": "create; unit tests with the SDK module mocked"
+  "src/server/llm/fakeClient.test.ts": "create"
+  "package.json": "add @github/copilot-sdk"
+  "src/server/config.ts": "update; optional LLM_FAKE flag"
+
+implementation_notes: |
+  Conventions: TS strict; server-only; Vitest colocated (npm test); config via getConfig() (COPILOT_GITHUB_TOKEN,
+  COPILOT_CLI_PATH, FACILITATOR_MODEL, EVALUATOR_MODEL); logger/metrics/health from src/server/observability (task 09).
+  Interface (tasks 23/24 depend on it verbatim):
+    interface LlmToolDefinition { name: string; description: string; parameters: JSONSchema7;
+      handler: (args: unknown) => Promise<string> }   // returns a short result message to the model
+    interface LlmRunOptions { kind: 'facilitator' | 'evaluator'; model: string; system: string;
+      messages: { role: 'user' | 'assistant'; content: string; images?: { mimeType: string; base64: string }[] }[];
+      tools: LlmToolDefinition[]; signal?: AbortSignal }
+    type LlmEvent = { type: 'text-delta'; text: string } | { type: 'tool-call'; name: string; args: unknown; result: string }
+      | { type: 'done'; usage?: { inputTokens?: number; outputTokens?: number } } | { type: 'error'; code: string; message: string; retryable: boolean }
+    interface LlmClient { run(opts: LlmRunOptions): AsyncIterable<LlmEvent>; listModels(): Promise<string[]>; readonly supportsImages: boolean }
+  Tool-call validation: before calling handler, validate args against parameters with ajv; on failure return
+  'Invalid arguments: <ajv errors>' to the model and do not call the handler (LLM-5).
+  Lock-down (LLM-6): disable all built-in CLI tools via SDK options AND install a permission handler that denies
+  any tool not in opts.tools; CLI working directory = fs.mkdtemp(os.tmpdir()/'tp-llm-') per process, no repo.
+  Conversation state: app DB is the source of truth; each run passes full messages (stateless sessions are acceptable;
+  use SDK resume only if the ADR shows it is reliable) (LLM-4).
+  Restart (LLM-9): on CLI process exit, restart up to 3 times within 5 minutes; afterwards health check 'copilot' fails and
+  run() yields { type:'error', code:'ai_unavailable', retryable:false }.
+  Retry (NFR-8): on rate-limit/quota/transient errors retry twice with 1 s and 4 s backoff before yielding error.
+  Never log COPILOT_GITHUB_TOKEN or full prompts at info level (debug only, redacted).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "docs/adr/0015-copilot-sdk-api.md exists and names concrete SDK identifiers for all six items in scope, with the pinned CLI version"
+    verify: "inspect docs/adr/0015-copilot-sdk-api.md"
+  - id: AC2
+    behavior: "Invalid tool arguments are rejected without invoking the handler and the model receives the validation message"
+    verify: "npm test -- copilotClient"
+  - id: AC3
+    behavior: "A permission request for any non-allow-listed tool (e.g. shell, file write) is denied"
+    verify: "npm test -- copilotClient"
+  - id: AC4
+    behavior: "Transient error retried twice then surfaced as error event; CLI crash beyond 3 restarts in 5 min marks 'copilot' health check failed"
+    verify: "npm test -- copilotClient"
+  - id: AC5
+    behavior: "FakeLlmClient replays scripted text-delta and tool-call events and invokes tool handlers"
+    verify: "npm test -- fakeClient"
+  - id: AC6
+    behavior: "No module outside src/server/llm imports @github/copilot-sdk"
+    verify: "grep -rn '@github/copilot-sdk' src | grep -v 'src/server/llm/'"
+
+risks_vulnerabilities:
+  - risk: "Agent gains filesystem/shell/network access on the host"
+    mitigation: "Built-in tools disabled + deny-by-default permission handler + empty temp working dir; tested"
+  - risk: "SDK API assumptions wrong, blocking tasks 23/24"
+    mitigation: "Spike + ADR first; interface above isolates the SDK"
+
+knowledge_gaps:
+  - "Exact TypeScript API for registering custom tools (LLM-5) — resolve in spike; record in ADR 0015."
+  - "Exact options for disabling built-in tools (LLM-6) — resolve in spike; if no disable option exists, rely on deny-all permission handler and note it."
+  - "Streaming event type names (LLM-7) — resolve in spike."
+  - "Session resume semantics (LLM-4) — resolve in spike; fallback stateless runs with full history."
+  - "Whether the SDK accepts image inputs (SR-2.4) — set supportsImages accordingly; if false, images are listed not ingested (task 21)."
+  - "A Copilot-entitled GitHub token is needed to run the real client; unit tests use mocks so this does not block the task."
+
+commit_message: |
+  feat(task-12): add Copilot SDK LlmClient with tool allow-list and fake client

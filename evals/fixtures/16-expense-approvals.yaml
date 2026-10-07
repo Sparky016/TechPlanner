@@ -1,0 +1,33 @@
+id: expense-approvals
+domain: fintech
+releaseAc3: true
+ticket:
+  key: EXP-17
+  summary: Manager approval for expense claims over a threshold
+  description: |
+    Expense claims above a threshold need manager approval before reimbursement. Managers approve or reject
+    from an email link or the app.
+  comments:
+    - author: Hugo (Finance)
+      body: Today finance chases managers manually.
+draft:
+  Problem Statement: Large expense claims are reimbursed without manager review.
+  Scope: Approval step for claims above a threshold, via email link or app.
+  Functional Requirements: |
+    - Claims above the threshold go to the submitter's manager.
+    - Manager approves or rejects with an optional comment.
+  Technical Design: A workflow state machine on the claim with an approval token per request.
+  Non-functional Requirements: The approval experience should be smooth.
+seededCriticalGaps:
+  - id: acceptance-criteria
+    section: Acceptance Criteria
+    keywords: [acceptance criteria, definition of done, how will we verify, done when]
+  - id: approver-unavailable
+    section: Error Handling
+    keywords: [delegate, out of office, escalat, no manager, unavailable]
+vagueStatements:
+  - section: Non-functional Requirements
+    text: The approval experience should be smooth.
+replies:
+  - The threshold is 500 EUR, configurable per company.
+  - I don't know, what else is missing?

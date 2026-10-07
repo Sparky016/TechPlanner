@@ -1,0 +1,35 @@
+id: mobile-push
+domain: mobile
+heldOut: true
+ticket:
+  key: MOB-215
+  summary: Push notifications for order status changes
+  description: |
+    Send push notifications to the iOS and Android apps when an order is shipped or delivered.
+    Users can opt out in app settings.
+  comments:
+    - author: Ana (Mobile)
+      body: We already have FCM set up for Android marketing messages.
+draft:
+  Problem Statement: Customers check the app repeatedly for order updates.
+  Scope: Push notifications on shipped and delivered order events, iOS and Android.
+  Functional Requirements: |
+    - Notify on shipped and delivered.
+    - Opt-out toggle in settings.
+  Technical Design: Order service emits events; a notifier service sends via FCM and APNs.
+  User Flows: The user gets a notification and it is user-friendly.
+  Acceptance Criteria: |
+    - A shipped order produces a push notification on a subscribed device.
+seededCriticalGaps:
+  - id: device-token-lifecycle
+    section: Data Model
+    keywords: [device token, token refresh, stale token, unregister, multiple devices]
+  - id: delivery-failure
+    section: Error Handling
+    keywords: [delivery fail, undeliver, apns error, fcm error, retry]
+vagueStatements:
+  - section: User Flows
+    text: The user gets a notification and it is user-friendly.
+replies:
+  - Tapping the notification should open the order details screen.
+  - No idea yet, please continue with what else you need.

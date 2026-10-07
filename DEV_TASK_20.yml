@@ -1,0 +1,70 @@
+id: "20"
+title: "Revisions API: save draft, history, compare and restore"
+phase: 2
+severity: high
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["07", "13", "15", "19"]
+status: PENDING
+source: "SPEC_DOC.md SR-10.1, SR-10.2, SR-11.1–SR-11.4, D-5"
+
+objective: |
+  Implement immutable Revisions: Save Draft snapshots the Working Copy, history lists revisions, compare
+  shows a section-aligned diff, and restore copies a revision into the Working Copy as a new revision. Exposes
+  createRevision() for publish.
+
+scope:
+  in:
+    - "src/server/revisions/revisions.ts: createRevision(client, { sessionId, trigger, authorId, published, restoredFrom? }), listRevisions, getRevision, compareRevisions, restoreRevision"
+    - "POST /api/sessions/:id/revisions (Save Draft), GET /api/sessions/:id/revisions, GET /api/sessions/:id/revisions/compare?a=&b=, POST /api/sessions/:id/revisions/:n/restore"
+  out:
+    - "History UI (task 36)"
+    - "Publishing (task 27)"
+
+files:
+  "src/server/revisions/revisions.ts": "create"
+  "src/app/api/sessions/[id]/revisions/route.ts": "create"
+  "src/app/api/sessions/[id]/revisions/compare/route.ts": "create"
+  "src/app/api/sessions/[id]/revisions/[n]/restore/route.ts": "create"
+  "tests/integration/revisions.test.ts": "create"
+
+implementation_notes: |
+  Conventions: TS strict; withApiHandler (task 13); requireSessionAccess/requireLock (task 15); getWorkingCopy and
+  replaceAllSections from src/server/spec/workingCopyRepo.ts (task 07); flushEditAudits from src/server/spec/editAudit.ts
+  (task 19); recordAudit (task 03); SECTION_NAMES (task 05); 'diff' npm diffLines; tests `npm run test:integration`.
+  Numbering: inside the transaction SELECT ... FROM planning_session WHERE id=$1 FOR UPDATE, then number = coalesce(max,0)+1.
+  readiness_score = score of latest evaluation row for the session or null.
+  List item: { number, createdAt, author: {accountId, displayName}, trigger, readinessScore, published } newest first (SR-11.2).
+  Compare: for each section in SECTION_NAMES order return { section, changed, hunks: diffLines(a,b) } (SR-11.3).
+  Restore: replaceAllSections with revision n's sections, then createRevision(trigger 'restore', restoredFrom n), audit
+  revision.restored { from: n, newNumber } (SR-11.4). No rows are deleted or modified.
+  Save Draft: flushEditAudits, createRevision(trigger 'save'), audit draft.saved { number }. Never touches Jira/Confluence (SR-10.2).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Save Draft creates revision n+1 with the working copy's sections and writes draft.saved"
+    verify: "npm run test:integration -- revisions"
+  - id: AC2
+    behavior: "Concurrent Save Draft calls produce distinct sequential numbers"
+    verify: "npm run test:integration -- revisions"
+  - id: AC3
+    behavior: "Compare returns changed=true only for sections that differ, in SECTION_NAMES order"
+    verify: "npm run test:integration -- revisions"
+  - id: AC4
+    behavior: "Restoring revision 1 sets the working copy to revision 1's content and creates a new revision with trigger restore and restored_from 1; earlier revisions unchanged"
+    verify: "npm run test:integration -- revisions"
+  - id: AC5
+    behavior: "No Atlassian HTTP call occurs during Save Draft"
+    verify: "npm run test:integration -- revisions (MockAgent disallows net connect)"
+
+risks_vulnerabilities:
+  - risk: "Revision number collisions"
+    mitigation: "Row lock on planning_session plus primary key (session_id, number)"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-20): add revisions API with compare and non-destructive restore
