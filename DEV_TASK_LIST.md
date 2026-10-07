@@ -101,7 +101,7 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 
 - [x] **Stakeholder ratification of D-1, D-2, D-8 and D-9** (blocks: none; annotates 01, 12, 30, 31). All four decisions ratified on 2026-10-06.
 - [ ] **Copilot SDK API names.** These are the APIs for tool registration, built-in tool disable, streaming events, session resume and image input. Task 12 resolves them in a spike and records them in ADR 0015. (blocks: none; resolved inside 12)
-- [ ] **Copilot-entitled `COPILOT_GITHUB_TOKEN`** for real-model runs. (blocks: 40 AC2/AC4, 41 real-LLM mode, 38 AC3 with the real model)
+- [x] **Copilot-entitled `COPILOT_GITHUB_TOKEN`** for real-model runs. User reports adding it to `.env` on 2026-10-07; authentication not yet smoke-tested. (blocks: 40 AC2/AC4, 41 real-LLM mode, 38 AC3 with the real model)
 - [ ] **Atlassian OAuth app** (client id/secret, redirect URI, cloud id) and a **Confluence space/parent page** for manual verification. Automated tests use mocks. (blocks: none)
 - [ ] **Confluence link vs. step independence.** SR-13.2 says all steps are independent, but the Jira description block and comment embed the Confluence link. Fallback: those two steps wait for the Confluence step. (task 27)
 - [ ] **`APP_BASE_URL`** added as a required env var (task 01) though not in SPEC_DOC §7.5 — confirm. (blocks: none)

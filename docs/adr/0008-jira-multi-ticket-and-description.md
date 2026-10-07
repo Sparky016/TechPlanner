@@ -1,6 +1,6 @@
 # ADR-0008: Jira Multi-Ticket and Description Block Handling
 
-Status: Proposed
+Status: Accepted
 
 Date: 2026-10-05
 

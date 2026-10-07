@@ -1,6 +1,6 @@
 # ADR-0002: LLM Integration
 
-Status: Proposed
+Status: Accepted
 
 Date: 2026-10-05
 
