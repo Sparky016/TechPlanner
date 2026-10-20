@@ -111,19 +111,83 @@ export function upsertSpecBlock(
   descriptionAdf: AdfDoc | null,
   nodes: AdfNode[],
 ): AdfDoc {
+  return upsertDelimitedBlock(
+    descriptionAdf,
+    nodes,
+    SPEC_BLOCK_START,
+    SPEC_BLOCK_END,
+  );
+}
+
+/** upsertSpecBlock for any pair of marker paragraphs. */
+export function upsertDelimitedBlock(
+  descriptionAdf: AdfDoc | null,
+  nodes: AdfNode[],
+  startMarker: string,
+  endMarker: string,
+): AdfDoc {
   if (descriptionAdf === null)
     return { type: "doc", version: 1, content: [...nodes] };
   const existing = Array.isArray(descriptionAdf.content)
     ? descriptionAdf.content
     : [];
-  const start = existing.findIndex((n) => isMarker(n, SPEC_BLOCK_START));
+  const start = existing.findIndex((n) => isMarker(n, startMarker));
   const end =
     start === -1
       ? -1
-      : existing.findIndex((n, i) => i > start && isMarker(n, SPEC_BLOCK_END));
+      : existing.findIndex((n, i) => i > start && isMarker(n, endMarker));
   const content =
     start !== -1 && end !== -1
       ? [...existing.slice(0, start), ...nodes, ...existing.slice(end + 1)]
       : [...existing, ...nodes];
   return { ...descriptionAdf, content };
+}
+
+export const CODE_BLOCK_START =
+  "TECH-PLANNER-CODE-START — Code investigation (managed by Tech Planner; edits here are overwritten)";
+export const CODE_BLOCK_END = "TECH-PLANNER-CODE-END";
+
+export interface CodeFindingsInfo {
+  summary: string;
+  references: { repository: string; path: string; url: string | null }[];
+  author: string;
+  updatedAt: Date;
+}
+
+/** The delimited code investigation block (facilitator tool update_ticket_code_findings). */
+export function buildCodeFindingsNodes(info: CodeFindingsInfo): AdfNode[] {
+  const paragraphs = info.summary
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p !== "")
+    .map((p) => paragraph(text(p)));
+  const refs: AdfNode[] =
+    info.references.length === 0
+      ? []
+      : [
+          paragraph(text("Code references:")),
+          {
+            type: "bulletList",
+            content: info.references.map((r) => {
+              const label = `${r.repository}:${r.path}`;
+              return {
+                type: "listItem",
+                content: [
+                  paragraph(r.url ? linkText(label, r.url) : text(label)),
+                ],
+              };
+            }),
+          },
+        ];
+  return [
+    paragraph(text(CODE_BLOCK_START)),
+    ...paragraphs,
+    ...refs,
+    paragraph(
+      text(
+        `Updated by Tech Planner for ${info.author} at ${info.updatedAt.toISOString()}`,
+      ),
+    ),
+    paragraph(text(CODE_BLOCK_END)),
+  ];
 }

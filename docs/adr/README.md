@@ -20,6 +20,7 @@ This directory contains Architecture Decision Records (ADRs) documenting major t
 | 0012 | Authorization Delegation to Atlassian | Accepted | SPEC_DOC.md §9 D-12 |
 | 0013 | Immutable Audit Enforcement | Accepted | SPEC_DOC.md §9 D-13 |
 | 0014 | Monitoring and Accessibility | Accepted | SPEC_DOC.md §9 D-14 |
+| 0016 | Azure DevOps Code Investigation | Proposed | User request (2026-10-20) |
 
 ## Status Reference
 

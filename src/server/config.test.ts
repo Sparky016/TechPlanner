@@ -81,6 +81,18 @@ describe('getConfig', () => {
     expect(getConfig().DOWNSTREAM_WEBHOOK_SECRET).toBe('shh');
   });
 
+  it('requires the Azure DevOps settings together and parses the repository allow-list', () => {
+    process.env.AZURE_DEVOPS_ORG_URL = 'https://dev.azure.com/acme/';
+    expect(() => getConfig()).toThrow(/AZURE_DEVOPS_PROJECT, AZURE_DEVOPS_PAT/);
+    process.env.AZURE_DEVOPS_PROJECT = 'Platform';
+    process.env.AZURE_DEVOPS_PAT = 'pat-secret';
+    process.env.AZURE_DEVOPS_REPOSITORIES = 'api, web ,,';
+    resetConfigForTests();
+    const cfg = getConfig();
+    expect(cfg.AZURE_DEVOPS_ORG_URL).toBe('https://dev.azure.com/acme');
+    expect(cfg.AZURE_DEVOPS_REPOSITORIES).toEqual(['api', 'web']);
+  });
+
   it('parses JSON overrides and section weights, rejecting bad ones', () => {
     process.env.CONFLUENCE_PROJECT_OVERRIDES = JSON.stringify({ ABC: { spaceKey: 'S', parentPageId: '1' } });
     process.env.SECTION_WEIGHTS = JSON.stringify({ Goals: 2 });
