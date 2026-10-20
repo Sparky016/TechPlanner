@@ -78,6 +78,17 @@ Use `http://localhost:3000` for local development.
 - `DOWNSTREAM_WEBHOOK_URL` and `DOWNSTREAM_WEBHOOK_SECRET` go together. The secret is required when the URL is set.
 - `METRICS_TOKEN` enables `GET /metrics` with a bearer token. Leave it empty to return 404.
 
+**Azure DevOps code investigation (optional: `AZURE_DEVOPS_ORG_URL`, `AZURE_DEVOPS_PROJECT`, `AZURE_DEVOPS_PAT`)**
+
+When set, the facilitator agent can search and read code in your Azure DevOps repositories to ground the specification in the existing code, and can write a summary of its findings to a session ticket's Jira description. See [ADR-0016](docs/adr/0016-azure-devops-code-investigation.md).
+
+1. Set `AZURE_DEVOPS_ORG_URL` to the organisation URL, e.g. `https://dev.azure.com/<org>`, and `AZURE_DEVOPS_PROJECT` to the project name.
+2. In Azure DevOps, open **User settings → Personal access tokens** and create a token for that organisation with the **Code (Read)** scope only. Put it in `AZURE_DEVOPS_PAT`. Use a service account for shared environments.
+3. Optional: limit the agent to some repositories with `AZURE_DEVOPS_REPOSITORIES=api,web`.
+4. Code search uses the Azure DevOps [Code Search extension](https://marketplace.visualstudio.com/items?itemName=ms.vss-code-search), which must be installed in the organisation. Without it, `search_code` returns an error and the agent can still browse and read files.
+
+The agent gets these tools: `list_repositories`, `search_code`, `list_code_directory`, `read_code_file` (at most 25 repository reads per turn, files cut at 40,000 characters) and `update_ticket_code_findings`. The last one upserts a block between `TECH-PLANNER-CODE-START` and `TECH-PLANNER-CODE-END` in the ticket description, as the signed-in facilitator, only when the facilitator asks for or agrees to it. The rest of the description is never changed, and each update is audited as `jira.updated` (`step: code_findings`).
+
 ### Verify Jira access with Atlassian CLI
 
 Install the official [Atlassian CLI](https://developer.atlassian.com/cloud/acli/guides/install-windows/) first. On Windows, authenticate interactively in PowerShell:

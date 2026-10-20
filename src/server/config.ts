@@ -60,6 +60,16 @@ const envSchema = z
     SECTION_WEIGHTS: optional(jsonString(sectionWeights)),
     APP_BASE_URL: z.string().url(),
     METRICS_TOKEN: optional(z.string().min(1)),
+    // Optional Azure DevOps code investigation; the three below go together. The PAT needs Code (Read) only.
+    AZURE_DEVOPS_ORG_URL: optional(z.string().url().transform((s) => s.replace(/\/+$/, ''))),
+    AZURE_DEVOPS_PROJECT: optional(z.string().min(1)),
+    AZURE_DEVOPS_PAT: optional(z.string().min(1)),
+    // Optional comma-separated allow-list of repository names; unset means every repository in the project.
+    AZURE_DEVOPS_REPOSITORIES: optional(
+      z.string().transform((s) => s.split(',').map((r) => r.trim()).filter((r) => r !== '')),
+    ),
+    // Optional Code Search host override; unset derives it from AZURE_DEVOPS_ORG_URL.
+    AZURE_DEVOPS_SEARCH_URL: optional(z.string().url().transform((s) => s.replace(/\/+$/, ''))),
   })
   .superRefine((env, ctx) => {
     if (env.DOWNSTREAM_WEBHOOK_URL && !env.DOWNSTREAM_WEBHOOK_SECRET) {
@@ -68,6 +78,14 @@ const envSchema = z
         path: ['DOWNSTREAM_WEBHOOK_SECRET'],
         message: 'required when DOWNSTREAM_WEBHOOK_URL is set',
       });
+    }
+    const ado = ['AZURE_DEVOPS_ORG_URL', 'AZURE_DEVOPS_PROJECT', 'AZURE_DEVOPS_PAT'] as const;
+    if (ado.some((k) => env[k] !== undefined)) {
+      for (const k of ado) {
+        if (env[k] === undefined) {
+          ctx.addIssue({ code: 'custom', path: [k], message: 'required when Azure DevOps is configured' });
+        }
+      }
     }
   });
 

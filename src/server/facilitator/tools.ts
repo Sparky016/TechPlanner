@@ -1,11 +1,15 @@
+import type { CurrentUser } from '@/server/auth/session';
+import { isAzureDevOpsEnabled } from '@/server/azureDevOps/client';
 import { query } from '@/server/db/pool';
 import type { LlmToolDefinition } from '@/server/llm';
 import { applyAiPatch } from '@/server/spec/workingCopyRepo';
 import { SECTION_NAMES, type SectionName } from '../../lib/spec/sections';
+import { createCodeTools } from './codeTools';
 
 // Server-only: never import from src/lib or client components.
 // Facilitator tools (LLM-5). Arguments are schema-validated by executeToolCall before a handler runs; the only
-// effects are section patches via applyAiPatch (D-5) and AI questions (LLM-6).
+// effects are section patches via applyAiPatch (D-5) and AI questions (LLM-6), plus the code investigation tools
+// in codeTools.ts when Azure DevOps is configured (ADR-0016).
 
 export const PATCH_CONTENT_MAX = 20_000;
 export const QUESTION_TEXT_MAX = 500;
@@ -38,12 +42,34 @@ export interface FacilitatorTurnState {
   clarificationEnded: boolean;
   patches: PatchOutcome[];
   questionIds: string[];
+  /** The acting facilitator; Jira writes run as this user. Absent in unit tests that only exercise patches. */
+  user?: CurrentUser;
+  ticketKeys: string[];
+  /** Repository reads so far this turn (MAX_CODE_CALLS_PER_TURN). */
+  codeCalls: number;
+  ticketUpdates: { ticketKey: string; result: 'success' | 'failure' }[];
   /** Events produced by tool handlers, drained by the turn runner after every LLM event. */
   pending: FacilitatorEvent[];
 }
 
-export function createTurnState(sessionId: string, aiReadAt: Date, clarificationEnded: boolean): FacilitatorTurnState {
-  return { sessionId, aiReadAt, clarificationEnded, patches: [], questionIds: [], pending: [] };
+export function createTurnState(
+  sessionId: string,
+  aiReadAt: Date,
+  clarificationEnded: boolean,
+  opts: { user?: CurrentUser; ticketKeys?: string[] } = {},
+): FacilitatorTurnState {
+  return {
+    sessionId,
+    aiReadAt,
+    clarificationEnded,
+    patches: [],
+    questionIds: [],
+    user: opts.user,
+    ticketKeys: opts.ticketKeys ?? [],
+    codeCalls: 0,
+    ticketUpdates: [],
+    pending: [],
+  };
 }
 
 interface ApplySectionPatchArgs {
@@ -155,5 +181,6 @@ export function createFacilitatorTools(state: FacilitatorTurnState): LlmToolDefi
     applySectionPatchTool(state),
     ...(state.clarificationEnded ? [] : [askQuestionTool(state)]),
     markQuestionAnsweredTool(state),
+    ...(isAzureDevOpsEnabled() ? createCodeTools(state) : []),
   ];
 }

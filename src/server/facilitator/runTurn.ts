@@ -1,5 +1,6 @@
 import { recordAudit } from '@/server/audit/audit';
 import type { CurrentUser } from '@/server/auth/session';
+import { isAzureDevOpsEnabled } from '@/server/azureDevOps/client';
 import { getConfig } from '@/server/config';
 import { withTransaction } from '@/server/db/pool';
 import { getLlmClient } from '@/server/llm';
@@ -86,8 +87,12 @@ export async function* runFacilitatorTurn(input: FacilitatorTurnInput): AsyncGen
   await markAiRead(sessionId, turnStart);
 
   const ctx = await loadSessionContext(sessionId);
-  const state = createTurnState(sessionId, turnStart, ctx.clarificationEnded);
-  const system = buildFacilitatorSystemPrompt({ gatePasses: ctx.gatePasses, clarificationEnded: ctx.clarificationEnded });
+  const state = createTurnState(sessionId, turnStart, ctx.clarificationEnded, { user, ticketKeys: ctx.ticketKeys });
+  const system = buildFacilitatorSystemPrompt({
+    gatePasses: ctx.gatePasses,
+    clarificationEnded: ctx.clarificationEnded,
+    codeInvestigation: isAzureDevOpsEnabled(),
+  });
   const messages = buildFacilitatorMessages(ctx, { supportsImages: getLlmClient().supportsImages });
 
   let outcome = yield* runModel(state, system, messages, signal);
@@ -119,6 +124,8 @@ export async function* runFacilitatorTurn(input: FacilitatorTurnInput): AsyncGen
           messageSeq: seq,
           patches: state.patches,
           questions: state.questionIds,
+          ...(state.codeCalls > 0 ? { codeCalls: state.codeCalls } : {}),
+          ...(state.ticketUpdates.length > 0 ? { ticketUpdates: state.ticketUpdates } : {}),
           model: getConfig().FACILITATOR_MODEL,
           clarificationEnded: ctx.clarificationEnded,
           ...(outcome.error ? { errorCode: outcome.error.code } : {}),
