@@ -45,6 +45,8 @@ export interface FacilitatorTurnState {
   /** The acting facilitator; Jira writes run as this user. Absent in unit tests that only exercise patches. */
   user?: CurrentUser;
   ticketKeys: string[];
+  /** The session's Azure DevOps repository; search_code defaults to it. Null searches every allowed repository. */
+  codeRepository: string | null;
   /** Repository reads so far this turn (MAX_CODE_CALLS_PER_TURN). */
   codeCalls: number;
   ticketUpdates: { ticketKey: string; result: 'success' | 'failure' }[];
@@ -56,7 +58,7 @@ export function createTurnState(
   sessionId: string,
   aiReadAt: Date,
   clarificationEnded: boolean,
-  opts: { user?: CurrentUser; ticketKeys?: string[] } = {},
+  opts: { user?: CurrentUser; ticketKeys?: string[]; codeRepository?: string | null } = {},
 ): FacilitatorTurnState {
   return {
     sessionId,
@@ -66,6 +68,7 @@ export function createTurnState(
     questionIds: [],
     user: opts.user,
     ticketKeys: opts.ticketKeys ?? [],
+    codeRepository: opts.codeRepository ?? null,
     codeCalls: 0,
     ticketUpdates: [],
     pending: [],

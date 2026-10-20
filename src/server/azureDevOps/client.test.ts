@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AzureDevOpsError,
+  checkConnection,
+  findRepository,
   fileWebUrl,
   getFileContent,
   listDirectory,
@@ -133,6 +135,40 @@ describe('azure devops client', () => {
       code: 'ado_404',
       message: 'TF401174: The item could not be found',
     });
+  });
+
+  it('reports a working connection with the available repositories', async () => {
+    fetchMock.mockResolvedValueOnce(json(200, { value: [{ id: '1', name: 'api', defaultBranch: 'refs/heads/main' }] }));
+    expect(await checkConnection()).toEqual({
+      configured: true,
+      organization: 'https://dev.azure.com/acme',
+      project: 'Platform Team',
+      connected: true,
+      repositories: [{ id: '1', name: 'api', defaultBranch: 'main', webUrl: null }],
+    });
+  });
+
+  it('reports a failed connection without leaking the PAT', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('<html>sign in</html>', { status: 203 }));
+    const status = await checkConnection();
+    expect(status).toMatchObject({
+      configured: true,
+      connected: false,
+      error: { code: 'ado_unauthorized', message: 'Azure DevOps rejected the configured credential' },
+    });
+    expect(JSON.stringify(status)).not.toContain('pat-secret');
+  });
+
+  it('reports an unconfigured connection without calling Azure DevOps', async () => {
+    delete config.AZURE_DEVOPS_PAT;
+    expect(await checkConnection()).toEqual({ configured: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('finds a repository by name, case-insensitively', async () => {
+    fetchMock.mockImplementation(async () => json(200, { value: [{ id: '1', name: 'Api' }] }));
+    expect(await findRepository('api')).toMatchObject({ name: 'Api' });
+    expect(await findRepository('web')).toBeNull();
   });
 
   it('refuses parent-directory paths', () => {

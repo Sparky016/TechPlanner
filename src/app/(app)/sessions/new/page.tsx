@@ -2,6 +2,9 @@
 
 import { type FormEvent, useState } from 'react';
 import { ErrorBanner } from '@/components/ErrorBanner';
+import { AzureDevOpsStatus } from '@/components/azureDevOps/AzureDevOpsStatus';
+import { RepositorySelect } from '@/components/azureDevOps/RepositorySelect';
+import { useAzureDevOps } from '@/components/azureDevOps/useAzureDevOps';
 import { ApiError, apiFetch } from '@/lib/api/client';
 
 function parseKeys(input: string): string[] {
@@ -18,6 +21,8 @@ function bodyField(err: ApiError, field: string): string[] {
 
 export default function NewSessionPage() {
   const [input, setInput] = useState('');
+  const [codeRepository, setCodeRepository] = useState<string | null>(null);
+  const ado = useAzureDevOps();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [duplicateIds, setDuplicateIds] = useState<string[] | null>(null);
@@ -28,7 +33,11 @@ export default function NewSessionPage() {
     try {
       const { session } = await apiFetch<{ session: { id: string } }>('/api/sessions', {
         method: 'POST',
-        json: { ticketKeys: parseKeys(input), ...(confirmDuplicate ? { confirmDuplicate: true } : {}) },
+        json: {
+          ticketKeys: parseKeys(input),
+          ...(codeRepository ? { codeRepository } : {}),
+          ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
+        },
       });
       window.location.assign(`/sessions/${session.id}`);
     } catch (err) {
@@ -73,6 +82,24 @@ export default function NewSessionPage() {
             className="mt-1 w-full rounded border border-slate-300 px-2 py-1"
             placeholder="ABC-123, ABC-124"
           />
+        </div>
+        <div className="space-y-1">
+          <label htmlFor="code-repository" className="block text-sm font-medium">
+            Code repository (optional)
+          </label>
+          <p id="code-repository-help" className="text-xs text-slate-600">
+            The Azure DevOps repository the AI facilitator investigates for these tickets. You can change it later.
+          </p>
+          <AzureDevOpsStatus ado={ado} />
+          {ado.status?.configured ? (
+            <RepositorySelect
+              id="code-repository"
+              status={ado.status}
+              value={codeRepository}
+              onChange={setCodeRepository}
+              disabled={busy || ado.checking}
+            />
+          ) : null}
         </div>
         <button
           type="submit"

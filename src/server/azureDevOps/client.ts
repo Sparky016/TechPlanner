@@ -189,6 +189,41 @@ interface RawRepository {
   isDisabled?: boolean;
 }
 
+export type AdoConnectionStatus =
+  | { configured: false }
+  | {
+      configured: true;
+      organization: string;
+      project: string;
+      connected: true;
+      repositories: AdoRepository[];
+    }
+  | {
+      configured: true;
+      organization: string;
+      project: string;
+      connected: false;
+      error: { code: string; message: string };
+    };
+
+/** Lists the repositories to prove the PAT, organization and project work; Azure DevOps failures become a status. */
+export async function checkConnection(): Promise<AdoConnectionStatus> {
+  if (!isAzureDevOpsEnabled()) return { configured: false };
+  const { orgUrl, project } = settings();
+  try {
+    return { configured: true, organization: orgUrl, project, connected: true, repositories: await listRepositories() };
+  } catch (err) {
+    if (!(err instanceof AzureDevOpsError)) throw err;
+    return { configured: true, organization: orgUrl, project, connected: false, error: { code: err.code, message: err.message } };
+  }
+}
+
+/** The repository's canonical name when it exists and is allowed, else null. */
+export async function findRepository(name: string): Promise<AdoRepository | null> {
+  const repos = await listRepositories();
+  return repos.find((r) => r.name.toLowerCase() === name.toLowerCase()) ?? null;
+}
+
 export async function listRepositories(): Promise<AdoRepository[]> {
   const { allowList } = settings();
   const body = await adoJson<{ value?: RawRepository[] }>(projectBase(), '/git/repositories');

@@ -33,7 +33,13 @@ vi.mock('@/server/azureDevOps/client', async (importOriginal) => {
 
 import { AtlassianApiError, atlassianJson } from '@/server/atlassian/client';
 import { recordAudit } from '@/server/audit/audit';
-import { AzureDevOpsError, getFileContent, isAzureDevOpsEnabled, searchCode } from '@/server/azureDevOps/client';
+import {
+  AzureDevOpsError,
+  getFileContent,
+  isAzureDevOpsEnabled,
+  listRepositories,
+  searchCode,
+} from '@/server/azureDevOps/client';
 import { executeToolCall } from '@/server/llm/toolCall';
 import { CODE_BLOCK_END, CODE_BLOCK_START } from '@/server/publish/adf';
 import { CODE_CALL_LIMIT_MESSAGE, MAX_CODE_CALLS_PER_TURN } from './codeTools';
@@ -44,7 +50,7 @@ import { UNTRUSTED_TAG } from './untrusted';
 const SESSION = '00000000-0000-4000-8000-000000000001';
 const USER = { accountId: 'acc-1', displayName: 'Ada' };
 
-function tools(opts: { user?: typeof USER } = { user: USER }) {
+function tools(opts: { user?: typeof USER; codeRepository?: string | null } = { user: USER }) {
   const state = createTurnState(SESSION, new Date(), false, { ...opts, ticketKeys: ['ENG-1'] });
   const byName = (name: string) => createFacilitatorTools(state).find((t) => t.name === name)!;
   return { state, byName, names: createFacilitatorTools(state).map((t) => t.name) };
@@ -95,6 +101,27 @@ describe('code investigation tools', () => {
     vi.mocked(searchCode).mockRejectedValue(new AzureDevOpsError(403, 'ado_repository_not_allowed', 'Repository x is not available'));
     const out = await executeToolCall(tools().byName('search_code'), { text: 'Refund', repository: 'x' });
     expect(out).toEqual({ ok: true, result: 'Azure DevOps error (ado_repository_not_allowed): Repository x is not available' });
+  });
+
+  it("searches the session's repository by default, and another one when asked", async () => {
+    vi.mocked(searchCode).mockResolvedValue({ total: 0, hits: [] });
+    const { byName } = tools({ user: USER, codeRepository: 'payments-api' });
+    expect(byName('search_code').description).toContain('payments-api');
+    await executeToolCall(byName('search_code'), { text: 'Refund' });
+    expect(searchCode).toHaveBeenLastCalledWith('Refund', { repository: 'payments-api' });
+    await executeToolCall(byName('search_code'), { text: 'Refund', repository: 'web' });
+    expect(searchCode).toHaveBeenLastCalledWith('Refund', { repository: 'web' });
+    await executeToolCall(tools().byName('search_code'), { text: 'Refund' });
+    expect(searchCode).toHaveBeenLastCalledWith('Refund', { repository: undefined });
+  });
+
+  it("marks the session's repository in list_repositories", async () => {
+    vi.mocked(listRepositories).mockResolvedValue([
+      { id: '1', name: 'payments-api', defaultBranch: 'main', webUrl: null },
+      { id: '2', name: 'web', defaultBranch: 'main', webUrl: null },
+    ]);
+    const out = await executeToolCall(tools({ user: USER, codeRepository: 'payments-api' }).byName('list_repositories'), {});
+    expect(out.result).toBe('- payments-api (default branch: main) [selected for this session]\n- web (default branch: main)');
   });
 
   it('caps repository reads per turn', async () => {
@@ -153,5 +180,10 @@ describe('code investigation tools', () => {
     const base = { gatePasses: false, clarificationEnded: false };
     expect(buildFacilitatorSystemPrompt(base)).not.toContain('Code investigation');
     expect(buildFacilitatorSystemPrompt({ ...base, codeInvestigation: true })).toContain('update_ticket_code_findings');
+    expect(buildFacilitatorSystemPrompt({ ...base, codeInvestigation: true })).toContain('Session repository: none selected');
+    expect(buildFacilitatorSystemPrompt({ ...base, codeInvestigation: true, codeRepository: 'payments-api' })).toContain(
+      'selected the Azure DevOps repository "payments-api"',
+    );
+    expect(buildFacilitatorSystemPrompt({ ...base, codeRepository: 'payments-api' })).not.toContain('payments-api');
   });
 });
