@@ -2,12 +2,14 @@ import { resetDatabase } from './setup';
 import { randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { GET as adoStatusGET } from '@/app/api/azure-devops/status/route';
+import { PUT as codeRepositoryPUT } from '@/app/api/sessions/[id]/code-repository/route';
 import { GET as detailGET } from '@/app/api/sessions/[id]/route';
 import { POST as refreshPOST } from '@/app/api/sessions/[id]/refresh-sources/route';
 import { GET as listGET, POST as createPOST } from '@/app/api/sessions/route';
 import { resetSiteUrlCache } from '@/server/atlassian/jira';
 import { SESSION_COOKIE, createSession as createAppSession } from '@/server/auth/session';
-import { getConfig } from '@/server/config';
+import { getConfig, resetConfigForTests } from '@/server/config';
 import { encryptSecret } from '@/server/crypto/secrets';
 import { db, query, withTransaction } from '@/server/db/pool';
 import { CSRF_COOKIE, CSRF_HEADER, issueCsrfToken } from '@/server/http/csrf';
@@ -88,8 +90,13 @@ function jiraResponse(path: string): Response {
   });
 }
 
+const ADO_REPOS_URL = 'https://dev.azure.com/acme/Platform/_apis/git/repositories?api-version=7.1';
+
 async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
   const url = String(input instanceof Request ? input.url : input);
+  if (url === ADO_REPOS_URL) {
+    return json({ value: [{ id: 'r1', name: 'payments-api', defaultBranch: 'refs/heads/main' }, { id: 'r2', name: 'web' }] });
+  }
   if (url === RESOURCES_URL) return json([{ id: CLOUD_ID, url: SITE }]);
   if (url.startsWith(JIRA_PREFIX)) return jiraResponse(url.slice(JIRA_PREFIX.length).split('?')[0]);
   if (url.startsWith(CONFLUENCE_PREFIX)) {
@@ -124,14 +131,14 @@ async function cookieFor(userId: string): Promise<string> {
 }
 
 function request(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PUT',
   path: string,
   opts: { cookie?: string; csrf?: boolean; body?: unknown; tabId?: string } = {},
 ): NextRequest {
   const cookies: string[] = [];
   const headers: Record<string, string> = {};
   if (opts.cookie) cookies.push(`${SESSION_COOKIE}=${opts.cookie}`);
-  if (opts.csrf ?? method === 'POST') {
+  if (opts.csrf ?? method !== 'GET') {
     headers.origin = getConfig().APP_BASE_URL;
     cookies.push(`${CSRF_COOKIE}=${CSRF}`);
     headers[CSRF_HEADER] = CSRF;
@@ -483,5 +490,81 @@ describe('AC6: authentication and CSRF', () => {
         )
       ).status,
     ).toBe(401);
+  });
+});
+
+describe('Azure DevOps code repository (ADR-0016)', () => {
+  const ADO_ENV = { AZURE_DEVOPS_ORG_URL: 'https://dev.azure.com/acme', AZURE_DEVOPS_PROJECT: 'Platform', AZURE_DEVOPS_PAT: 'pat' };
+
+  beforeEach(() => {
+    Object.assign(process.env, ADO_ENV);
+    resetConfigForTests();
+  });
+
+  afterEach(() => {
+    for (const k of Object.keys(ADO_ENV)) delete process.env[k];
+    resetConfigForTests();
+  });
+
+  async function setRepository(id: string, tabId: string, repository: string | null): Promise<Response> {
+    return codeRepositoryPUT(
+      request('PUT', `/api/sessions/${id}/code-repository`, { cookie: alice, tabId, body: { repository } }),
+      routeArg(id),
+    );
+  }
+
+  it('reports the live connection with the available repositories', async () => {
+    const res = await adoStatusGET(request('GET', '/api/azure-devops/status', { cookie: alice }), noParams);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      configured: true,
+      connected: true,
+      project: 'Platform',
+      repositories: [{ name: 'payments-api', defaultBranch: 'main' }, { name: 'web' }],
+    });
+  });
+
+  it('reports not configured without Azure DevOps settings', async () => {
+    for (const k of Object.keys(ADO_ENV)) delete process.env[k];
+    resetConfigForTests();
+    const res = await adoStatusGET(request('GET', '/api/azure-devops/status', { cookie: alice }), noParams);
+    expect(await res.json()).toMatchObject({ configured: false });
+  });
+
+  it('creates a session with a repository and stores its canonical name', async () => {
+    issues['REPO-1'] = { summary: 'x', description: 'x' };
+    const res = await create(alice, { ticketKeys: ['REPO-1'], codeRepository: 'PAYMENTS-API' });
+    expect(res.status).toBe(201);
+    const { session } = (await res.json()) as { session: { id: string; codeRepository: string } };
+    expect(session.codeRepository).toBe('payments-api');
+    const detail = await detailGET(request('GET', `/api/sessions/${session.id}`, { cookie: alice }), routeArg(session.id));
+    expect(((await detail.json()) as { session: { codeRepository: string } }).session.codeRepository).toBe('payments-api');
+  });
+
+  it('rejects an unknown repository at creation', async () => {
+    issues['REPO-2'] = { summary: 'x', description: 'x' };
+    const res = await create(alice, { ticketKeys: ['REPO-2'], codeRepository: 'nope' });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('unknown_repository');
+  });
+
+  it('sets and clears the repository under the session lock', async () => {
+    issues['REPO-3'] = { summary: 'x', description: 'x' };
+    const id = await createOk(alice, ['REPO-3']);
+    const tab = randomUUID();
+    await acquireOrRenewLock(id, tab);
+
+    expect((await setRepository(id, randomUUID(), 'web')).status).toBe(423);
+    const set = await setRepository(id, tab, 'web');
+    expect(set.status).toBe(200);
+    expect(await set.json()).toEqual({ codeRepository: 'web' });
+    expect((await setRepository(id, tab, 'nope')).status).toBe(400);
+    const cleared = await setRepository(id, tab, null);
+    expect(await cleared.json()).toEqual({ codeRepository: null });
+    const [row] = await query<{ code_repository: string | null }>(
+      'SELECT code_repository FROM planning_session WHERE id = $1',
+      [id],
+    );
+    expect(row.code_repository).toBeNull();
   });
 });

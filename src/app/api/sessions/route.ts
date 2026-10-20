@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { query } from '@/server/db/pool';
 import { withApiHandler } from '@/server/http/handler';
+import { CODE_REPOSITORY_MAX, resolveCodeRepository } from '@/server/sessions/codeRepository';
 import { MAX_TICKET_KEYS, createSession } from '@/server/sessions/createSession';
 import { type PlanningSessionDbRow, type PlanningSessionRow, mapSessionRow } from '@/server/sessions/repo';
 
@@ -12,6 +13,8 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
 const createBody = z.object({
   ticketKeys: z.array(z.string()).min(1).max(MAX_TICKET_KEYS),
   confirmDuplicate: z.boolean().optional(),
+  // Optional Azure DevOps repository for code investigation (ADR-0016).
+  codeRepository: z.string().trim().min(1).max(CODE_REPOSITORY_MAX).nullable().optional(),
 });
 
 const listQuery = z.object({
@@ -26,6 +29,7 @@ function sessionSummary(s: PlanningSessionRow) {
     ticketKeys: s.ticketKeys,
     status: s.status,
     clarificationEnded: s.clarificationEnded,
+    codeRepository: s.codeRepository,
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
   };
@@ -53,10 +57,13 @@ export const GET = withApiHandler({}, async (ctx) => {
   return Response.json({ sessions: rows.map((r) => sessionSummary(mapSessionRow(r))) }, { headers: NO_STORE });
 });
 
-// Creates a session. 400 invalid keys, 422 unreadable tickets, 409 existing session for the primary ticket.
+// Creates a session. 400 invalid keys or repository, 422 unreadable tickets, 409 existing session for the primary ticket.
 export const POST = withApiHandler({}, async (ctx) => {
   const body = createBody.parse(await ctx.req.json().catch(() => null));
+  // Validated before the Jira reads so a bad pick fails fast.
+  const codeRepository = await resolveCodeRepository(body.codeRepository ?? null);
   const result = await createSession(ctx.user!, body.ticketKeys, {
+    codeRepository,
     confirmDuplicate: body.confirmDuplicate,
     correlationId: ctx.correlationId,
   });

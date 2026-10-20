@@ -84,7 +84,13 @@ function listRepositoriesTool(state: FacilitatorTurnState): LlmToolDefinition {
       return adoResult(async () => {
         const repos = await listRepositories();
         if (repos.length === 0) return 'No repositories are available.';
-        return repos.map((r) => `- ${r.name} (default branch: ${r.defaultBranch ?? 'none'})`).join('\n');
+        const selected = state.codeRepository?.toLowerCase();
+        return repos
+          .map(
+            (r) =>
+              `- ${r.name} (default branch: ${r.defaultBranch ?? 'none'})${r.name.toLowerCase() === selected ? ' [selected for this session]' : ''}`,
+          )
+          .join('\n');
       });
     },
   };
@@ -93,7 +99,7 @@ function listRepositoriesTool(state: FacilitatorTurnState): LlmToolDefinition {
 function searchCodeTool(state: FacilitatorTurnState): LlmToolDefinition {
   return {
     name: 'search_code',
-    description: `Search code in the Azure DevOps repositories (Azure DevOps Code Search syntax, e.g. "RefundService", "ext:cs Refund", "path:/src/api"). Optionally limit to one repository. Returns up to ${MAX_SEARCH_RESULTS} matching files; read them with read_code_file.`,
+    description: `Search code in the Azure DevOps repositories (Azure DevOps Code Search syntax, e.g. "RefundService", "ext:cs Refund", "path:/src/api"). Optionally limit to one repository${state.codeRepository ? `; omit repository to search the session's repository (${state.codeRepository})` : ''}. Returns up to ${MAX_SEARCH_RESULTS} matching files; read them with read_code_file.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -101,7 +107,7 @@ function searchCodeTool(state: FacilitatorTurnState): LlmToolDefinition {
       properties: { text: { type: 'string', minLength: 1, maxLength: SEARCH_TEXT_MAX }, repository: repositoryProp },
     },
     handler: async (args) => {
-      const { text, repository } = args as SearchCodeArgs;
+      const { text, repository = state.codeRepository ?? undefined } = args as SearchCodeArgs;
       const limited = overBudget(state);
       if (limited) return limited;
       return adoResult(async () => {

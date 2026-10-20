@@ -37,6 +37,7 @@ export const GET = withApiHandler<{ id: string }>({}, async (ctx) => {
         facilitatorId: session.facilitatorId,
         status: session.status,
         clarificationEnded: session.clarificationEnded,
+        codeRepository: session.codeRepository,
         confluencePageId: session.confluencePageId,
         confluencePageVersion: session.confluencePageVersion,
         createdAt: session.createdAt.toISOString(),

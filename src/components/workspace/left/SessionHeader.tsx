@@ -4,10 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
+import { CodeRepositoryPicker } from '@/components/workspace/left/CodeRepositoryPicker';
 import { SourcesList } from '@/components/workspace/left/SourcesList';
 import { ApiError, apiFetch } from '@/lib/api/client';
 
-// Session tickets and sources, with Refresh sources (SR-2.6).
+// Session tickets, code repository (ADR-0016) and sources, with Refresh sources (SR-2.6).
 export function SessionHeader() {
   const { sessionId, detail, detailError, reloadDetail, readOnly, publish } = useWorkspace();
   const [busy, setBusy] = useState(false);
@@ -50,6 +51,7 @@ export function SessionHeader() {
           <p className="text-sm text-slate-600">Also: {session.ticketKeys.slice(1).join(', ')}</p>
         ) : null}
       </div>
+      <CodeRepositoryPicker />
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium">Sources</h2>
         <button

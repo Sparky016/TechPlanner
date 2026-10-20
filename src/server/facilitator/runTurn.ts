@@ -87,11 +87,16 @@ export async function* runFacilitatorTurn(input: FacilitatorTurnInput): AsyncGen
   await markAiRead(sessionId, turnStart);
 
   const ctx = await loadSessionContext(sessionId);
-  const state = createTurnState(sessionId, turnStart, ctx.clarificationEnded, { user, ticketKeys: ctx.ticketKeys });
+  const state = createTurnState(sessionId, turnStart, ctx.clarificationEnded, {
+    user,
+    ticketKeys: ctx.ticketKeys,
+    codeRepository: ctx.codeRepository,
+  });
   const system = buildFacilitatorSystemPrompt({
     gatePasses: ctx.gatePasses,
     clarificationEnded: ctx.clarificationEnded,
     codeInvestigation: isAzureDevOpsEnabled(),
+    codeRepository: ctx.codeRepository,
   });
   const messages = buildFacilitatorMessages(ctx, { supportsImages: getLlmClient().supportsImages });
 
@@ -124,7 +129,7 @@ export async function* runFacilitatorTurn(input: FacilitatorTurnInput): AsyncGen
           messageSeq: seq,
           patches: state.patches,
           questions: state.questionIds,
-          ...(state.codeCalls > 0 ? { codeCalls: state.codeCalls } : {}),
+          ...(state.codeCalls > 0 ? { codeCalls: state.codeCalls, codeRepository: state.codeRepository } : {}),
           ...(state.ticketUpdates.length > 0 ? { ticketUpdates: state.ticketUpdates } : {}),
           model: getConfig().FACILITATOR_MODEL,
           clarificationEnded: ctx.clarificationEnded,

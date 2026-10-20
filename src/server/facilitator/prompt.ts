@@ -16,6 +16,8 @@ export interface FacilitatorPromptOptions {
   clarificationEnded: boolean;
   /** Azure DevOps code investigation tools are offered (ADR-0016). */
   codeInvestigation?: boolean;
+  /** The repository the facilitator picked for this session, if any. */
+  codeRepository?: string | null;
 }
 
 const BASE_PROMPT = `You are the AI technical facilitator in a live planning session. Act as a senior software architect working with the facilitator to turn Jira tickets into an implementation-ready technical specification.
@@ -58,12 +60,18 @@ const CODE_INVESTIGATION_TEXT = `Code investigation: you can read the team's Azu
 - Keep investigation focused: a turn has a limited number of repository reads.
 - update_ticket_code_findings writes a summary of your findings, with file references, to a ticket's Jira description. Call it only when the facilitator asks for the ticket to be updated or agrees to your offer to do so; the summary must be concise, factual and self-contained.`;
 
+function codeRepositoryText(repository: string | null): string {
+  return repository
+    ? `Session repository: the facilitator selected the Azure DevOps repository "${repository}" for this session. The code for these tickets lives there: investigate it first and pass repository "${repository}" to read_code_file and list_code_directory (search_code searches it by default). Look in another repository only when the code clearly lives elsewhere, and say so.`
+    : 'Session repository: none selected. Call list_repositories to find the right repository; if it is unclear which one holds the code, ask the facilitator to select it in the session panel.';
+}
+
 export function buildFacilitatorSystemPrompt(opts: FacilitatorPromptOptions): string {
   return [
     BASE_PROMPT,
     gateText(opts.gatePasses),
     ...(opts.clarificationEnded ? [CLARIFICATION_ENDED_TEXT] : []),
-    ...(opts.codeInvestigation ? [CODE_INVESTIGATION_TEXT] : []),
+    ...(opts.codeInvestigation ? [CODE_INVESTIGATION_TEXT, codeRepositoryText(opts.codeRepository ?? null)] : []),
   ].join('\n\n');
 }
 
