@@ -242,11 +242,12 @@ interface RawSearchResult {
   }[];
 }
 
-/** Azure DevOps Code Search across the allowed repositories, or one of them. */
-export async function searchCode(text: string, opts: { repository?: string; top?: number } = {}): Promise<AdoSearchResult> {
+/** Azure DevOps Code Search across the allowed repositories, or some of them. */
+export async function searchCode(text: string, opts: { repositories?: string[]; top?: number } = {}): Promise<AdoSearchResult> {
   const { searchUrl, project, allowList } = settings();
-  if (opts.repository !== undefined) assertAllowed(opts.repository);
-  const repositories = opts.repository !== undefined ? [opts.repository] : allowList;
+  const picked = opts.repositories && opts.repositories.length > 0 ? opts.repositories : undefined;
+  picked?.forEach(assertAllowed);
+  const repositories = picked ?? allowList;
   const top = Math.min(opts.top ?? MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
   const body = await adoJson<RawSearchResult>(
     `${searchUrl}/${encodeURIComponent(project)}/_apis`,

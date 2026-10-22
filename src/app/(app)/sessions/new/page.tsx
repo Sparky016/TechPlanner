@@ -21,7 +21,7 @@ function bodyField(err: ApiError, field: string): string[] {
 
 export default function NewSessionPage() {
   const [input, setInput] = useState('');
-  const [codeRepository, setCodeRepository] = useState<string | null>(null);
+  const [codeRepositories, setCodeRepositories] = useState<string[]>([]);
   const ado = useAzureDevOps();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -35,7 +35,7 @@ export default function NewSessionPage() {
         method: 'POST',
         json: {
           ticketKeys: parseKeys(input),
-          ...(codeRepository ? { codeRepository } : {}),
+          ...(codeRepositories.length > 0 ? { codeRepositories } : {}),
           ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
         },
       });
@@ -84,19 +84,22 @@ export default function NewSessionPage() {
           />
         </div>
         <div className="space-y-1">
-          <label htmlFor="code-repository" className="block text-sm font-medium">
-            Code repository (optional)
-          </label>
-          <p id="code-repository-help" className="text-xs text-slate-600">
-            The Azure DevOps repository the AI facilitator investigates for these tickets. You can change it later.
+          <p aria-hidden="true" className="block text-sm font-medium">
+            Code repositories (optional)
+          </p>
+          <p id="code-repositories-help" className="text-xs text-slate-600">
+            The Azure DevOps repositories the AI facilitator investigates for these tickets. Select every repository the
+            change touches. You can change them later.
           </p>
           <AzureDevOpsStatus ado={ado} />
           {ado.status?.configured ? (
             <RepositorySelect
-              id="code-repository"
+              id="code-repositories"
+              label="Code repositories (optional)"
+              describedBy="code-repositories-help"
               status={ado.status}
-              value={codeRepository}
-              onChange={setCodeRepository}
+              value={codeRepositories}
+              onChange={setCodeRepositories}
               disabled={busy || ado.checking}
             />
           ) : null}

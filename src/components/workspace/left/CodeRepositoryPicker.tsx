@@ -8,27 +8,27 @@ import { useAzureDevOps } from '@/components/azureDevOps/useAzureDevOps';
 import { useWorkspace } from '@/components/workspace/WorkspaceProvider';
 import { ApiError, apiFetch } from '@/lib/api/client';
 
-// Azure DevOps connection status and the session's code repository (ADR-0016): the facilitator agent investigates
-// the selected repository first.
+// Azure DevOps connection status and the session's code repositories (ADR-0016): the facilitator agent investigates
+// the selected repositories first.
 export function CodeRepositoryPicker() {
   const { sessionId, detail, reloadDetail, readOnly } = useWorkspace();
   const ado = useAzureDevOps();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   if (!detail) return null;
-  const current = detail.session.codeRepository;
+  const current = detail.session.codeRepositories;
 
-  async function save(repository: string | null) {
+  async function save(repositories: string[]) {
     setSaving(true);
     setError(null);
     try {
       await apiFetch(`/api/sessions/${encodeURIComponent(sessionId)}/code-repository`, {
         method: 'PUT',
-        json: { repository },
+        json: { repositories },
       });
       await reloadDetail();
     } catch (err) {
-      setError(err instanceof ApiError ? err : new ApiError('Could not save the repository', 0, undefined, undefined, null));
+      setError(err instanceof ApiError ? err : new ApiError('Could not save the repositories', 0, undefined, undefined, null));
     } finally {
       setSaving(false);
     }
@@ -36,16 +36,14 @@ export function CodeRepositoryPicker() {
 
   const configured = ado.status?.configured === true;
   return (
-    <section aria-label="Code repository" className="space-y-1">
-      <h2 className="text-sm font-medium">Code repository</h2>
+    <section aria-label="Code repositories" className="space-y-1">
+      <h2 className="text-sm font-medium">Code repositories</h2>
       <AzureDevOpsStatus ado={ado} />
-      {configured || current !== null ? (
+      {configured || current.length > 0 ? (
         <>
-          <label htmlFor="code-repository" className="sr-only">
-            Azure DevOps repository
-          </label>
           <RepositorySelect
-            id="code-repository"
+            id="code-repositories"
+            label="Azure DevOps repositories"
             status={ado.status}
             value={current}
             onChange={(r) => void save(r)}

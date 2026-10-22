@@ -50,7 +50,7 @@ import { UNTRUSTED_TAG } from './untrusted';
 const SESSION = '00000000-0000-4000-8000-000000000001';
 const USER = { accountId: 'acc-1', displayName: 'Ada' };
 
-function tools(opts: { user?: typeof USER; codeRepository?: string | null } = { user: USER }) {
+function tools(opts: { user?: typeof USER; codeRepositories?: string[] } = { user: USER }) {
   const state = createTurnState(SESSION, new Date(), false, { ...opts, ticketKeys: ['ENG-1'] });
   const byName = (name: string) => createFacilitatorTools(state).find((t) => t.name === name)!;
   return { state, byName, names: createFacilitatorTools(state).map((t) => t.name) };
@@ -103,25 +103,31 @@ describe('code investigation tools', () => {
     expect(out).toEqual({ ok: true, result: 'Azure DevOps error (ado_repository_not_allowed): Repository x is not available' });
   });
 
-  it("searches the session's repository by default, and another one when asked", async () => {
+  it("searches the session's repositories by default, and another one when asked", async () => {
     vi.mocked(searchCode).mockResolvedValue({ total: 0, hits: [] });
-    const { byName } = tools({ user: USER, codeRepository: 'payments-api' });
-    expect(byName('search_code').description).toContain('payments-api');
+    const { byName } = tools({ user: USER, codeRepositories: ['payments-api', 'ledger'] });
+    expect(byName('search_code').description).toContain('payments-api, ledger');
     await executeToolCall(byName('search_code'), { text: 'Refund' });
-    expect(searchCode).toHaveBeenLastCalledWith('Refund', { repository: 'payments-api' });
+    expect(searchCode).toHaveBeenLastCalledWith('Refund', { repositories: ['payments-api', 'ledger'] });
     await executeToolCall(byName('search_code'), { text: 'Refund', repository: 'web' });
-    expect(searchCode).toHaveBeenLastCalledWith('Refund', { repository: 'web' });
+    expect(searchCode).toHaveBeenLastCalledWith('Refund', { repositories: ['web'] });
     await executeToolCall(tools().byName('search_code'), { text: 'Refund' });
-    expect(searchCode).toHaveBeenLastCalledWith('Refund', { repository: undefined });
+    expect(searchCode).toHaveBeenLastCalledWith('Refund', { repositories: [] });
   });
 
-  it("marks the session's repository in list_repositories", async () => {
+  it("marks the session's repositories in list_repositories", async () => {
     vi.mocked(listRepositories).mockResolvedValue([
       { id: '1', name: 'payments-api', defaultBranch: 'main', webUrl: null },
       { id: '2', name: 'web', defaultBranch: 'main', webUrl: null },
+      { id: '3', name: 'ledger', defaultBranch: 'main', webUrl: null },
     ]);
-    const out = await executeToolCall(tools({ user: USER, codeRepository: 'payments-api' }).byName('list_repositories'), {});
-    expect(out.result).toBe('- payments-api (default branch: main) [selected for this session]\n- web (default branch: main)');
+    const out = await executeToolCall(
+      tools({ user: USER, codeRepositories: ['payments-api', 'LEDGER'] }).byName('list_repositories'),
+      {},
+    );
+    expect(out.result).toBe(
+      '- payments-api (default branch: main) [selected for this session]\n- web (default branch: main)\n- ledger (default branch: main) [selected for this session]',
+    );
   });
 
   it('caps repository reads per turn', async () => {
@@ -180,10 +186,13 @@ describe('code investigation tools', () => {
     const base = { gatePasses: false, clarificationEnded: false };
     expect(buildFacilitatorSystemPrompt(base)).not.toContain('Code investigation');
     expect(buildFacilitatorSystemPrompt({ ...base, codeInvestigation: true })).toContain('update_ticket_code_findings');
-    expect(buildFacilitatorSystemPrompt({ ...base, codeInvestigation: true })).toContain('Session repository: none selected');
-    expect(buildFacilitatorSystemPrompt({ ...base, codeInvestigation: true, codeRepository: 'payments-api' })).toContain(
+    expect(buildFacilitatorSystemPrompt({ ...base, codeInvestigation: true })).toContain('Session repositories: none selected');
+    expect(buildFacilitatorSystemPrompt({ ...base, codeInvestigation: true, codeRepositories: ['payments-api'] })).toContain(
       'selected the Azure DevOps repository "payments-api"',
     );
-    expect(buildFacilitatorSystemPrompt({ ...base, codeRepository: 'payments-api' })).not.toContain('payments-api');
+    expect(
+      buildFacilitatorSystemPrompt({ ...base, codeInvestigation: true, codeRepositories: ['payments-api', 'ledger'] }),
+    ).toContain('selected the Azure DevOps repositories "payments-api", "ledger"');
+    expect(buildFacilitatorSystemPrompt({ ...base, codeRepositories: ['payments-api'] })).not.toContain('payments-api');
   });
 });

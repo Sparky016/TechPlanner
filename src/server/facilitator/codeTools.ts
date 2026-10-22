@@ -84,11 +84,11 @@ function listRepositoriesTool(state: FacilitatorTurnState): LlmToolDefinition {
       return adoResult(async () => {
         const repos = await listRepositories();
         if (repos.length === 0) return 'No repositories are available.';
-        const selected = state.codeRepository?.toLowerCase();
+        const selected = new Set(state.codeRepositories.map((r) => r.toLowerCase()));
         return repos
           .map(
             (r) =>
-              `- ${r.name} (default branch: ${r.defaultBranch ?? 'none'})${r.name.toLowerCase() === selected ? ' [selected for this session]' : ''}`,
+              `- ${r.name} (default branch: ${r.defaultBranch ?? 'none'})${selected.has(r.name.toLowerCase()) ? ' [selected for this session]' : ''}`,
           )
           .join('\n');
       });
@@ -99,7 +99,7 @@ function listRepositoriesTool(state: FacilitatorTurnState): LlmToolDefinition {
 function searchCodeTool(state: FacilitatorTurnState): LlmToolDefinition {
   return {
     name: 'search_code',
-    description: `Search code in the Azure DevOps repositories (Azure DevOps Code Search syntax, e.g. "RefundService", "ext:cs Refund", "path:/src/api"). Optionally limit to one repository${state.codeRepository ? `; omit repository to search the session's repository (${state.codeRepository})` : ''}. Returns up to ${MAX_SEARCH_RESULTS} matching files; read them with read_code_file.`,
+    description: `Search code in the Azure DevOps repositories (Azure DevOps Code Search syntax, e.g. "RefundService", "ext:cs Refund", "path:/src/api"). Optionally limit to one repository${state.codeRepositories.length > 0 ? `; omit repository to search the session's ${state.codeRepositories.length === 1 ? 'repository' : 'repositories'} (${state.codeRepositories.join(', ')})` : ''}. Returns up to ${MAX_SEARCH_RESULTS} matching files; read them with read_code_file.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -107,11 +107,12 @@ function searchCodeTool(state: FacilitatorTurnState): LlmToolDefinition {
       properties: { text: { type: 'string', minLength: 1, maxLength: SEARCH_TEXT_MAX }, repository: repositoryProp },
     },
     handler: async (args) => {
-      const { text, repository = state.codeRepository ?? undefined } = args as SearchCodeArgs;
+      const { text, repository } = args as SearchCodeArgs;
+      const repositories = repository !== undefined ? [repository] : state.codeRepositories;
       const limited = overBudget(state);
       if (limited) return limited;
       return adoResult(async () => {
-        const { total, hits } = await searchCode(text, { repository });
+        const { total, hits } = await searchCode(text, { repositories });
         if (hits.length === 0) return `No matches for "${text}".`;
         const lines = hits.map(
           (h) => `- ${h.repository}:${h.path}${h.branch ? ` @${h.branch}` : ''} (${h.matchCount} match${h.matchCount === 1 ? '' : 'es'})`,

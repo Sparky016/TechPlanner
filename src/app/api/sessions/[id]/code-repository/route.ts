@@ -2,24 +2,26 @@ import { z } from 'zod';
 import { query } from '@/server/db/pool';
 import { withApiHandler } from '@/server/http/handler';
 import { requireSessionAccess } from '@/server/sessions/access';
-import { CODE_REPOSITORY_MAX, resolveCodeRepository } from '@/server/sessions/codeRepository';
+import { CODE_REPOSITORY_MAX, MAX_CODE_REPOSITORIES, resolveCodeRepositories } from '@/server/sessions/codeRepository';
 import { readTabId, requireLock } from '@/server/sessions/lock';
 
 // Server-only route; never cache.
 export const dynamic = 'force-dynamic';
 
-const body = z.object({ repository: z.string().trim().min(1).max(CODE_REPOSITORY_MAX).nullable() });
+const body = z.object({
+  repositories: z.array(z.string().trim().min(1).max(CODE_REPOSITORY_MAX)).max(MAX_CODE_REPOSITORIES),
+});
 
-// Sets (or clears, with null) the Azure DevOps repository the facilitator agent investigates (ADR-0016).
-// No dedicated audit action exists (SR-12.1); the next ai.suggestion records the repository in use.
+// Replaces (or clears, with []) the Azure DevOps repositories the facilitator agent investigates (ADR-0016).
+// No dedicated audit action exists (SR-12.1); the next ai.suggestion records the repositories in use.
 export const PUT = withApiHandler<{ id: string }>({}, async (ctx) => {
   const session = await requireSessionAccess(ctx, ctx.params.id);
   await requireLock(session.id, readTabId(ctx.req));
-  const { repository } = body.parse(await ctx.req.json().catch(() => null));
-  const codeRepository = await resolveCodeRepository(repository);
-  await query('UPDATE planning_session SET code_repository = $2, updated_at = now() WHERE id = $1', [
+  const { repositories } = body.parse(await ctx.req.json().catch(() => null));
+  const codeRepositories = await resolveCodeRepositories(repositories);
+  await query('UPDATE planning_session SET code_repositories = $2, updated_at = now() WHERE id = $1', [
     session.id,
-    codeRepository,
+    codeRepositories,
   ]);
-  return Response.json({ codeRepository }, { headers: { 'Cache-Control': 'no-store' } });
+  return Response.json({ codeRepositories }, { headers: { 'Cache-Control': 'no-store' } });
 });

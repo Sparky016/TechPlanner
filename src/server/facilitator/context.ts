@@ -36,8 +36,8 @@ export interface ContextQuestion {
 export interface SessionContext {
   sessionId: string;
   ticketKeys: string[];
-  /** Azure DevOps repository the facilitator picked for code investigation (ADR-0016), or null. */
-  codeRepository: string | null;
+  /** Azure DevOps repositories the facilitator picked for code investigation (ADR-0016); may be empty. */
+  codeRepositories: string[];
   /** The current source batch (SR-2.6). */
   snapshots: SourceSnapshot[];
   /** Notes (SR-3.6): included as context, never treated as a reply. */
@@ -102,7 +102,7 @@ export async function loadSessionContext(sessionId: string): Promise<SessionCont
   return {
     sessionId,
     ticketKeys: session.ticketKeys,
-    codeRepository: session.codeRepository,
+    codeRepositories: session.codeRepositories,
     snapshots,
     notes: all.filter((m) => m.role === 'note'),
     messages: all.filter((m) => m.role !== 'note'),

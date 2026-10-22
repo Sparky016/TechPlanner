@@ -90,13 +90,13 @@ export async function* runFacilitatorTurn(input: FacilitatorTurnInput): AsyncGen
   const state = createTurnState(sessionId, turnStart, ctx.clarificationEnded, {
     user,
     ticketKeys: ctx.ticketKeys,
-    codeRepository: ctx.codeRepository,
+    codeRepositories: ctx.codeRepositories,
   });
   const system = buildFacilitatorSystemPrompt({
     gatePasses: ctx.gatePasses,
     clarificationEnded: ctx.clarificationEnded,
     codeInvestigation: isAzureDevOpsEnabled(),
-    codeRepository: ctx.codeRepository,
+    codeRepositories: ctx.codeRepositories,
   });
   const messages = buildFacilitatorMessages(ctx, { supportsImages: getLlmClient().supportsImages });
 
@@ -129,7 +129,7 @@ export async function* runFacilitatorTurn(input: FacilitatorTurnInput): AsyncGen
           messageSeq: seq,
           patches: state.patches,
           questions: state.questionIds,
-          ...(state.codeCalls > 0 ? { codeCalls: state.codeCalls, codeRepository: state.codeRepository } : {}),
+          ...(state.codeCalls > 0 ? { codeCalls: state.codeCalls, codeRepositories: state.codeRepositories } : {}),
           ...(state.ticketUpdates.length > 0 ? { ticketUpdates: state.ticketUpdates } : {}),
           model: getConfig().FACILITATOR_MODEL,
           clarificationEnded: ctx.clarificationEnded,

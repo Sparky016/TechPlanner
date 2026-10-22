@@ -45,7 +45,7 @@ describe('new session page', () => {
     expect(screen.getByRole('alert').textContent).toContain('c2');
   });
 
-  it('shows the Azure DevOps connection and sends the selected repository', async () => {
+  it('shows the Azure DevOps connection and sends the selected repositories', async () => {
     const assign = vi.fn();
     vi.stubGlobal('location', { ...window.location, assign });
     mockApi(() => ({ session: { id: 's-1' } }), {
@@ -53,18 +53,26 @@ describe('new session page', () => {
       organization: 'https://dev.azure.com/acme',
       project: 'Platform',
       connected: true,
-      repositories: [{ id: '1', name: 'payments-api', defaultBranch: 'main', webUrl: null }],
+      repositories: [
+        { id: '1', name: 'payments-api', defaultBranch: 'main', webUrl: null },
+        { id: '2', name: 'web', defaultBranch: null, webUrl: null },
+        { id: '3', name: 'ledger', defaultBranch: 'main', webUrl: null },
+      ],
       checkedAt: '2026-10-20T00:00:00Z',
     });
     render(<NewSessionPage />);
-    expect((await screen.findByText(/Connected to Azure DevOps \(Platform\): 1 repository available/)).textContent).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Code repository (optional)'), { target: { value: 'payments-api' } });
+    expect((await screen.findByText(/Connected to Azure DevOps \(Platform\): 3 repositories available/)).textContent).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Code repositories (optional)' })).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('ledger (main)'));
+    fireEvent.click(screen.getByLabelText('payments-api (main)'));
+    fireEvent.click(screen.getByLabelText('web'));
+    fireEvent.click(screen.getByLabelText('web'));
     fireEvent.change(screen.getByLabelText('Jira ticket keys'), { target: { value: 'ABC-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create session' }));
     await waitFor(() => expect(assign).toHaveBeenCalledWith('/sessions/s-1'));
     expect(apiFetch).toHaveBeenCalledWith('/api/sessions', {
       method: 'POST',
-      json: { ticketKeys: ['ABC-1'], codeRepository: 'payments-api' },
+      json: { ticketKeys: ['ABC-1'], codeRepositories: ['ledger', 'payments-api'] },
     });
     vi.unstubAllGlobals();
   });

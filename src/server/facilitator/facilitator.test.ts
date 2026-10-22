@@ -48,7 +48,7 @@ function context(overrides: Partial<SessionContext> = {}): SessionContext {
   return {
     sessionId: SESSION,
     ticketKeys: ['ENG-1'],
-    codeRepository: null,
+    codeRepositories: [],
     snapshots: [],
     notes: [],
     messages: [{ seq: 1, role: 'facilitator', content: 'Hello', createdAt: new Date() }],

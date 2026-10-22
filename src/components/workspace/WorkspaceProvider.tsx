@@ -29,8 +29,8 @@ export interface SessionInfo {
   facilitatorId: string;
   status: 'draft' | 'published' | 'partially_published';
   clarificationEnded: boolean;
-  /** Azure DevOps repository for code investigation, or null. */
-  codeRepository: string | null;
+  /** Azure DevOps repositories for code investigation; empty when none is picked. */
+  codeRepositories: string[];
   confluencePageId: string | null;
   confluencePageVersion: number | null;
   createdAt: string;

@@ -15,8 +15,8 @@ export interface PlanningSessionRow {
   confluencePageVersion: number | null;
   lockHolder: string | null;
   lockExpiresAt: Date | null;
-  /** Azure DevOps repository for code investigation (ADR-0016); null searches every allowed repository. */
-  codeRepository: string | null;
+  /** Azure DevOps repositories for code investigation (ADR-0016); empty searches every allowed repository. */
+  codeRepositories: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -32,7 +32,7 @@ export interface PlanningSessionDbRow {
   confluence_page_version: number | null;
   lock_holder: string | null;
   lock_expires_at: Date | null;
-  code_repository: string | null;
+  code_repositories: string[] | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -55,7 +55,7 @@ export function mapSessionRow(row: PlanningSessionDbRow): PlanningSessionRow {
     confluencePageVersion: row.confluence_page_version,
     lockHolder: row.lock_holder,
     lockExpiresAt: row.lock_expires_at,
-    codeRepository: row.code_repository ?? null,
+    codeRepositories: row.code_repositories ?? [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

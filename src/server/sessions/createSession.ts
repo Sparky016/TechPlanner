@@ -26,7 +26,7 @@ export function normaliseTicketKeys(ticketKeys: readonly string[]): string[] {
 export async function createSession(
   user: CurrentUser,
   ticketKeys: readonly string[],
-  options: { confirmDuplicate?: boolean; correlationId?: string | null; codeRepository?: string | null } = {},
+  options: { confirmDuplicate?: boolean; correlationId?: string | null; codeRepositories?: string[] } = {},
 ): Promise<CreateSessionResult> {
   const keys = normaliseTicketKeys(ticketKeys);
   const invalidKeys = keys.filter((k) => !isValidIssueKey(k));
@@ -53,10 +53,10 @@ export async function createSession(
 
   const session = await withTransaction(async (client) => {
     const inserted = await client.query<PlanningSessionDbRow>(
-      `INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id, code_repository)
+      `INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id, code_repositories)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [primary, keys, user.accountId, options.codeRepository ?? null],
+      [primary, keys, user.accountId, options.codeRepositories ?? []],
     );
     const row = mapSessionRow(inserted.rows[0]);
     await insertSnapshots(client, row.id, snapshots, retrievedAt);
@@ -69,7 +69,7 @@ export async function createSession(
         userDisplayName: user.displayName,
         sessionId: row.id,
         ticketIds: keys,
-        details: { sourceCount: snapshots.length, ...(options.codeRepository ? { codeRepository: options.codeRepository } : {}) },
+        details: { sourceCount: snapshots.length, ...(options.codeRepositories?.length ? { codeRepositories: options.codeRepositories } : {}) },
         correlationId: options.correlationId ?? null,
       },
       client,

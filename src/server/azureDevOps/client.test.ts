@@ -84,6 +84,17 @@ describe('azure devops client', () => {
     });
   });
 
+  it('limits a search to the given repositories', async () => {
+    config.AZURE_DEVOPS_REPOSITORIES = ['api', 'web', 'jobs'];
+    fetchMock.mockResolvedValueOnce(json(200, { count: 0, results: [] }));
+    await searchCode('Refund', { repositories: ['api', 'jobs'] });
+    expect(JSON.parse(String(call(0).init.body)).filters.Repository).toEqual(['api', 'jobs']);
+    await expect(searchCode('Refund', { repositories: ['api', 'secret-repo'] })).rejects.toMatchObject({
+      code: 'ado_repository_not_allowed',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a repository outside the allow-list without calling Azure DevOps', async () => {
     config.AZURE_DEVOPS_REPOSITORIES = ['api'];
     await expect(getFileContent('web', '/a.ts')).rejects.toMatchObject({ code: 'ado_repository_not_allowed' });

@@ -506,9 +506,9 @@ describe('Azure DevOps code repository (ADR-0016)', () => {
     resetConfigForTests();
   });
 
-  async function setRepository(id: string, tabId: string, repository: string | null): Promise<Response> {
+  async function setRepositories(id: string, tabId: string, repositories: string[]): Promise<Response> {
     return codeRepositoryPUT(
-      request('PUT', `/api/sessions/${id}/code-repository`, { cookie: alice, tabId, body: { repository } }),
+      request('PUT', `/api/sessions/${id}/code-repository`, { cookie: alice, tabId, body: { repositories } }),
       routeArg(id),
     );
   }
@@ -531,40 +531,54 @@ describe('Azure DevOps code repository (ADR-0016)', () => {
     expect(await res.json()).toMatchObject({ configured: false });
   });
 
-  it('creates a session with a repository and stores its canonical name', async () => {
+  it('creates a session with repositories and stores their canonical names once each', async () => {
     issues['REPO-1'] = { summary: 'x', description: 'x' };
-    const res = await create(alice, { ticketKeys: ['REPO-1'], codeRepository: 'PAYMENTS-API' });
+    const res = await create(alice, { ticketKeys: ['REPO-1'], codeRepositories: ['PAYMENTS-API', 'web', 'payments-api'] });
     expect(res.status).toBe(201);
-    const { session } = (await res.json()) as { session: { id: string; codeRepository: string } };
-    expect(session.codeRepository).toBe('payments-api');
+    const { session } = (await res.json()) as { session: { id: string; codeRepositories: string[] } };
+    expect(session.codeRepositories).toEqual(['payments-api', 'web']);
     const detail = await detailGET(request('GET', `/api/sessions/${session.id}`, { cookie: alice }), routeArg(session.id));
-    expect(((await detail.json()) as { session: { codeRepository: string } }).session.codeRepository).toBe('payments-api');
+    expect(((await detail.json()) as { session: { codeRepositories: string[] } }).session.codeRepositories).toEqual([
+      'payments-api',
+      'web',
+    ]);
+  });
+
+  it('creates a session with no repositories by default', async () => {
+    issues['REPO-4'] = { summary: 'x', description: 'x' };
+    const res = await create(alice, { ticketKeys: ['REPO-4'] });
+    expect(((await res.json()) as { session: { codeRepositories: string[] } }).session.codeRepositories).toEqual([]);
   });
 
   it('rejects an unknown repository at creation', async () => {
     issues['REPO-2'] = { summary: 'x', description: 'x' };
-    const res = await create(alice, { ticketKeys: ['REPO-2'], codeRepository: 'nope' });
+    const res = await create(alice, { ticketKeys: ['REPO-2'], codeRepositories: ['web', 'nope'] });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe('unknown_repository');
   });
 
-  it('sets and clears the repository under the session lock', async () => {
+  it('sets and clears the repositories under the session lock', async () => {
     issues['REPO-3'] = { summary: 'x', description: 'x' };
     const id = await createOk(alice, ['REPO-3']);
     const tab = randomUUID();
     await acquireOrRenewLock(id, tab);
 
-    expect((await setRepository(id, randomUUID(), 'web')).status).toBe(423);
-    const set = await setRepository(id, tab, 'web');
+    expect((await setRepositories(id, randomUUID(), ['web'])).status).toBe(423);
+    const set = await setRepositories(id, tab, ['web', 'Payments-Api']);
     expect(set.status).toBe(200);
-    expect(await set.json()).toEqual({ codeRepository: 'web' });
-    expect((await setRepository(id, tab, 'nope')).status).toBe(400);
-    const cleared = await setRepository(id, tab, null);
-    expect(await cleared.json()).toEqual({ codeRepository: null });
-    const [row] = await query<{ code_repository: string | null }>(
-      'SELECT code_repository FROM planning_session WHERE id = $1',
+    expect(await set.json()).toEqual({ codeRepositories: ['web', 'payments-api'] });
+    expect((await setRepositories(id, tab, ['web', 'nope'])).status).toBe(400);
+    const [kept] = await query<{ code_repositories: string[] }>(
+      'SELECT code_repositories FROM planning_session WHERE id = $1',
       [id],
     );
-    expect(row.code_repository).toBeNull();
+    expect(kept.code_repositories).toEqual(['web', 'payments-api']);
+    const cleared = await setRepositories(id, tab, []);
+    expect(await cleared.json()).toEqual({ codeRepositories: [] });
+    const [row] = await query<{ code_repositories: string[] }>(
+      'SELECT code_repositories FROM planning_session WHERE id = $1',
+      [id],
+    );
+    expect(row.code_repositories).toEqual([]);
   });
 });
