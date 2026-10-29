@@ -292,3 +292,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 09:45 | 43 | worker (haiku/low) complete @ c5be59e → orchestrator eval PASS (AC1; README source cell tidied) → DONE
 2026-10-29 10:00 | phase 7 | baseline on native Postgres 16: unit 336, integration 140, e2e 13/14 (clarification.spec fails pre-migration: note-input label intercepts Send click — UI bug, out of scope); MySQL 8.4 for verification runs in a sandbox-only container (repo dev setup stays Docker-free)
 2026-10-29 10:00 | 44 | worker dispatched (opus/high)
+2026-10-29 10:40 | 44 | worker complete @ 3ed56dc..9d3d93a (unit 349, integration 140, e2e 13/14 baseline-equal; audit read-back bounded by id > head; e2e sql() helper uses ? via translator) → eval dispatched (sonnet/medium)
