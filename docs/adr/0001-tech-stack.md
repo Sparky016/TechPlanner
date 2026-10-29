@@ -1,6 +1,6 @@
 # ADR-0001: Tech Stack and Hosting
 
-Status: Accepted
+Status: Amended by ADR-0017
 
 Date: 2026-10-05
 
@@ -12,7 +12,7 @@ Tech stack & hosting unspecified.
 
 ## Decision
 
-TypeScript / Next.js / Node 22 / PostgreSQL 16, single Docker image on the hosting server.
+TypeScript / Next.js / Node 22 / MySQL 8.4 LTS (database amended from PostgreSQL 16 by ADR-0017), single Docker image on the hosting server.
 
 ## Rationale
 
