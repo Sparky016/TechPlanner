@@ -373,6 +373,39 @@ describe('GET /api/sessions and /api/sessions/:id', () => {
       (await detailGET(request('GET', `/api/sessions/${unknown}`, { cookie: alice }), routeArg(unknown))).status,
     ).toBe(404);
   });
+  it('reports ingestedAt, analyzedAt and the derived intakeState in detail and list (GI-1)', async () => {
+    issues['INT-1'] = { summary: 'Intake', description: 'x' };
+    const id = await createOk(alice, ['INT-1']);
+    type Intake = { id: string; ingestedAt: string | null; analyzedAt: string | null; intakeState: string };
+    const detail = async (): Promise<Intake> => {
+      const res = await detailGET(request('GET', `/api/sessions/${id}`, { cookie: alice }), routeArg(id));
+      expect(res.status).toBe(200);
+      const { session } = (await res.json()) as { session: Intake };
+      return { id: session.id, ingestedAt: session.ingestedAt, analyzedAt: session.analyzedAt, intakeState: session.intakeState };
+    };
+    const listed = async (): Promise<Intake | undefined> => {
+      const res = await listGET(request('GET', '/api/sessions?ticket=INT-1', { cookie: alice }), noParams);
+      const { sessions } = (await res.json()) as { sessions: Intake[] };
+      const s = sessions.find((x) => x.id === id);
+      return s && { id: s.id, ingestedAt: s.ingestedAt, analyzedAt: s.analyzedAt, intakeState: s.intakeState };
+    };
+
+    // Creation does not set the timestamps (until task 44 moves ingest out of creation, it still stores snapshots).
+    const none = { id, ingestedAt: null, analyzedAt: null, intakeState: 'not_ingested' };
+    expect(await detail()).toEqual(none);
+    expect(await listed()).toEqual(none);
+
+    await query("UPDATE planning_session SET ingested_at = '2026-10-01T09:00:00Z' WHERE id = $1", [id]);
+    const ingested = { id, ingestedAt: '2026-10-01T09:00:00.000Z', analyzedAt: null, intakeState: 'ingested' };
+    expect(await detail()).toEqual(ingested);
+    expect(await listed()).toEqual(ingested);
+
+    // As the 0005 backfill leaves existing sessions.
+    await query("UPDATE planning_session SET analyzed_at = ingested_at WHERE id = $1", [id]);
+    const analyzed = { ...ingested, analyzedAt: '2026-10-01T09:00:00.000Z', intakeState: 'analyzed' };
+    expect(await detail()).toEqual(analyzed);
+    expect(await listed()).toEqual(analyzed);
+  });
 });
 
 describe('POST /api/sessions/:id/refresh-sources', () => {

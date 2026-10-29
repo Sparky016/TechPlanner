@@ -3,7 +3,7 @@ import { query } from '@/server/db/pool';
 import { withApiHandler } from '@/server/http/handler';
 import { CODE_REPOSITORY_MAX, resolveCodeRepository } from '@/server/sessions/codeRepository';
 import { MAX_TICKET_KEYS, createSession } from '@/server/sessions/createSession';
-import { type PlanningSessionDbRow, type PlanningSessionRow, mapSessionRow } from '@/server/sessions/repo';
+import { type PlanningSessionDbRow, type PlanningSessionRow, intakeState, mapSessionRow } from '@/server/sessions/repo';
 
 // Server-only route; never cache.
 export const dynamic = 'force-dynamic';
@@ -30,6 +30,9 @@ function sessionSummary(s: PlanningSessionRow) {
     status: s.status,
     clarificationEnded: s.clarificationEnded,
     codeRepository: s.codeRepository,
+    ingestedAt: s.ingestedAt?.toISOString() ?? null,
+    analyzedAt: s.analyzedAt?.toISOString() ?? null,
+    intakeState: intakeState(s),
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
   };

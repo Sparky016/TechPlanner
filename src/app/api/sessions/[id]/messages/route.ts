@@ -21,17 +21,24 @@ interface MessageRow {
   seq: number;
   role: string;
   content: string;
+  question_id: string | null;
   created_at: Date;
 }
 
-// Conversation history in order (role, content, createdAt, seq).
+// Conversation history in order (role, content, createdAt, seq, and the question a message answers, if any).
 export const GET = withApiHandler<{ id: string }>({}, async (ctx) => {
   const session = await requireSessionAccess(ctx, ctx.params.id);
   const rows = await query<MessageRow>(
-    'SELECT seq, role, content, created_at FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+    'SELECT seq, role, content, question_id, created_at FROM conversation_message WHERE session_id = $1 ORDER BY seq',
     [session.id],
   );
-  const messages = rows.map((r) => ({ seq: r.seq, role: r.role, content: r.content, createdAt: r.created_at }));
+  const messages = rows.map((r) => ({
+    seq: r.seq,
+    role: r.role,
+    content: r.content,
+    questionId: r.question_id,
+    createdAt: r.created_at,
+  }));
   return Response.json({ messages }, { headers: { 'Cache-Control': 'no-store' } });
 });
 

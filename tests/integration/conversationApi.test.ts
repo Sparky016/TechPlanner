@@ -415,6 +415,51 @@ describe('questions', () => {
     expect((await dismiss(s, other, { reason: 'r'.repeat(501) })).status).toBe(413);
   });
 
+  it('lists the answer and resolution fields, and the question a message answers (GI-12)', async () => {
+    const s = await createLockedSession();
+    const open = await insertQuestion(s, 'Which IdP?');
+    const [answered] = await query<{ id: string }>(
+      `INSERT INTO ai_question (session_id, section, text, status, answer_text, answered_at, answered_via, resolution, resolved_at)
+       VALUES ($1, 'Scope', 'Which region?', 'resolved', 'EU only', '2026-10-02T10:00:00Z', 'facilitator', 'answered',
+               '2026-10-03T10:00:00Z')
+       RETURNING id`,
+      [s.id],
+    );
+    await query(
+      `INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES
+         ($1, 1, 'facilitator', 'Hello', NULL), ($1, 2, 'facilitator', 'EU only', $2)`,
+      [s.id, answered.id],
+    );
+
+    const list = await questionsGET(request('GET', `/api/sessions/${s.id}/questions`), {
+      params: Promise.resolve({ id: s.id }),
+    });
+    expect(list.status).toBe(200);
+    const { questions } = (await list.json()) as { questions: Record<string, unknown>[] };
+    const pick = (q: Record<string, unknown>) => {
+      const { id, status, answerText, answeredAt, answeredVia, resolution, resolvedAt } = q;
+      return { id, status, answerText, answeredAt, answeredVia, resolution, resolvedAt };
+    };
+    expect(questions.map(pick)).toEqual([
+      { id: open, status: 'open', answerText: null, answeredAt: null, answeredVia: null, resolution: null, resolvedAt: null },
+      {
+        id: answered.id,
+        status: 'resolved',
+        answerText: 'EU only',
+        answeredAt: '2026-10-02T10:00:00.000Z',
+        answeredVia: 'facilitator',
+        resolution: 'answered',
+        resolvedAt: '2026-10-03T10:00:00.000Z',
+      },
+    ]);
+
+    const messages = (await history(s)) as unknown as { seq: number; questionId: string | null }[];
+    expect(messages.map(({ seq, questionId }) => ({ seq, questionId }))).toEqual([
+      { seq: 1, questionId: null },
+      { seq: 2, questionId: answered.id },
+    ]);
+  });
+
   it('dismisses without a reason', async () => {
     const s = await createLockedSession();
     const qid = await insertQuestion(s, 'Which IdP?');

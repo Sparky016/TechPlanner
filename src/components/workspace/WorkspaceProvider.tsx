@@ -33,6 +33,12 @@ export interface SessionInfo {
   codeRepository: string | null;
   confluencePageId: string | null;
   confluencePageVersion: number | null;
+  /** When the sources were first ingested, or null (guided intake GI-1). */
+  ingestedAt: string | null;
+  /** When the initial analysis succeeded, or null. */
+  analyzedAt: string | null;
+  /** Server-derived; the client never computes it from the timestamps. */
+  intakeState: 'not_ingested' | 'ingested' | 'analyzed';
   createdAt: string;
   updatedAt: string;
 }

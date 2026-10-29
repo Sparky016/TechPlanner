@@ -115,7 +115,16 @@ describe('AUDIT_ACTIONS', () => {
       'revision.restored',
       'error',
     ];
-    const extra = ['auth.refresh_failed', 'question.dismissed', 'issue.accepted_risk', 'session.lock_taken_over'];
+    const extra = [
+      'auth.refresh_failed',
+      'question.dismissed',
+      'issue.accepted_risk',
+      'session.lock_taken_over',
+      'sources.ingested',
+      'question.answered',
+      'question.resolved',
+      'question.reopened',
+    ];
     expect([...AUDIT_ACTIONS].sort()).toEqual([...sr121, ...extra].sort());
   });
 });
