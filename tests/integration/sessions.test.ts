@@ -221,10 +221,34 @@ beforeEach(() => {
   jiraReads = {};
   clearAccessCacheForTests();
   resetSiteUrlCache();
-  vi.stubGlobal('fetch', vi.fn(fakeFetch));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: RequestInfo | URL) => {
+      const pending = fakeFetch(input);
+      inFlight.add(pending);
+      const done = () => inFlight.delete(pending);
+      pending.then(done, done);
+      return pending;
+    }),
+  );
 });
 
-afterEach(() => {
+// A request that fails early (e.g. a 404 issue read in Promise.all) leaves its sibling reads running: they issue their
+// fetch calls after the route has already responded. Wait until those stragglers have finished, so none of them lands
+// on the next test's fresh fetch mock (which would break `not.toHaveBeenCalled()` assertions).
+const inFlight = new Set<Promise<unknown>>();
+async function drainStragglers(): Promise<void> {
+  const fetchMock = vi.mocked(fetch);
+  for (;;) {
+    const seen = fetchMock.mock.calls.length;
+    await Promise.allSettled([...inFlight]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    if (fetchMock.mock.calls.length === seen && inFlight.size === 0) return;
+  }
+}
+
+afterEach(async () => {
+  await drainStragglers();
   vi.unstubAllGlobals();
 });
 

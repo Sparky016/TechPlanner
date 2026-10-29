@@ -37,10 +37,17 @@ const EVENT_TYPES = [
   'confluence.updated',
   'downstream.triggered',
   'revision.restored',
+  'sources.ingested',
+  'question.answered',
+  'question.resolved',
+  'question.reopened',
   'error',
 ];
 // What the flow below triggers.
-const EXPECTED = EVENT_TYPES.filter((t) => !['ai.suggestion.rejected', 'error'].includes(t));
+// The question.* events are asserted in intake.spec.ts.
+const EXPECTED = EVENT_TYPES.filter(
+  (t) => !['ai.suggestion.rejected', 'error', 'question.answered', 'question.resolved', 'question.reopened'].includes(t),
+);
 
 type AuditRow = {
   id: string;
