@@ -66,7 +66,7 @@ Phases:
 | 45 | 7 | [Facilitator turn kinds, shared SSE turn helper and analysis turn (POST /analyze)](DEV_TASK_45.yml) | high | high | opus / high | 43 | DONE | d72d83b |
 | 46 | 7 | [Question lifecycle API: answer, resolve, reopen; full question context](DEV_TASK_46.yml) | high | high | opus / medium | 45 | EVAL | f548082 |
 | 47 | 7 | [Workspace turn runner and intake controls (Ingest, Analyze, ?analyze=1)](DEV_TASK_47.yml) | high | high | opus / medium | 44, 45 | DONE | 09d25b7 |
-| 48 | 7 | [Questions UI: grouped list, Answer, Resolve, Edit answer, Reopen](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46, 47 | IN_PROGRESS | |
+| 48 | 7 | [Questions UI: grouped list, Answer, Resolve, Edit answer, Reopen](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46, 47 | EVAL | 3c3e655 |
 | 49 | 7 | [Discuss with AI: collapsible overview conversation](DEV_TASK_49.yml) | medium | medium | sonnet / medium | 47 | IN_PROGRESS | |
 | 50 | 7 | [New session page: Create and ingest](DEV_TASK_50.yml) | medium | low | sonnet / low | 44, 47 | DONE | 903de87 |
 | 51 | 7 | [Guided intake verification and docs (E2E, a11y, evals, SPEC_DOC, ADR 0017)](DEV_TASK_51.yml) | medium | medium | sonnet / medium | 48, 49, 50 | PENDING | |
@@ -310,3 +310,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 11:3x | 48 | worker dispatched (sonnet/medium)
 2026-10-29 11:4x | 50 | eval FAIL (haiku/low: AC2 'no test clicks Create session') overridden by orchestrator — page.test.tsx:48 clicks Create session and asserts the exact body without ingest; SpecEditor 2 failures were parallel-load flakes (5/5 in isolation). Misnamed test at :112 renamed by orchestrator → DONE @ 903de87. Follow-up: workspace does not show the create-time ingestError (GI-26 says 'shown with the error')
 2026-10-29 11:5x | 47 | eval PASS → DONE @ 09d25b7 (SessionHeader 14, +Conversation 19, +workspaceLock 19; follow-ups: setAnalyzing(false) before reloadDetail lets Analyze ticket flash enabled; per-token setSettling; SpecEditor.test.tsx flaky under full-suite load on parent commit too)
+2026-10-29 12:0x | 48 | worker complete @ 3c3e655 (QuestionsList 9 tests, unit 385; region name 'AI questions' kept) → eval dispatched (sonnet/low, detached worktree)
