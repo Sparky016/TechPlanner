@@ -62,7 +62,7 @@ Phases:
 | 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | DONE | a3b00e2 |
 | 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | DONE | 74e6a0b |
 | 43 | 7 | [ADRs for the MySQL migration (new ADR-0017, amend ADR-0001 and ADR-0013)](DEV_TASK_43.yml) | medium | trivial | haiku / low | — | DONE | c5be59e |
-| 44 | 7 | [Dialect-neutral data-access layer on PostgreSQL (DbClient, ? placeholders, no RETURNING, lock and error helpers)](DEV_TASK_44.yml) | critical | high | opus / high | 43 | PENDING | |
+| 44 | 7 | [Dialect-neutral data-access layer on PostgreSQL (DbClient, ? placeholders, no RETURNING, lock and error helpers)](DEV_TASK_44.yml) | critical | high | opus / high | 43 | DONE | 3ed56dc..9d3d93a |
 | 45 | 7 | [Replace pg-boss with an in-house SQL job queue (on PostgreSQL first)](DEV_TASK_45.yml) | high | high | opus / medium | 44 | PENDING | |
 | 46 | 7 | [MySQL 8.4 cutover: mysql2 driver, MySQL migrations, dialect SQL, per-table grants, test harness and dev setup](DEV_TASK_46.yml) | critical | critical | opus / high | 44, 45 | PENDING | |
 | 47 | 7 | [MySQL integrity and concurrency hardening: audit hash round-trip, gap-lock review, deadlock retry, pool sizing](DEV_TASK_47.yml) | high | high | opus / medium | 46 | PENDING | |
@@ -293,3 +293,5 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 10:00 | phase 7 | baseline on native Postgres 16: unit 336, integration 140, e2e 13/14 (clarification.spec fails pre-migration: note-input label intercepts Send click — UI bug, out of scope); MySQL 8.4 for verification runs in a sandbox-only container (repo dev setup stays Docker-free)
 2026-10-29 10:00 | 44 | worker dispatched (opus/high)
 2026-10-29 10:40 | 44 | worker complete @ 3ed56dc..9d3d93a (unit 349, integration 140, e2e 13/14 baseline-equal; audit read-back bounded by id > head; e2e sql() helper uses ? via translator) → eval dispatched (sonnet/medium)
+2026-10-29 11:20 | 44 | eval PASS → DONE @ 3ed56dc..9d3d93a (unit 349, integration 140 — one flaky sessions.test fetch-not-called on 1 of 3 runs, unrelated; e2e 13/14 baseline; notes: getCurrentUser now rejects the request whose 30-day cap expires it, acquireOrRenewLock holder read-back non-atomic like before)
+2026-10-29 11:20 | 45 | worker dispatched (opus/medium)
