@@ -26,20 +26,23 @@ export default function NewSessionPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [duplicateIds, setDuplicateIds] = useState<string[] | null>(null);
+  const [ingestMode, setIngestMode] = useState(false);
 
-  async function submit(confirmDuplicate: boolean) {
+  async function submit(confirmDuplicate: boolean, ingest: boolean) {
+    setIngestMode(ingest);
     setBusy(true);
     setError(null);
     try {
-      const { session } = await apiFetch<{ session: { id: string } }>('/api/sessions', {
+      const { session, ingested } = await apiFetch<{ session: { id: string }; ingested?: boolean }>('/api/sessions', {
         method: 'POST',
         json: {
           ticketKeys: parseKeys(input),
           ...(codeRepository ? { codeRepository } : {}),
+          ...(ingest ? { ingest: true } : {}),
           ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
         },
       });
-      window.location.assign(`/sessions/${session.id}`);
+      window.location.assign(ingest && ingested ? `/sessions/${session.id}?analyze=1` : `/sessions/${session.id}`);
     } catch (err) {
       const apiErr = err instanceof ApiError ? err : new ApiError('Could not create the session', 0, undefined, undefined, null);
       if (apiErr.status === 409) {
@@ -56,7 +59,7 @@ export default function NewSessionPage() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     setDuplicateIds(null);
-    void submit(false);
+    void submit(false, false);
   }
 
   const unreadable = error?.status === 422 ? bodyField(error, 'unreadable') : [];
@@ -101,13 +104,26 @@ export default function NewSessionPage() {
             />
           ) : null}
         </div>
-        <button
-          type="submit"
-          disabled={busy || parseKeys(input).length === 0}
-          className="rounded bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-60"
-        >
-          Create session
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="submit"
+            disabled={busy || parseKeys(input).length === 0}
+            className="rounded bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-60"
+          >
+            Create session
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setDuplicateIds(null);
+              void submit(false, true);
+            }}
+            disabled={busy || parseKeys(input).length === 0}
+            className="rounded border border-blue-700 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
+          >
+            {busy && ingestMode ? 'Creating and ingesting…' : 'Create and ingest'}
+          </button>
+        </div>
       </form>
 
       {duplicateIds ? (
@@ -126,7 +142,7 @@ export default function NewSessionPage() {
           </ul>
           <button
             type="button"
-            onClick={() => void submit(true)}
+            onClick={() => void submit(true, ingestMode)}
             disabled={busy}
             className="rounded border border-amber-600 px-3 py-1 hover:bg-amber-100 disabled:opacity-60"
           >
