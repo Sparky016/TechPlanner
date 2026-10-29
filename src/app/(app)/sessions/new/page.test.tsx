@@ -109,7 +109,7 @@ describe('new session page', () => {
     vi.unstubAllGlobals();
   });
 
-  it('Create session sends no ingest flag, and Create anyway keeps the ingest mode', async () => {
+  it('Create anyway after a duplicate keeps the Create and ingest mode', async () => {
     const { ApiError } = await import('@/lib/api/client');
     const assign = vi.fn();
     vi.stubGlobal('location', { ...window.location, assign });

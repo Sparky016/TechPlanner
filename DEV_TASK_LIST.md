@@ -68,7 +68,7 @@ Phases:
 | 47 | 7 | [Workspace turn runner and intake controls (Ingest, Analyze, ?analyze=1)](DEV_TASK_47.yml) | high | high | opus / medium | 44, 45 | EVAL | 09d25b7 |
 | 48 | 7 | [Questions UI: grouped list, Answer, Resolve, Edit answer, Reopen](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46, 47 | IN_PROGRESS | |
 | 49 | 7 | [Discuss with AI: collapsible overview conversation](DEV_TASK_49.yml) | medium | medium | sonnet / medium | 47 | IN_PROGRESS | |
-| 50 | 7 | [New session page: Create and ingest](DEV_TASK_50.yml) | medium | low | sonnet / low | 44, 47 | EVAL | 903de87 |
+| 50 | 7 | [New session page: Create and ingest](DEV_TASK_50.yml) | medium | low | sonnet / low | 44, 47 | DONE | 903de87 |
 | 51 | 7 | [Guided intake verification and docs (E2E, a11y, evals, SPEC_DOC, ADR 0017)](DEV_TASK_51.yml) | medium | medium | sonnet / medium | 48, 49, 50 | PENDING | |
 
 ## Execution notes
@@ -308,3 +308,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 11:2x | 50 | worker complete @ 903de87 (3 new page tests, unit 375 incl. WIP) → eval dispatched (haiku/low, detached worktree)
 2026-10-29 11:3x | 46 | worker complete @ f548082 (questionsApi 8, conversationApi 11, integration 166; MAX_ANSWER_CHARS in lifecycle.ts — Next forbids extra route exports) → eval dispatched (sonnet/medium, detached worktree)
 2026-10-29 11:3x | 48 | worker dispatched (sonnet/medium)
+2026-10-29 11:4x | 50 | eval FAIL (haiku/low: AC2 'no test clicks Create session') overridden by orchestrator — page.test.tsx:48 clicks Create session and asserts the exact body without ingest; SpecEditor 2 failures were parallel-load flakes (5/5 in isolation). Misnamed test at :112 renamed by orchestrator → DONE @ 903de87. Follow-up: workspace does not show the create-time ingestError (GI-26 says 'shown with the error')
