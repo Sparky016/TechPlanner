@@ -2,9 +2,14 @@
 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { ErrorBanner } from '@/components/ErrorBanner';
-import { useWorkspace, useWorkspaceEvents } from '@/components/workspace/WorkspaceProvider';
+import {
+  type ActiveTurn,
+  type TurnError,
+  useActiveTurn,
+  useWorkspace,
+  useWorkspaceEvents,
+} from '@/components/workspace/WorkspaceProvider';
 import { ApiError, apiFetch } from '@/lib/api/client';
-import { streamMessage } from '@/lib/api/sse';
 
 // Facilitator ↔ AI conversation with the streamed AI turn rendered token by token (SR-3.5). Notes and system
 // messages are shown inline but visually distinct. All text is rendered as plain text (never as HTML).
@@ -14,12 +19,6 @@ interface Message {
   role: 'facilitator' | 'ai' | 'note' | 'system';
   content: string;
   createdAt: string;
-}
-
-interface TurnError {
-  code?: string;
-  message: string;
-  correlationId?: string;
 }
 
 const ROLE_LABEL: Record<Message['role'], string> = {
@@ -46,18 +45,26 @@ function MessageBubble({ role, content }: { role: Message['role']; content: stri
 }
 
 export function Conversation() {
-  const { sessionId, readOnly, publish } = useWorkspace();
+  const { sessionId, readOnly, runTurn, turnInProgress } = useWorkspace();
+  const activeTurn = useActiveTurn();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [text, setText] = useState('');
-  const [streaming, setStreaming] = useState(false);
-  const [pending, setPending] = useState<{ prompt: string; reply: string } | null>(null);
   const [turnError, setTurnError] = useState<TurnError | null>(null);
+  // The last streamed turn stays on screen until the reload that follows it has the persisted messages.
+  const [settling, setSettling] = useState<ActiveTurn | null>(null);
+  const pending = activeTurn ?? settling;
+
+  useEffect(() => {
+    // Only a started turn is followed by a reload (conversation_changed); a rejected one just disappears.
+    if (activeTurn?.started) setSettling(activeTurn);
+  }, [activeTurn]);
 
   const load = useCallback(async () => {
     try {
       const data = await apiFetch<{ messages: Message[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages`);
       setMessages(data.messages);
+      setSettling(null);
       setLoadError(null);
     } catch (err) {
       setLoadError(err instanceof ApiError ? err : new ApiError('Could not load the conversation', 0, undefined, undefined, null));
@@ -75,42 +82,15 @@ export function Conversation() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const prompt = text;
-    if (prompt.trim() === '' || streaming) return;
-    setStreaming(true);
+    if (prompt.trim() === '' || turnInProgress) return;
     setTurnError(null);
-    setPending({ prompt, reply: '' });
     setText('');
-    let failed = false;
-    let started = false;
-    try {
-      for await (const ev of streamMessage(sessionId, prompt)) {
-        started = true;
-        if (ev.type === 'token') {
-          setPending((p) => (p ? { ...p, reply: p.reply + ev.text } : p));
-        } else if (ev.type === 'error') {
-          failed = true;
-          setTurnError({ code: ev.code, message: ev.message, correlationId: ev.correlationId });
-          publish(ev);
-        } else {
-          publish(ev);
-        }
-      }
-    } catch (err) {
-      failed = true;
-      const apiErr = err instanceof ApiError ? err : null;
-      setTurnError({
-        code: apiErr?.code,
-        message: apiErr?.message ?? 'The AI turn failed',
-        correlationId: apiErr?.correlationId,
-      });
-    } finally {
-      // The server persists the facilitator message (and any AI reply) itself; reload rather than trust local text.
-      await load();
-      setPending(null);
-      setStreaming(false);
-      // A request rejected before streaming (e.g. 409 turn_in_progress) persisted nothing: give the text back.
-      if (failed && !started) setText((t) => (t === '' ? prompt : t));
-    }
+    // The server persists the facilitator message (and any AI reply); runTurn publishes conversation_changed after
+    // a started turn, which reloads the list rather than trusting local text.
+    const result = await runTurn({ path: '/messages', body: { text: prompt }, label: 'Discussion', prompt });
+    if (result.error) setTurnError(result.error);
+    // A request rejected before streaming (e.g. 409 turn_in_progress) persisted nothing: give the text back.
+    if (!result.started && !result.ok) setText((t) => (t === '' ? prompt : t));
   }
 
   const aiUnavailable = turnError?.code === 'ai_unavailable';
@@ -125,7 +105,7 @@ export function Conversation() {
         ))}
         {pending ? (
           <>
-            <MessageBubble role="facilitator" content={pending.prompt} />
+            {pending.prompt !== undefined ? <MessageBubble role="facilitator" content={pending.prompt} /> : null}
             <li data-role="ai" data-testid="streaming-reply" className={`rounded border px-2 py-1 text-sm ${ROLE_CLASS.ai}`}>
               <p className="text-xs font-medium text-slate-500">AI</p>
               <p className="whitespace-pre-wrap break-words">{pending.reply || '…'}</p>
@@ -153,10 +133,10 @@ export function Conversation() {
         />
         <button
           type="submit"
-          disabled={readOnly || streaming || text.trim() === ''}
+          disabled={readOnly || turnInProgress || text.trim() === ''}
           className="rounded bg-blue-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-60"
         >
-          {streaming ? 'AI is responding…' : 'Send'}
+          {turnInProgress ? 'AI is responding…' : 'Send'}
         </button>
       </form>
     </section>

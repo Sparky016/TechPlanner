@@ -1,13 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WorkspaceProvider } from '@/components/workspace/WorkspaceProvider';
+import { useWorkspace, WorkspaceProvider, type WorkspaceValue } from '@/components/workspace/WorkspaceProvider';
 import { Conversation } from '@/components/workspace/left/Conversation';
 import type { TurnEvent } from '@/lib/api/sse';
 
 const apiFetch = vi.hoisted(() => vi.fn());
-const streamMessage = vi.hoisted(() => vi.fn());
+const streamTurn = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/api/client', async (orig) => ({ ...(await orig<typeof import('@/lib/api/client')>()), apiFetch }));
-vi.mock('@/lib/api/sse', async (orig) => ({ ...(await orig<typeof import('@/lib/api/sse')>()), streamMessage }));
+vi.mock('@/lib/api/sse', async (orig) => ({ ...(await orig<typeof import('@/lib/api/sse')>()), streamTurn }));
 
 // A stream whose events are pushed by the test, so intermediate renders can be observed.
 function controlledStream() {
@@ -40,7 +40,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   apiFetch.mockReset();
-  streamMessage.mockReset();
+  streamTurn.mockReset();
 });
 
 async function renderAndSend(text: string) {
@@ -56,13 +56,54 @@ async function renderAndSend(text: string) {
   fireEvent.click(send);
 }
 
+let workspace: WorkspaceValue | null = null;
+function Capture() {
+  workspace = useWorkspace();
+  return null;
+}
+
 describe('Conversation', () => {
+  it('disables Send while a turn started elsewhere streams, shows its reply, and refuses a second turn', async () => {
+    const s = controlledStream();
+    streamTurn.mockReturnValue(s.gen());
+    render(
+      <WorkspaceProvider sessionId="s1">
+        <Capture />
+        <Conversation />
+      </WorkspaceProvider>,
+    );
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/api/sessions/s1/lock', { method: 'POST' }));
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Queued' } });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false));
+
+    let first!: Promise<unknown>;
+    act(() => {
+      first = workspace!.runTurn({ path: '/analyze', label: 'Analysis' });
+    });
+    expect((screen.getByRole('button', { name: 'AI is responding…' }) as HTMLButtonElement).disabled).toBe(true);
+    const second = await workspace!.runTurn({ path: '/analyze', label: 'Analysis' });
+    expect(second).toMatchObject({ ok: false, started: false, error: { code: 'turn_in_progress' } });
+    expect(streamTurn).toHaveBeenCalledTimes(1);
+    expect(streamTurn).toHaveBeenCalledWith('/api/sessions/s1/analyze', undefined, expect.any(AbortSignal));
+
+    await act(async () => s.push({ type: 'token', text: 'Summary' }));
+    await waitFor(() => expect(screen.getByTestId('streaming-reply').textContent).toContain('Summary'));
+    await act(async () => {
+      s.push({ type: 'done', messageSeq: 3 });
+      s.push(null);
+      await first;
+    });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(await first).toEqual({ ok: true, started: true, error: null });
+  });
+
+
   it('renders streamed tokens incrementally and disables send while streaming', async () => {
     const s = controlledStream();
-    streamMessage.mockReturnValue(s.gen());
+    streamTurn.mockReturnValue(s.gen());
     await renderAndSend('What is the scope?');
 
-    expect(streamMessage).toHaveBeenCalledWith('s1', 'What is the scope?');
+    expect(streamTurn).toHaveBeenCalledWith('/api/sessions/s1/messages', { text: 'What is the scope?' }, expect.any(AbortSignal));
     await act(async () => s.push({ type: 'token', text: 'The ' }));
     await waitFor(() => expect(screen.getByTestId('streaming-reply').textContent).toContain('The'));
     expect((screen.getByRole('button', { name: 'AI is responding…' }) as HTMLButtonElement).disabled).toBe(true);
@@ -80,7 +121,7 @@ describe('Conversation', () => {
 
   it('shows the error message with its correlation id on an error event', async () => {
     const s = controlledStream();
-    streamMessage.mockReturnValue(s.gen());
+    streamTurn.mockReturnValue(s.gen());
     await renderAndSend('Hi');
     await act(async () => {
       s.push({ type: 'token', text: 'Partial' });
@@ -96,7 +137,7 @@ describe('Conversation', () => {
 
   it('shows a request error such as turn_in_progress with its correlation id', async () => {
     const { ApiError } = await import('@/lib/api/client');
-    streamMessage.mockImplementation(() => {
+    streamTurn.mockImplementation(() => {
       throw new ApiError('A facilitator turn is already in progress', 409, 'turn_in_progress', 'corr-9', null);
     });
     await renderAndSend('Again');

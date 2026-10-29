@@ -3,10 +3,11 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorBanner } from '@/components/ErrorBanner';
 import { ApiError, apiFetch } from '@/lib/api/client';
-import type { TurnEvent } from '@/lib/api/sse';
+import { streamTurn, type TurnEvent } from '@/lib/api/sse';
 
-// Shared workspace state for all three panels: session detail, the session lock (D-3) and an event bus that
-// carries streamed facilitator events (patch/suggestion/question/done) so the center and right panels can react.
+// Shared workspace state for all three panels: session detail, the session lock (D-3), an event bus that
+// carries streamed facilitator events (token/patch/suggestion/question/done/error) so every panel can react, and
+// the turn runner (GI-22): one AI turn at a time per tab, started from any panel and visible to all of them.
 
 export const LOCK_HEARTBEAT_MS = 20_000;
 
@@ -58,6 +59,43 @@ export interface LockInfo {
 export type WorkspaceEvent = TurnEvent | { type: 'conversation_changed' };
 type Listener = (e: WorkspaceEvent) => void;
 
+/** A turn to start with runTurn. `path` is relative to /api/sessions/:id, e.g. '/messages', '/analyze'. */
+export interface RunTurnOptions {
+  path: string;
+  /** JSON body; omit for routes without one (/analyze). */
+  body?: unknown;
+  /** Short human-readable name of the turn, e.g. 'Discussion', 'Analysis', 'Answer'. */
+  label: string;
+  /** The facilitator text that started the turn, shown above the streamed reply (message and answer turns). */
+  prompt?: string;
+}
+
+/** The turn streaming right now in this tab (read with useActiveTurn). */
+export interface ActiveTurn {
+  label: string;
+  prompt?: string;
+  /** Concatenated `token` text so far. */
+  reply: string;
+  /** False until the first event arrives (the request may still be rejected with 409/423). */
+  started: boolean;
+}
+
+export interface TurnError {
+  code?: string;
+  message: string;
+  correlationId?: string;
+  /** HTTP status of a request rejected before streaming (409, 423, ...); undefined for stream `error` events. */
+  status?: number;
+}
+
+export interface TurnResult {
+  /** The stream ended without an `error` event. */
+  ok: boolean;
+  /** At least one event arrived, i.e. the server accepted the turn and persisted its input. */
+  started: boolean;
+  error: TurnError | null;
+}
+
 export interface WorkspaceValue {
   sessionId: string;
   detail: SessionDetail | null;
@@ -70,9 +108,24 @@ export interface WorkspaceValue {
   takeOver: () => Promise<void>;
   publish: (e: WorkspaceEvent) => void;
   subscribe: (listener: Listener) => () => void;
+  /**
+   * Streams one AI turn, publishing every event on the bus and updating useActiveTurn(). Resolves when the turn
+   * ends; never throws. Refused locally (started: false, code 'turn_in_progress') while another turn streams in
+   * this tab. After a started turn it publishes `conversation_changed`.
+   */
+  runTurn: (opts: RunTurnOptions) => Promise<TurnResult>;
+  /** True while any turn started with runTurn streams in this tab. Disables every Send / Answer / Analyze control. */
+  turnInProgress: boolean;
 }
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
+// Kept apart from WorkspaceContext so a token only re-renders the components that show the streamed reply.
+const ActiveTurnContext = createContext<ActiveTurn | null>(null);
+
+/** The turn streaming in this tab, or null. Re-renders on every token: use it only where the reply is shown. */
+export function useActiveTurn(): ActiveTurn | null {
+  return useContext(ActiveTurnContext);
+}
 
 export function useWorkspace(): WorkspaceValue {
   const value = useContext(WorkspaceContext);
@@ -99,6 +152,11 @@ export function WorkspaceProvider({ sessionId, children }: { sessionId: string; 
   const [detailError, setDetailError] = useState<ApiError | null>(null);
   const [lock, setLock] = useState<LockInfo | null>(null);
   const [lockError, setLockError] = useState<ApiError | null>(null);
+  const [activeTurn, setActiveTurn] = useState<ActiveTurn | null>(null);
+  const [turnInProgress, setTurnInProgress] = useState(false);
+  // Synchronous guard so a double click cannot start two streams before the state update renders.
+  const turnRunning = useRef(false);
+  const turnAbort = useRef<AbortController | null>(null);
   const listeners = useRef(new Set<Listener>());
   const base = `/api/sessions/${encodeURIComponent(sessionId)}`;
 
@@ -157,6 +215,54 @@ export function WorkspaceProvider({ sessionId, children }: { sessionId: string; 
     };
   }, []);
 
+  // Abort a streaming turn when the workspace unmounts (the server finishes and persists it regardless).
+  useEffect(() => () => turnAbort.current?.abort(), []);
+
+  const runTurn = useCallback(
+    async ({ path, body, label, prompt }: RunTurnOptions): Promise<TurnResult> => {
+      if (turnRunning.current) {
+        return {
+          ok: false,
+          started: false,
+          error: { code: 'turn_in_progress', message: 'An AI turn is already in progress.' },
+        };
+      }
+      turnRunning.current = true;
+      const controller = new AbortController();
+      turnAbort.current = controller;
+      setTurnInProgress(true);
+      setActiveTurn({ label, prompt, reply: '', started: false });
+      let started = false;
+      let error: TurnError | null = null;
+      try {
+        for await (const ev of streamTurn(`${base}${path}`, body, controller.signal)) {
+          if (!started) setActiveTurn((t) => (t ? { ...t, started: true } : t));
+          started = true;
+          if (ev.type === 'token') setActiveTurn((t) => (t ? { ...t, reply: t.reply + ev.text } : t));
+          else if (ev.type === 'error') error = { code: ev.code, message: ev.message, correlationId: ev.correlationId };
+          publish(ev);
+        }
+      } catch (err) {
+        const apiErr = err instanceof ApiError ? err : null;
+        error = {
+          code: apiErr?.code,
+          message: apiErr?.message ?? 'The AI turn failed',
+          correlationId: apiErr?.correlationId,
+          status: apiErr?.status,
+        };
+      } finally {
+        turnRunning.current = false;
+        if (turnAbort.current === controller) turnAbort.current = null;
+        setActiveTurn(null);
+        setTurnInProgress(false);
+      }
+      // The server persisted the turn's messages: let every panel reload them.
+      if (started) publish({ type: 'conversation_changed' });
+      return { ok: error === null, started, error };
+    },
+    [base, publish],
+  );
+
   const value = useMemo<WorkspaceValue>(
     () => ({
       sessionId,
@@ -169,11 +275,17 @@ export function WorkspaceProvider({ sessionId, children }: { sessionId: string; 
       takeOver,
       publish,
       subscribe,
+      runTurn,
+      turnInProgress,
     }),
-    [sessionId, detail, detailError, reloadDetail, lock, lockError, takeOver, publish, subscribe],
+    [sessionId, detail, detailError, reloadDetail, lock, lockError, takeOver, publish, subscribe, runTurn, turnInProgress],
   );
 
-  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
+  return (
+    <WorkspaceContext.Provider value={value}>
+      <ActiveTurnContext.Provider value={activeTurn}>{children}</ActiveTurnContext.Provider>
+    </WorkspaceContext.Provider>
+  );
 }
 
 /** Read-only banner with Take over, shown while another tab holds the session lock. */
