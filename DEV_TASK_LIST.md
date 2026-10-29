@@ -62,7 +62,7 @@ Phases:
 | 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | DONE | a3b00e2 |
 | 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | DONE | 74e6a0b |
 | 43 | 7 | [Guided intake schema: migration 0005, intake state, question lifecycle fields, audit actions](DEV_TASK_43.yml) | high | medium | opus / medium | — | DONE | 12d1b6a |
-| 44 | 7 | [Explicit source ingestion: no ingest at creation, POST /ingest, create-and-ingest](DEV_TASK_44.yml) | high | high | opus / medium | 43 | EVAL | fcc19f1 |
+| 44 | 7 | [Explicit source ingestion: no ingest at creation, POST /ingest, create-and-ingest](DEV_TASK_44.yml) | high | high | opus / medium | 43 | DONE | 35fffc4..fcc19f1 |
 | 45 | 7 | [Facilitator turn kinds, shared SSE turn helper and analysis turn (POST /analyze)](DEV_TASK_45.yml) | high | high | opus / high | 43 | IN_PROGRESS | |
 | 46 | 7 | [Question lifecycle API: answer, resolve, reopen; full question context](DEV_TASK_46.yml) | high | high | opus / medium | 45 | PENDING | |
 | 47 | 7 | [Workspace turn runner and intake controls (Ingest, Analyze, ?analyze=1)](DEV_TASK_47.yml) | high | high | opus / medium | 44, 45 | PENDING | |
@@ -298,3 +298,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 10:0x | 43 | eval PASS → DONE @ 12d1b6a (worktree: schema 9, sessions+conversationApi 28, unit 336, integration 144; follow-ups: intakeState() precedence when analyzed_at set without ingested_at; harden flaky fetch-not-called assertion in sessions.test.ts)
 2026-10-29 10:0x | e2e | first baseline (2 failed: a11y AC1, clarification AC-13) invalid — ran against a tree being edited; clean re-run at 26300f5 in worktree started
 2026-10-29 10:1x | 44 | worker complete @ fcc19f1 (pure rename landed in 35fffc4 via orchestrator commit; sessions 22, unit 337, integration 149; e2e session-create expected to fail until 51) → eval dispatched (sonnet/medium, detached worktree)
+2026-10-29 10:2x | 44 | eval PASS → DONE @ fcc19f1 (worktree: sessions 22, integration 148, unit 336; flaky sessions.test.ts:302 traced to a straggler comment fetch from the 422 test racing the next mock reset — pre-existing, follow-up)
