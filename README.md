@@ -16,7 +16,7 @@ npm run dev                                       # http://localhost:3000
 
 Scripts: `lint`, `typecheck`, `test` (unit, `src/**/*.test.ts`), `test:integration`
 (`tests/integration/**`, sequential, needs the dev database), `test:e2e` (Playwright), `build`, `start`.
-`worker`, `audit:verify` and `eval:llm` print "not implemented" until their tasks land.
+`npm run build` needs the required configuration variables set (dummy values are enough), as in the Dockerfile.
 
 ### Configuration
 
