@@ -55,7 +55,7 @@ Secrets. Store them in the hosting platform's secret store and inject them as en
 | `DOWNSTREAM_WEBHOOK_SECRET` | signing secret for the downstream webhook (required when `DOWNSTREAM_WEBHOOK_URL` is set) |
 | `METRICS_TOKEN`             | bearer token for `GET /metrics` (optional; `/metrics` returns 404 when unset) |
 
-Non-secret required settings: `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLOUD_ID`, `OAUTH_REDIRECT_URI`, `APP_BASE_URL`, `FACILITATOR_MODEL`, `EVALUATOR_MODEL`, `CONFLUENCE_SPACE_KEY` and `CONFLUENCE_PARENT_PAGE_ID`. Optional settings: `CONTEXT_TOKEN_BUDGET`, `CONFLUENCE_PROJECT_OVERRIDES`, `DOWNSTREAM_WEBHOOK_URL`, `SECTION_WEIGHTS` and `COPILOT_CLI_PATH`, which the image already sets.
+Non-secret required settings: `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLOUD_ID`, `OAUTH_REDIRECT_URI`, `APP_BASE_URL`, `FACILITATOR_MODEL`, `EVALUATOR_MODEL`, `CONFLUENCE_SPACE_KEY` and `CONFLUENCE_PARENT_PAGE_ID`. Optional settings: `CONTEXT_TOKEN_BUDGET`, `ANALYSIS_MAX_QUESTIONS` (default 8: the most questions the AI may ask in the initial analysis turn; every other turn keeps the limit of 3), `CONFLUENCE_PROJECT_OVERRIDES`, `DOWNSTREAM_WEBHOOK_URL`, `SECTION_WEIGHTS` and `COPILOT_CLI_PATH`, which the image already sets.
 
 `LLM_FAKE=1` swaps the Copilot client for a scripted fake. Use it only for smoke tests without a Copilot-entitled token, **never in production**.
 
