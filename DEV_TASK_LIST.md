@@ -63,7 +63,7 @@ Phases:
 | 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | DONE | 74e6a0b |
 | 43 | 7 | [ADRs for the MySQL migration (new ADR-0017, amend ADR-0001 and ADR-0013)](DEV_TASK_43.yml) | medium | trivial | haiku / low | — | DONE | c5be59e |
 | 44 | 7 | [Dialect-neutral data-access layer on PostgreSQL (DbClient, ? placeholders, no RETURNING, lock and error helpers)](DEV_TASK_44.yml) | critical | high | opus / high | 43 | DONE | 3ed56dc..9d3d93a |
-| 45 | 7 | [Replace pg-boss with an in-house SQL job queue (on PostgreSQL first)](DEV_TASK_45.yml) | high | high | opus / medium | 44 | PENDING | |
+| 45 | 7 | [Replace pg-boss with an in-house SQL job queue (on PostgreSQL first)](DEV_TASK_45.yml) | high | high | opus / medium | 44 | DONE | 3194b54 |
 | 46 | 7 | [MySQL 8.4 cutover: mysql2 driver, MySQL migrations, dialect SQL, per-table grants, test harness and dev setup](DEV_TASK_46.yml) | critical | critical | opus / high | 44, 45 | PENDING | |
 | 47 | 7 | [MySQL integrity and concurrency hardening: audit hash round-trip, gap-lock review, deadlock retry, pool sizing](DEV_TASK_47.yml) | high | high | opus / medium | 46 | PENDING | |
 | 48 | 7 | [Production on the hosting server: native MySQL setup, compose wiring, server config, backups and runbook](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46 | PENDING | |
@@ -296,3 +296,5 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 11:20 | 44 | eval PASS → DONE @ 3ed56dc..9d3d93a (unit 349, integration 140 — one flaky sessions.test fetch-not-called on 1 of 3 runs, unrelated; e2e 13/14 baseline; notes: getCurrentUser now rejects the request whose 30-day cap expires it, acquireOrRenewLock holder read-back non-atomic like before)
 2026-10-29 11:20 | 45 | worker dispatched (opus/medium)
 2026-10-29 11:40 | 45 | worker complete @ 3194b54 (integration 147 incl. 11 queue cases, unit 349, e2e 13/14 baseline; +finished_at, +hasPendingJob, superseded-on-requeue-collision) → eval dispatched (sonnet/medium)
+2026-10-29 12:10 | 45 | eval PASS → DONE @ 3194b54 (unit 349, integration 147, jobs x3 stable, e2e 13/14 baseline; note: late finish() after visibility-timeout requeue can mark the newer activation — activation token folded into 46)
+2026-10-29 12:10 | 46 | worker dispatched (opus/high); MySQL 8.4.13 sandbox container on :3306
