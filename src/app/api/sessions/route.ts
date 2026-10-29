@@ -1,9 +1,17 @@
 import { z } from 'zod';
 import { query } from '@/server/db/pool';
 import { withApiHandler } from '@/server/http/handler';
+import { logger } from '@/server/observability/logger';
 import { CODE_REPOSITORY_MAX, resolveCodeRepository } from '@/server/sessions/codeRepository';
 import { MAX_TICKET_KEYS, createSession } from '@/server/sessions/createSession';
-import { type PlanningSessionDbRow, type PlanningSessionRow, intakeState, mapSessionRow } from '@/server/sessions/repo';
+import { describeIngestError, ingestSources } from '@/server/sessions/ingestSources';
+import {
+  type PlanningSessionDbRow,
+  type PlanningSessionRow,
+  getSessionById,
+  intakeState,
+  mapSessionRow,
+} from '@/server/sessions/repo';
 
 // Server-only route; never cache.
 export const dynamic = 'force-dynamic';
@@ -15,6 +23,8 @@ const createBody = z.object({
   confirmDuplicate: z.boolean().optional(),
   // Optional Azure DevOps repository for code investigation (ADR-0016).
   codeRepository: z.string().trim().min(1).max(CODE_REPOSITORY_MAX).nullable().optional(),
+  // Create and ingest (GI-26): ingest the sources straight after creation.
+  ingest: z.boolean().optional(),
 });
 
 const listQuery = z.object({
@@ -61,6 +71,8 @@ export const GET = withApiHandler({}, async (ctx) => {
 });
 
 // Creates a session. 400 invalid keys or repository, 422 unreadable tickets, 409 existing session for the primary ticket.
+// With ingest: true the sources are ingested after the creation commits; an ingest failure never fails the 201 but is
+// returned as ingestError (GI-26). No session lock is needed: no tab can hold one yet.
 export const POST = withApiHandler({}, async (ctx) => {
   const body = createBody.parse(await ctx.req.json().catch(() => null));
   // Validated before the Jira reads so a bad pick fails fast.
@@ -83,7 +95,30 @@ export const POST = withApiHandler({}, async (ctx) => {
       return errorWith(409, 'session_exists', 'A session already exists for the primary ticket', ctx.correlationId, {
         existingSessionIds: result.existingSessionIds,
       });
-    case 'created':
-      return Response.json({ session: sessionSummary(result.session) }, { status: 201, headers: NO_STORE });
+    case 'created': {
+      let session = result.session;
+      let ingestError: { code: string; message: string; correlationId: string } | undefined;
+      if (body.ingest) {
+        try {
+          await ingestSources(ctx.user!, session.id, { via: 'create', correlationId: ctx.correlationId });
+          session = (await getSessionById(session.id)) ?? session;
+        } catch (err) {
+          // Unexpected errors are logged here, as withApiHandler would; the failure is already audited.
+          const described = describeIngestError(err);
+          if (described.code === 'internal_error') {
+            logger.error({ err, sessionId: session.id }, 'Create and ingest failed');
+          }
+          ingestError = { ...described, correlationId: ctx.correlationId };
+        }
+      }
+      return Response.json(
+        {
+          session: sessionSummary(session),
+          ingested: session.ingestedAt !== null,
+          ...(ingestError ? { ingestError } : {}),
+        },
+        { status: 201, headers: NO_STORE },
+      );
+    }
   }
 });

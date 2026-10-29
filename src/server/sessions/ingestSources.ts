@@ -1,8 +1,17 @@
+import type { PoolClient } from 'pg';
+import { AtlassianApiError } from '@/server/atlassian/client';
+import { recordAudit } from '@/server/audit/audit';
 import type { CurrentUser } from '@/server/auth/session';
+import { ReauthRequiredError } from '@/server/auth/tokens';
 import { withTransaction } from '@/server/db/pool';
 import { HttpError } from '@/server/http/errors';
-import { getSessionById } from './repo';
+import { getCorrelationId } from '@/server/observability/context';
+import { logger } from '@/server/observability/logger';
+import { type PlanningSessionRow, getSessionById } from './repo';
 import {
+  type IngestStatus,
+  type SourceKind,
+  type SourceSnapshot,
   type SourceSnapshotInput,
   collectSources,
   fetchIssues,
@@ -11,8 +20,10 @@ import {
 } from './sources';
 
 // Server-only: never import from src/lib or client components.
-// Refresh sources (SR-2.6): refetch everything, store a new snapshot batch and tell the AI what changed through
-// one 'system' conversation message. Access and lock checks are the caller's (route's) job.
+// Ingest (GI-4) and Refresh sources (SR-2.6) share one core (GI-5): refetch everything as the acting user, store a
+// new snapshot batch and tell the AI about it through one 'system' conversation message. The first ingest is a
+// refresh with an empty previous batch, posting a counts summary instead of an all-"added" diff.
+// Access and lock checks are the caller's (route's) job.
 
 export const MAX_DIFF_CHARS = 4000;
 const DIFF_CONTEXT_LINES = 3;
@@ -110,11 +121,9 @@ function buildMessage(
   return parts.join('\n');
 }
 
-export async function refreshSources(user: CurrentUser, sessionId: string): Promise<RefreshResult> {
-  const session = await getSessionById(sessionId);
-  if (!session) throw new HttpError(404, 'Session not found', 'not_found');
-
-  // Tickets that became unreadable are recorded as unavailable rather than failing the refresh.
+// Shared core: every ticket and its linked sources, fetched as `user`. Tickets that became unreadable are recorded
+// as unavailable jira_issue snapshots rather than failing the whole fetch.
+async function collectBatch(user: CurrentUser, session: PlanningSessionRow): Promise<SourceSnapshotInput[]> {
   const fetched = await fetchIssues(user.accountId, session.ticketKeys);
   const issues = fetched.flatMap((f) => (f.issue ? [f.issue] : []));
   const collected = await collectSources(user.accountId, issues);
@@ -132,7 +141,32 @@ export async function refreshSources(user: CurrentUser, sessionId: string): Prom
           },
         ],
   );
-  const next = [...unreadable, ...collected];
+  return [...unreadable, ...collected];
+}
+
+// Inside the caller's transaction, which must already hold the planning_session row lock (serialises seq).
+async function appendSystemMessage(client: PoolClient, sessionId: string, content: string): Promise<number> {
+  const seq = await client.query<{ seq: number }>(
+    `INSERT INTO conversation_message (session_id, seq, role, content)
+     VALUES ($1, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = $1), 'system', $2)
+     RETURNING seq`,
+    [sessionId, content],
+  );
+  return seq.rows[0].seq;
+}
+
+async function loadSession(sessionId: string): Promise<PlanningSessionRow> {
+  const session = await getSessionById(sessionId);
+  if (!session) throw new HttpError(404, 'Session not found', 'not_found');
+  return session;
+}
+
+export async function refreshSources(user: CurrentUser, sessionId: string): Promise<RefreshResult> {
+  const session = await loadSession(sessionId);
+  // GI-6: the first batch comes from Ingest, which posts the summary message instead of a diff.
+  if (!session.ingestedAt) throw new HttpError(409, 'Sources have not been ingested yet', 'not_ingested');
+
+  const next = await collectBatch(user, session);
   const previous = await loadCurrentSnapshots(session.id);
 
   const previousByKey = new Map(previous.map((s) => [keyOf(s), s]));
@@ -150,13 +184,7 @@ export async function refreshSources(user: CurrentUser, sessionId: string): Prom
     await client.query('SELECT 1 FROM planning_session WHERE id = $1 FOR UPDATE', [session.id]);
     await insertSnapshots(client, session.id, next, retrievedAt);
     if (added.length === 0 && removed.length === 0 && changed.length === 0) return null;
-    const seq = await client.query<{ seq: number }>(
-      `INSERT INTO conversation_message (session_id, seq, role, content)
-       VALUES ($1, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = $1), 'system', $2)
-       RETURNING seq`,
-      [session.id, buildMessage(retrievedAt, added, removed, changed)],
-    );
-    return seq.rows[0].seq;
+    return appendSystemMessage(client, session.id, buildMessage(retrievedAt, added, removed, changed));
   });
 
   return {
@@ -165,5 +193,122 @@ export async function refreshSources(user: CurrentUser, sessionId: string): Prom
     changed: changed.map(({ after }) => change(after)),
     messageSeq,
     retrievedAt,
+  };
+}
+
+export type IngestVia = 'ingest' | 'create';
+
+export interface IngestCounts {
+  counts: Record<SourceKind, number>;
+  statuses: Record<IngestStatus, number>;
+}
+
+export interface IngestResult extends IngestCounts {
+  ingestedAt: Date;
+  // The batch just stored, as loadCurrentSnapshots returns it.
+  sources: SourceSnapshot[];
+  messageSeq: number;
+}
+
+export function countSources(snapshots: readonly SourceSnapshotInput[]): IngestCounts {
+  const counts: Record<SourceKind, number> = { jira_issue: 0, confluence_page: 0, attachment: 0 };
+  const statuses: Record<IngestStatus, number> = { ingested: 0, listed: 0, unavailable: 0, truncated: 0 };
+  for (const s of snapshots) {
+    counts[s.kind]++;
+    statuses[s.ingestStatus]++;
+  }
+  return { counts, statuses };
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+// GI-4 summary message.
+export function buildIngestMessage(ingestedAt: Date, { counts, statuses }: IngestCounts): string {
+  return (
+    `Sources ingested at ${ingestedAt.toISOString()}: ` +
+    `${plural(counts.jira_issue, 'Jira issue', 'Jira issues')}, ` +
+    `${plural(counts.confluence_page, 'Confluence page', 'Confluence pages')}, ` +
+    `${plural(counts.attachment, 'attachment', 'attachments')} ` +
+    `(${statuses.listed} listed only, ${statuses.unavailable} unavailable, ${statuses.truncated} truncated).`
+  );
+}
+
+// The stable code and user-facing message an ingest failure is reported and audited with. Unexpected errors get a
+// generic message, as withApiHandler renders them; the details stay in the logs.
+export function describeIngestError(err: unknown): { code: string; message: string } {
+  if (err instanceof HttpError) return { code: err.code ?? `http_${err.status}`, message: err.message };
+  if (err instanceof AtlassianApiError || err instanceof ReauthRequiredError) {
+    return { code: err.code, message: err.message };
+  }
+  return { code: 'internal_error', message: 'Unexpected error' };
+}
+
+const alreadyIngested = () =>
+  new HttpError(409, 'Sources are already ingested; use Refresh sources', 'already_ingested');
+
+// First ingestion (GI-4, GI-26). `via` records whether it came from the Ingest button or Create and ingest.
+// A failure leaves ingested_at NULL and is audited; 404 and already_ingested are not ingest attempts.
+export async function ingestSources(
+  user: CurrentUser,
+  sessionId: string,
+  options: { via?: IngestVia; correlationId?: string | null } = {},
+): Promise<IngestResult> {
+  const session = await loadSession(sessionId);
+  if (session.ingestedAt) throw alreadyIngested();
+  const via = options.via ?? 'ingest';
+  const correlationId = options.correlationId ?? getCorrelationId() ?? null;
+  const audit = {
+    userId: user.accountId,
+    userDisplayName: user.displayName,
+    sessionId: session.id,
+    ticketIds: session.ticketKeys,
+    correlationId,
+  };
+
+  let committed: { ingestedAt: Date; messageSeq: number; counts: IngestCounts };
+  try {
+    // Slow Atlassian calls stay outside the transaction.
+    const next = await collectBatch(user, session);
+    const ingestedAt = new Date();
+    const counts = countSources(next);
+    committed = await withTransaction(async (client) => {
+      // Re-check under the row lock: a racing ingest may have committed while we fetched. Throwing rolls back.
+      const locked = await client.query<{ ingested_at: Date | null }>(
+        'SELECT ingested_at FROM planning_session WHERE id = $1 FOR UPDATE',
+        [session.id],
+      );
+      if (locked.rows[0]?.ingested_at) throw alreadyIngested();
+      await insertSnapshots(client, session.id, next, ingestedAt);
+      await client.query('UPDATE planning_session SET ingested_at = $2 WHERE id = $1', [session.id, ingestedAt]);
+      const messageSeq = await appendSystemMessage(client, session.id, buildIngestMessage(ingestedAt, counts));
+      await recordAudit(
+        { ...audit, action: 'sources.ingested', result: 'success', details: { ...counts, via } },
+        client,
+      );
+      return { ingestedAt, messageSeq, counts };
+    });
+  } catch (err) {
+    if (err instanceof HttpError && err.code === 'already_ingested') throw err;
+    try {
+      await recordAudit({
+        ...audit,
+        action: 'sources.ingested',
+        result: 'failure',
+        details: { via, errorCode: describeIngestError(err).code },
+      });
+    } catch (auditErr) {
+      // The ingest error is what the caller must see.
+      logger.error({ err: auditErr, sessionId: session.id }, 'Failed to record sources.ingested failure audit');
+    }
+    throw err;
+  }
+
+  return {
+    ingestedAt: committed.ingestedAt,
+    ...committed.counts,
+    messageSeq: committed.messageSeq,
+    sources: await loadCurrentSnapshots(session.id),
   };
 }
