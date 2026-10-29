@@ -263,7 +263,7 @@ async function sessionStatus(id: string): Promise<string> {
 
 beforeAll(async () => {
   await resetDatabase();
-  await db.query('DROP SCHEMA IF EXISTS pgboss CASCADE');
+  await db.query('DELETE FROM job');
   resetConfigForTests();
   resetLlmClientForTests();
   fake = getLlmClient() as FakeLlmClient;
@@ -290,7 +290,7 @@ afterEach(() => {
 
 afterAll(async () => {
   await stopQueue();
-  await db.query('DROP SCHEMA IF EXISTS pgboss CASCADE');
+  await db.query('DELETE FROM job');
   await db.end();
 });
 

@@ -545,7 +545,6 @@ async function resetDatabase(): Promise<void> {
   const db = new Client({ connectionString: DATABASE_URL });
   await db.connect();
   try {
-    await db.query('DROP SCHEMA IF EXISTS pgboss CASCADE'); // job queue state from an earlier run
     await db.query('DROP SCHEMA public CASCADE');
     await db.query('CREATE SCHEMA public');
   } finally {

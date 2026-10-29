@@ -11,7 +11,7 @@ There is one image, `techplanner`, for every role. The `ROLE` environment variab
 | `ROLE`          | Process                                          | Lifetime                         |
 | --------------- | ------------------------------------------------ | -------------------------------- |
 | `web` (default) | Next.js standalone server on `PORT` (3000)       | long-running, `HEALTHCHECK` on `/healthz` |
-| `worker`        | pg-boss job worker (`npm run worker` equivalent) | long-running                     |
+| `worker`        | job queue worker (`npm run worker` equivalent)   | long-running                     |
 | `migrate`       | forward-only migration runner (`npm run migrate` equivalent) | one-shot, exits 0 on success |
 
 - `web` and `worker` **never** run migrations. Migrations run only through the explicit `migrate` role.

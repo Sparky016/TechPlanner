@@ -28,6 +28,7 @@ export function runScript(script: string): string {
 
 /**
  * Destroys all data: drops and recreates schema public, then migrates (as tests/integration/setup.ts does).
+ * The job queue lives in schema public too, so no job from an earlier spec survives the reset.
  * scripts/migrate.ts runs as a child process because Playwright's loader cannot import it (import.meta).
  */
 export async function resetDatabase(): Promise<void> {

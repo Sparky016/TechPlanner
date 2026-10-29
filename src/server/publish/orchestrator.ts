@@ -215,8 +215,8 @@ export async function startPublish(input: StartPublishInput): Promise<StartPubli
   return { kind: 'started', runId, revisionNumber };
 }
 
-// pg-boss cannot join the publish transaction, so the job is queued after commit. If queueing fails the run is
-// marked failed (its steps stay pending) so that Retry can pick it up.
+// enqueue() runs on its own pooled connection, outside the publish transaction, so the job is queued after commit.
+// If queueing fails the run is marked failed (its steps stay pending) so that Retry can pick it up.
 async function enqueueRun(runId: string, options: { confluenceAction?: ConfluenceAction }): Promise<void> {
   try {
     await enqueue(JOB_NAMES.publishRun, { runId, ...(options.confluenceAction ? { options } : {}) });

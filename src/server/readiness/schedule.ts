@@ -1,5 +1,4 @@
-import { query } from '@/server/db/pool';
-import { enqueue } from '@/server/jobs/queue';
+import { enqueue, hasPendingJob } from '@/server/jobs/queue';
 import { JOB_NAMES } from '@/server/jobs/names';
 
 // Server-only: never import from src/lib or client components.
@@ -19,13 +18,5 @@ export async function scheduleEvaluation(sessionId: string): Promise<boolean> {
 
 /** True while a queued, retrying or active evaluation job exists for the session. */
 export async function isEvaluationPending(sessionId: string): Promise<boolean> {
-  // The pg-boss schema is created lazily by the first queue start.
-  const [exists] = await query<{ present: boolean }>("SELECT to_regclass('pgboss.job') IS NOT NULL AS present");
-  if (!exists?.present) return false;
-  const rows = await query(
-    `SELECT 1 FROM pgboss.job
-     WHERE name = ? AND singleton_key = ? AND state IN ('created', 'retry', 'active') LIMIT 1`,
-    [JOB_NAMES.readinessEvaluate, sessionId],
-  );
-  return rows.length > 0;
+  return hasPendingJob(JOB_NAMES.readinessEvaluate, sessionId);
 }
