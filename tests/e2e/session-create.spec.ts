@@ -1,11 +1,37 @@
 import { expect, test } from '@playwright/test';
-import { createSession, login, resetAll, sql } from './support/helpers';
+import { createSession, ingestButton, login, resetAll, sql } from './support/helpers';
 
 test.beforeEach(async ({ request }) => {
   await resetAll(request);
 });
 
-test('AC-2: creating a session with ABC-123 shows its description, comments, attachments and linked Confluence pages', async ({
+test('GI-2: creating a session ingests nothing; the workspace offers Ingest ticket', async ({ page }) => {
+  await login(page);
+  const sessionId = await createSession(page, 'ABC-123', { ingest: false });
+
+  await expect(page.getByRole('heading', { name: 'ABC-123' })).toBeVisible();
+  await expect(page.getByText('Sources not ingested yet.')).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Sources' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Refresh sources' })).toHaveCount(0);
+  await expect(ingestButton(page)).toBeEnabled();
+  expect(await sql('SELECT 1 FROM source_snapshot WHERE session_id = $1', [sessionId])).toHaveLength(0);
+  const [row] = await sql<{ ingested_at: Date | null; analyzed_at: Date | null }>(
+    'SELECT ingested_at, analyzed_at FROM planning_session WHERE id = $1',
+    [sessionId],
+  );
+  expect(row).toEqual({ ingested_at: null, analyzed_at: null });
+  const created = await sql('SELECT 1 FROM audit_record WHERE action = $1 AND session_id = $2', ['draft.created', sessionId]);
+  expect(created).toHaveLength(1);
+
+  // The sources appear only after the facilitator ingests (Analyze after ingest unchecked: no AI turn is consumed).
+  await page.getByLabel('Analyze after ingest').uncheck();
+  await ingestButton(page).click();
+  await expect(page.getByRole('list', { name: 'Sources' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Sources not ingested yet.')).toHaveCount(0);
+  await expect(ingestButton(page)).toHaveCount(0);
+});
+
+test('AC-2: ingesting a session with ABC-123 shows its description, comments, attachments and linked Confluence pages', async ({
   page,
 }) => {
   await login(page);

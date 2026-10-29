@@ -52,6 +52,8 @@ const envSchema = z
     // With LLM_FAKE=1: path to a JSON scenario file scripting the fake (tests/e2e/fixtures/llm-script.json).
     LLM_FAKE_SCRIPT: optional(z.string().min(1)),
     CONTEXT_TOKEN_BUDGET: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(150000)),
+    // Question limit of the initial analysis turn (GI-10, GD-2); every other turn keeps D-7's 3.
+    ANALYSIS_MAX_QUESTIONS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(8)),
     CONFLUENCE_SPACE_KEY: required,
     CONFLUENCE_PARENT_PAGE_ID: required,
     CONFLUENCE_PROJECT_OVERRIDES: optional(jsonString(projectOverrides)),

@@ -28,6 +28,19 @@ test('AC-13: ending clarification stops proactive AI questions', async ({ page }
 
   const rows = await sql('SELECT 1 FROM ai_question WHERE session_id = $1', [sessionId]);
   expect(rows).toHaveLength(1);
+
+  // The question is closed with Resolve (which replaced Dismiss): not relevant, with a reason.
+  const open = page.getByRole('region', { name: 'AI questions' }).getByRole('listitem').first();
+  await open.getByRole('button', { name: 'Resolve as not relevant' }).click();
+  await open.getByLabel('Reason (optional)').fill('Out of scope for the first release');
+  await open.getByRole('button', { name: 'Confirm resolve' }).click();
+  await expect(page.getByRole('region', { name: 'AI questions' }).getByRole('button', { name: 'Resolved (1)' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'AI questions' }).getByRole('heading', { level: 2 })).toHaveText(
+    'Questions · 0 open · 0 answered',
+  );
+  expect(await sql('SELECT status, resolution, dismiss_reason FROM ai_question WHERE session_id = $1', [sessionId])).toEqual([
+    { status: 'resolved', resolution: 'not_relevant', dismiss_reason: 'Out of scope for the first release' },
+  ]);
   const turns = await sql<{ details: { questions: string[]; clarificationEnded: boolean } }>(
     "SELECT details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1 ORDER BY id",
     [sessionId],

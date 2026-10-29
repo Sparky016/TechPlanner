@@ -1,0 +1,78 @@
+id: "46"
+title: "Question lifecycle API: answer (streamed turn), resolve, reopen; AI context for all questions"
+phase: 7
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["45"]
+status: PENDING
+source: "docs/specs/guided-intake-and-question-answering.md GI-12, GI-14, GI-16, GI-17, GI-19, GI-21, §8.3"
+
+objective: |
+  Let the Facilitator answer a question (persisted, then worked into the spec by an AI turn), resolve it
+  (answered or not relevant), or reopen it, and give every AI turn the full question picture so resolved
+  questions are not asked again.
+
+scope:
+  in:
+    - "POST /api/sessions/:id/questions/:qid/answer { text } (lock): in one transaction set answer_text, answered_at, answered_via='facilitator', status='answered', insert facilitator message with question_id, audit question.answered; then turnStreamResponse with turn { kind: 'answer' }"
+    - "Answer allowed from open and answered; resolved -> 409 question_resolved; >10 000 chars -> 413; not ingested -> 409 not_ingested"
+    - "POST .../resolve { reason? } (lock): answered -> resolved/answered; open -> resolved/not_relevant (reason kept in dismiss_reason); resolved -> 409 question_not_open; audit question.resolved; no AI call"
+    - "POST .../reopen (lock): resolved -> answered when answer_text set, else open; clear resolution/resolved_at; audit question.reopened; 409 question_not_resolved"
+    - "POST .../dismiss becomes an alias of resolve-from-open (same response shape as today plus status 'resolved'); keep for one release"
+    - "mark_question_answered gains optional answerSummary (<= 2000): stores answer_text, answered_via='ai'; only open -> answered"
+    - "context.ts loads every question; prompt.ts renders Open / Answered (with answer and source) / Resolved (resolution, reason, do-not-re-ask rule); discussion line from GI-21 added to the base prompt for message turns"
+  out:
+    - "UI (task 48)"
+
+files:
+  "src/server/questions/lifecycle.ts": "create (answerQuestion, resolveQuestion, reopenQuestion - transactional, audited)"
+  "src/app/api/sessions/[id]/questions/[qid]/answer/route.ts": "create"
+  "src/app/api/sessions/[id]/questions/[qid]/resolve/route.ts": "create"
+  "src/app/api/sessions/[id]/questions/[qid]/reopen/route.ts": "create"
+  "src/app/api/sessions/[id]/questions/[qid]/dismiss/route.ts": "update to delegate to resolveQuestion"
+  "src/server/facilitator/tools.ts": "update mark_question_answered"
+  "src/server/facilitator/context.ts": "update (questions grouped)"
+  "src/server/facilitator/prompt.ts": "update buildContextMessage"
+  "src/server/facilitator/facilitator.test.ts": "update"
+  "src/server/facilitator/__snapshots__/facilitator.test.ts.snap": "update"
+  "tests/integration/questionsApi.test.ts": "create"
+  "tests/integration/conversationApi.test.ts": "update dismiss AC4 expectations"
+
+implementation_notes: |
+  Conventions: lock the question row FOR UPDATE inside the transaction (dismiss route pattern); reuse
+  isUuid() for qid; MAX_REASON_CHARS 500; MAX_MESSAGE_CHARS 10 000 from the messages route (export it).
+  Answer ordering matters: persist answer + message BEFORE acquiring the turn advisory lock would leave an
+  answered question with no turn on 409. Acquire the turn lock first (turnStream), then run answerQuestion as
+  the first step of the run callback, then the facilitator turn. On 409 nothing is persisted.
+  ContextQuestion gains status, answerText, answeredVia, resolution, reason. Keep 'Open AI questions' heading
+  text stable for the existing snapshot where possible.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Answering streams a turn whose ANSWER_TEXT names the question; question is answered with answer_text; facilitator message has question_id; question.answered audited"
+    verify: "npm run test:integration -- questionsApi"
+  - id: AC2
+    behavior: "LLM failure during an answer turn keeps the answer and status answered; re-answering replaces answer_text and runs a new turn"
+    verify: "npm run test:integration -- questionsApi"
+  - id: AC3
+    behavior: "Resolve from answered/open sets the right resolution; reopen restores answered/open; every invalid transition returns its 409"
+    verify: "npm run test:integration -- questionsApi"
+  - id: AC4
+    behavior: "Legacy /dismiss resolves as not_relevant and audits question.resolved"
+    verify: "npm run test:integration -- conversationApi"
+  - id: AC5
+    behavior: "Context message lists answered and resolved questions with the do-not-re-ask rule (snapshot); mark_question_answered stores answerSummary and refuses resolved questions"
+    verify: "npm test"
+
+risks_vulnerabilities:
+  - risk: "Answer text is user input fed back to the model"
+    mitigation: "Same handling as facilitator messages (trusted facilitator input); question text is AI-authored, rendered as data in ANSWER_TEXT"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-46): question answer, resolve and reopen with full question context

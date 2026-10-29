@@ -1,0 +1,56 @@
+id: "48"
+title: "Questions UI: grouped list, inline Answer, Resolve, Edit answer, Reopen"
+phase: 7
+severity: high
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["46", "47"]
+status: PENDING
+source: "docs/specs/guided-intake-and-question-answering.md GI-12-GI-18, §6 accessibility, §9"
+
+objective: |
+  Make the Questions list the main work queue: answer a question inline and watch it worked into the spec,
+  resolve or reopen questions, grouped by state.
+
+scope:
+  in:
+    - "Header 'Questions · N open · N answered'; groups Open (oldest first), 'Answered — awaiting resolve', Resolved (collapsed, with count)"
+    - "Open item: Answer (inline textarea, Send answer, Cancel, Ctrl/Cmd+Enter) and 'Resolve as not relevant' (existing reason form, relabelled)"
+    - "Answered item: answer text (label 'Answered in discussion (AI summary)' when answeredVia='ai'), Resolve (one click), Edit answer (prefilled form)"
+    - "Resolved item: resolution label, reason, Reopen"
+    - "Send answer -> runTurn({ path: .../answer, body: { text } }); item shows 'AI is updating the specification…'; on done show patched sections (from patch events) or 'N suggestion(s) pending'"
+    - "409 turn_in_progress / failure before streaming -> restore the text in the form; ai_unavailable -> GI-14 banner text"
+    - "All actions disabled when readOnly or turnInProgress; focus to textarea on open, back to Answer on cancel; aria-live status region"
+  out:
+    - "Batch answering (GD-9, out of scope)"
+
+files:
+  "src/components/workspace/left/QuestionsList.tsx": "update"
+  "src/components/workspace/left/QuestionsList.test.tsx": "update"
+
+implementation_notes: |
+  Conventions: useWorkspace().runTurn/turnInProgress from task 47; reload the list on question/done bus events
+  (existing) and after resolve/reopen. Render all text as plain text (never HTML).
+  Collect patch/suggestion events for the active answer turn by subscribing via useWorkspaceEvents while that
+  question's turn runs.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Questions render in three groups with counts; Resolved collapsed by default"
+    verify: "npm test -- QuestionsList"
+  - id: AC2
+    behavior: "Answer posts to /answer, shows progress, then the answer and patched sections; failure before streaming restores the text"
+    verify: "npm test -- QuestionsList"
+  - id: AC3
+    behavior: "Resolve from open sends reason to /resolve; Resolve from answered sends no body; Reopen posts /reopen; buttons disabled when readOnly or a turn is running"
+    verify: "npm test -- QuestionsList"
+
+risks_vulnerabilities: []
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-48): answer, resolve and reopen AI questions in the left panel

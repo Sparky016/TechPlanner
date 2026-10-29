@@ -5,6 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import { emptySections } from '../src/lib/spec/document';
 import { SECTION_NAMES, type SectionName } from '../src/lib/spec/sections';
+import type { TurnKind } from '../src/server/facilitator/runTurn';
 import { findMatch, judgeMatch, rate, type Candidate, type CheckTally, type SeededGap } from './matchers';
 
 // LLM behaviour eval harness (task 40, SPEC_DOC §8 / §10 AC3). `npm run eval:llm [-- --validate-only]`.
@@ -13,6 +14,7 @@ import { findMatch, judgeMatch, rate, type Candidate, type CheckTally, type Seed
 
 const FIXTURES_DIR = join(process.cwd(), 'evals', 'fixtures');
 const REPORT_PATH = join(process.cwd(), 'evals', 'report.json');
+const ANALYSIS_REPORT_PATH = join(process.cwd(), 'evals', 'report-analysis.json');
 const DEFAULT_EVAL_DATABASE_URL = 'postgres://techplanner:techplanner@localhost:5432/techplanner_eval';
 
 const MIN_FIXTURES = 20;
@@ -32,6 +34,15 @@ export const THRESHOLDS = {
   releaseAc3: 1,
 } as const;
 type CheckId = keyof typeof THRESHOLDS;
+
+// `conversation` (default): kickoff + scripted replies, plus the evaluator checks (a)-(d).
+// `analysis` (guided intake, GI-10): the initial analysis turn only; scores check (a) on that single turn.
+type EvalMode = 'conversation' | 'analysis';
+/** Checks scored per mode; the others are not run in that mode. */
+const MODE_CHECKS: Record<EvalMode, CheckId[]> = {
+  conversation: ['facilitatorAsksGap', 'evaluatorRaisesGap', 'vagueNeverComplete', 'releaseAc3'],
+  analysis: ['facilitatorAsksGap'],
+};
 
 // ---------------------------------------------------------------------------------------------------------------
 // Fixture schema
@@ -115,15 +126,20 @@ interface Options {
   validateOnly: boolean;
   repeat: number;
   judge: boolean;
+  mode: EvalMode;
 }
 
 function parseArgs(argv: string[]): Options {
-  const opts: Options = { validateOnly: false, repeat: 1, judge: false };
+  const opts: Options = { validateOnly: false, repeat: 1, judge: false, mode: 'conversation' };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--validate-only') opts.validateOnly = true;
     else if (arg === '--judge') opts.judge = true;
-    else if (arg === '--repeat' || arg.startsWith('--repeat=')) {
+    else if (arg === '--mode' || arg.startsWith('--mode=')) {
+      const value = arg.includes('=') ? arg.split('=')[1] : argv[++i];
+      if (value !== 'conversation' && value !== 'analysis') throw new Error('--mode needs "conversation" or "analysis"');
+      opts.mode = value;
+    } else if (arg === '--repeat' || arg.startsWith('--repeat=')) {
       const value = arg.includes('=') ? arg.split('=')[1] : argv[++i];
       const n = Number(value);
       if (!Number.isInteger(n) || n < 1) throw new Error('--repeat needs a positive integer');
@@ -198,9 +214,9 @@ function summarise(results: FixtureResult[]): Record<CheckId, CheckTally> {
   return t;
 }
 
-function withThresholds(tallies: Record<CheckId, CheckTally>): Record<CheckId, CheckSummary> {
-  const out = {} as Record<CheckId, CheckSummary>;
-  for (const id of Object.keys(THRESHOLDS) as CheckId[]) {
+function withThresholds(tallies: Record<CheckId, CheckTally>, ids: CheckId[]): Partial<Record<CheckId, CheckSummary>> {
+  const out: Partial<Record<CheckId, CheckSummary>> = {};
+  for (const id of ids) {
     const r = rate(tallies[id]);
     out[id] = { ...tallies[id], rate: r, threshold: THRESHOLDS[id], pass: r !== null && r >= THRESHOLDS[id] };
   }
@@ -266,7 +282,8 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
   async function createSession(f: Fixture, run: number, purpose: string): Promise<string> {
     return withTransaction(async (client) => {
       const { rows } = await client.query<{ id: string }>(
-        'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ($1, ARRAY[$1]) RETURNING id',
+        // ingested_at is set: AI turns are refused before ingestion (GI-23) and the seeded snapshot stands for the ingest.
+        'INSERT INTO planning_session (primary_ticket_key, ticket_keys, ingested_at) VALUES ($1, ARRAY[$1], now()) RETURNING id',
         [f.ticket.key],
       );
       const sessionId = rows[0].id;
@@ -318,11 +335,15 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
 
     // Facilitator: kickoff plus scripted replies; questions are read from the turn events.
     const facSession = await createSession(f, run, 'facilitator');
-    const messages = [KICKOFF_MESSAGE, ...f.replies.slice(0, FACILITATOR_TURNS - 1)];
-    for (const [i, text] of messages.entries()) {
+    // Analysis mode: the single initial analysis turn (GI-10); no scripted replies, no evaluator.
+    const turns: TurnKind[] =
+      opts.mode === 'analysis'
+        ? [{ kind: 'analysis' }]
+        : [KICKOFF_MESSAGE, ...f.replies.slice(0, FACILITATOR_TURNS - 1)].map((text) => ({ kind: 'message', text }));
+    for (const [i, turnKind] of turns.entries()) {
       const turn = i + 1;
       try {
-        for await (const event of runFacilitatorTurn({ sessionId: facSession, user, text })) {
+        for await (const event of runFacilitatorTurn({ sessionId: facSession, user, turn: turnKind })) {
           if (event.type === 'question') result.questions.push({ turn, text: event.text, section: event.section });
           else if (event.type === 'error') result.turnErrors.push(`turn ${turn}: ${event.code}: ${event.message}`);
         }
@@ -330,6 +351,14 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
         result.turnErrors.push(`turn ${turn}: ${errorMessage(err)}`);
       }
       if (result.turnErrors.length > 0) break;
+    }
+
+    if (opts.mode === 'analysis') {
+      for (const gap of f.seededCriticalGaps) {
+        const asked = (await match(result.questions, gap)) as QuestionRecord | undefined;
+        result.gaps.push({ id: gap.id, section: gap.section, askedInTurn: asked?.turn ?? null, askedBy: asked?.text ?? null, raisedBy: null });
+      }
+      return result;
     }
 
     // Evaluator: a separate session holding the same seeded draft, so the facilitator's edits and the evaluator's
@@ -389,8 +418,11 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
         const vague = res.vague.filter((v) => v.pass).length;
         const errors = [...res.turnErrors, ...(res.evaluationError ? [`evaluation: ${res.evaluationError}`] : [])];
         console.log(
-          `[${r}/${opts.repeat}] ${f.id.padEnd(32)} asked ${asked}/${res.gaps.length}  raised ${raised}/${res.gaps.length}` +
-            `  vague ${vague}/${res.vague.length}${res.releaseAc3 ? `  AC3 ${res.releaseAc3.pass ? 'pass' : 'FAIL'}` : ''}` +
+          `[${r}/${opts.repeat}] ${f.id.padEnd(32)} asked ${asked}/${res.gaps.length}` +
+            (opts.mode === 'analysis'
+              ? ''
+              : `  raised ${raised}/${res.gaps.length}  vague ${vague}/${res.vague.length}` +
+                (res.releaseAc3 ? `  AC3 ${res.releaseAc3.pass ? 'pass' : 'FAIL'}` : '')) +
             (errors.length ? `  errors: ${errors.join('; ')}` : ''),
         );
       }
@@ -402,12 +434,15 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
     await db.end().catch(() => undefined);
   }
 
-  const checks = withThresholds(summarise(results));
-  const heldOut = summarise(results.filter((r) => r.heldOut));
+  const checkIds = MODE_CHECKS[opts.mode];
+  const checks = withThresholds(summarise(results), checkIds);
+  const heldOutAll = summarise(results.filter((r) => r.heldOut));
+  const heldOut = Object.fromEntries(checkIds.map((id) => [id, heldOutAll[id]]));
   const pass = Object.values(checks).every((c) => c.pass);
   const report = {
     generatedAt: new Date().toISOString(),
     mode: fake ? 'fake' : 'real',
+    evalMode: opts.mode,
     models: { facilitator: cfg.FACILITATOR_MODEL, evaluator: cfg.EVALUATOR_MODEL },
     repeat: opts.repeat,
     judge: opts.judge,
@@ -417,23 +452,27 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
     pass,
     results,
   };
-  await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  const reportPath = opts.mode === 'analysis' ? ANALYSIS_REPORT_PATH : REPORT_PATH;
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 
   console.log(`\nLLM behaviour evals (${report.mode} model${fake ? ' — plumbing only, not a real result' : ''})`);
   const labels: Record<CheckId, string> = {
-    facilitatorAsksGap: '(a) facilitator asks each seeded gap within 3 turns',
+    facilitatorAsksGap:
+      opts.mode === 'analysis'
+        ? '(a) analysis turn asks about each seeded gap'
+        : '(a) facilitator asks each seeded gap within 3 turns',
     evaluatorRaisesGap: '(b) evaluator raises a critical issue per seeded gap',
     vagueNeverComplete: '(c) vague section never marked complete',
     releaseAc3: '(d) release AC3: missing acceptance criteria',
   };
-  for (const id of Object.keys(THRESHOLDS) as CheckId[]) {
-    const c = checks[id];
+  for (const id of checkIds) {
+    const c = checks[id] as CheckSummary;
     const pct = c.rate === null ? 'n/a' : `${(c.rate * 100).toFixed(1)}%`;
     console.log(
       `${c.pass ? 'PASS' : 'FAIL'}  ${labels[id].padEnd(54)} ${c.passed}/${c.total} = ${pct} (threshold ${THRESHOLDS[id] * 100}%)`,
     );
   }
-  console.log(`Report: ${REPORT_PATH}`);
+  console.log(`Report: ${reportPath}`);
   return pass ? 0 : 1;
 }
 

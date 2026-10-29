@@ -1,13 +1,14 @@
 import { recordAudit } from '@/server/audit/audit';
-import { isValidIssueKey, type JiraIssueSnapshot } from '@/server/atlassian/jira';
+import { isValidIssueKey } from '@/server/atlassian/jira';
 import type { CurrentUser } from '@/server/auth/session';
 import { query, withTransaction } from '@/server/db/pool';
 import { initWorkingCopy } from '@/server/spec/workingCopyRepo';
 import { type PlanningSessionDbRow, type PlanningSessionRow, mapSessionRow } from './repo';
-import { collectSources, fetchIssues, insertSnapshots } from './sources';
+import { fetchIssues } from './sources';
 
 // Server-only: never import from src/lib or client components.
-// Creates a Planning Session from Jira keys (SR-2.1, SR-2.5–SR-2.8). Partial source failures never fail creation.
+// Creates a Planning Session from Jira keys (SR-2.1, SR-2.5–SR-2.8). Sources are not ingested here (GI-2): that is
+// ingestSources, run by POST /ingest or, for Create and ingest, by the route after this transaction commits.
 
 // The spec sets no maximum; 10 is the task's fallback.
 export const MAX_TICKET_KEYS = 10;
@@ -37,7 +38,6 @@ export async function createSession(
   const fetched = await fetchIssues(user.accountId, keys);
   const unreadable = fetched.filter((f) => f.issue === null).map((f) => f.key);
   if (unreadable.length > 0) return { kind: 'unreadable', unreadable };
-  const issues = fetched.map((f) => f.issue).filter((i): i is JiraIssueSnapshot => i !== null);
 
   const primary = keys[0];
   if (!options.confirmDuplicate) {
@@ -48,9 +48,6 @@ export async function createSession(
     if (existing.length > 0) return { kind: 'duplicate', existingSessionIds: existing.map((r) => r.id) };
   }
 
-  const snapshots = await collectSources(user.accountId, issues);
-  const retrievedAt = new Date();
-
   const session = await withTransaction(async (client) => {
     const inserted = await client.query<PlanningSessionDbRow>(
       `INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id, code_repository)
@@ -59,7 +56,6 @@ export async function createSession(
       [primary, keys, user.accountId, options.codeRepository ?? null],
     );
     const row = mapSessionRow(inserted.rows[0]);
-    await insertSnapshots(client, row.id, snapshots, retrievedAt);
     await initWorkingCopy(row.id, undefined, client);
     await recordAudit(
       {
@@ -69,7 +65,7 @@ export async function createSession(
         userDisplayName: user.displayName,
         sessionId: row.id,
         ticketIds: keys,
-        details: { sourceCount: snapshots.length, ...(options.codeRepository ? { codeRepository: options.codeRepository } : {}) },
+        details: options.codeRepository ? { codeRepository: options.codeRepository } : {},
         correlationId: options.correlationId ?? null,
       },
       client,

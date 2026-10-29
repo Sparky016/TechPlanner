@@ -118,14 +118,77 @@ export async function login(page: Page): Promise<void> {
   await expect(notice).toBeHidden();
 }
 
-/** Creates a session from the New session form and waits until this tab holds the session lock. Returns its id. */
-export async function createSession(page: Page, keys: string): Promise<string> {
+export interface CreateSessionOptions {
+  /**
+   * How the session gets its sources. 'button' (default): Create session, then Ingest ticket(s).
+   * 'create': the Create and ingest button. false: Create session only; the session stays not_ingested.
+   */
+  ingest?: 'button' | 'create' | false;
+  /**
+   * Whether the AI analysis runs after ingesting (the 'Analyze after ingest' checkbox). Default false, so specs keep
+   * the scripted LLM turns they were written for. With ingest 'create' the analysis always starts (?analyze=1).
+   */
+  analyze?: boolean;
+}
+
+/** The Ingest ticket / Ingest tickets button of the Sources block. */
+export function ingestButton(page: Page) {
+  return page.getByRole('button', { name: /^Ingest tickets?$/ });
+}
+
+/** The 'Discuss with AI' toggle (the panel is collapsed by default once questions exist). */
+export function discussToggle(page: Page) {
+  return page.getByRole('button', { name: 'Discuss with AI', exact: true });
+}
+
+/** Expands the Discuss with AI panel if it is collapsed. */
+export async function openDiscussion(page: Page): Promise<void> {
+  const toggle = discussToggle(page);
+  await expect(toggle).toBeEnabled({ timeout: 30_000 });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+}
+
+/** Waits for any running intake step (ingesting, analyzing) and AI turn to finish. */
+export async function waitForIntakeIdle(page: Page): Promise<void> {
+  await expect(page.getByTestId('intake-status')).toHaveText('', { timeout: 60_000 });
+  await expect(page.getByRole('button', { name: 'AI is responding…' })).toBeHidden({ timeout: 60_000 });
+}
+
+/**
+ * Creates a session from the New session form and waits until this tab holds the session lock and the requested
+ * intake step is done. Returns its id. Defaults to the cheapest path that keeps scripted LLM turns for later steps:
+ * Create session, then Ingest ticket with 'Analyze after ingest' unchecked.
+ */
+export async function createSession(page: Page, keys: string, options: CreateSessionOptions = {}): Promise<string> {
+  const { ingest = 'button', analyze = false } = options;
   await page.goto('/sessions/new');
   await page.getByLabel('Jira ticket keys').fill(keys);
-  await page.getByRole('button', { name: 'Create session' }).click();
-  await page.waitForURL(/\/sessions\/[0-9a-f-]{36}$/, { timeout: 60_000 });
-  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled({ timeout: 30_000 });
-  return page.url().split('/').pop() as string;
+  await page.getByRole('button', { name: ingest === 'create' ? 'Create and ingest' : 'Create session', exact: true }).click();
+  await page.waitForURL(/\/sessions\/[0-9a-f-]{36}(\?analyze=1)?$/, { timeout: 60_000 });
+  const sessionId = new URL(page.url()).pathname.split('/').pop() as string;
+
+  if (ingest === 'create') {
+    await expect(page.getByRole('list', { name: 'Sources' })).toBeVisible({ timeout: 30_000 });
+    return sessionId;
+  }
+  // The Ingest button is enabled once this tab holds the session lock.
+  await expect(ingestButton(page)).toBeEnabled({ timeout: 30_000 });
+  if (ingest === false) return sessionId;
+
+  const analyzeBox = page.getByLabel('Analyze after ingest');
+  if (analyze) await analyzeBox.check();
+  else await analyzeBox.uncheck();
+  await ingestButton(page).click();
+  await expect(page.getByRole('list', { name: 'Sources' })).toBeVisible({ timeout: 30_000 });
+  if (analyze) {
+    await expect(page.getByRole('button', { name: 'Refresh sources' })).toBeEnabled({ timeout: 90_000 });
+    await waitForIntakeIdle(page);
+  } else {
+    await expect(page.getByRole('button', { name: 'Analyze ticket' })).toBeEnabled({ timeout: 30_000 });
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled({ timeout: 30_000 });
+  }
+  return sessionId;
 }
 
 /** Sends a facilitator message and waits for the AI turn to finish. */
@@ -135,6 +198,7 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
 }
 
 export async function startMessage(page: Page, text: string): Promise<void> {
+  await openDiscussion(page);
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill(text);
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByRole('button', { name: 'AI is responding…' })).toBeVisible();

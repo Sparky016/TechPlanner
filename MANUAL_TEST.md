@@ -55,11 +55,12 @@ Sign in before starting this stage.
 | Step | Action | Expected result |
 |------|--------|-----------------|
 | C1 | Open the new-session page from the sessions list | The form asks for ticket keys |
-| C2 | Enter one disposable ticket key (for example `SMOKE-1`) and submit | Redirected to `$BASE/sessions/<id>`. The workspace loads |
+| C2 | Enter one disposable ticket key (for example `SMOKE-1`) and click **Create session** | Redirected to `$BASE/sessions/<id>`. The workspace loads. The Sources block says **Sources not ingested yet.** and offers **Ingest ticket** with **Analyze after ingest** checked. Nothing is ingested at creation |
 | C3 | Go back to the new-session page and submit the same ticket key again | Alert dialog: **A session already exists for this ticket.** The existing session is linked. No new session is created |
 | C4 | Submit a malformed key such as `not a key!!` | Form shows a validation error (API returns `400` with `invalidKeys`). No session is created |
 | C5 | Submit a key that does not exist in Jira, such as `ZZZ-99999` | Form shows an unreadable-ticket error (API returns `422` with `unreadable`). No session is created |
 | C6 | Return to the sessions list | The session from C2 is listed. Duplicate and invalid attempts do not appear |
+| C7 | Create a second session with **Create and ingest** (another disposable key, or confirm the duplicate with **Create another session anyway**) | The button reads **Creating and ingesting…** while it runs. The workspace opens with the sources listed and the analysis streaming in **Discuss with AI** (`?analyze=1` is removed from the address bar). Reloading the page does not start a second analysis. Use the session from C2 for Stage D |
 
 ## Stage D: Workspace
 
@@ -72,10 +73,16 @@ The workspace has three panels, each with an accessible label:
 
 | Step | Action | Expected result |
 |------|--------|-----------------|
-| D1 | Open `$BASE/sessions/<id>` | All three panels render. The ticket context from Jira is shown in the session header |
-| D2 | Click **Refresh sources** in the session header | Completes without an error. Source status is updated |
+| D1 | Open `$BASE/sessions/<id>` | All three panels render. The ticket keys are shown in the session header. **Discuss with AI** is disabled with the hint **Ingest the ticket to start the discussion.** |
+| D1a | Leave **Analyze after ingest** unchecked and click **Ingest ticket** | Status says **Ingesting…**, then the sources list shows the Jira issue, linked Confluence pages and attachments with their ingest status. **Ingest ticket** is replaced by **Refresh sources** and **Analyze ticket**. The conversation shows one **System** message "Sources ingested at …" |
+| D1b | Click **Analyze ticket** | Status says **Analyzing <KEY>…**. The AI summary streams into **Discuss with AI**, sections of the specification fill in, and the **AI questions** panel lists up to 8 open questions (`Questions · N open · 0 answered`). **Analyze ticket** disappears |
+| D1c | On one question click **Answer**, type a concrete answer and click **Send answer** | Focus moves to the answer box. The question shows **AI is updating the specification…**, then **Updated sections: …** (or **N suggestion(s) pending.**), and moves to **Answered — awaiting resolve**. The answer appears in **Discuss with AI** as **Answer to: …** |
+| D1d | Click **Resolve** on the answered question | It leaves the list; **Resolved (1)** appears. Expanding it shows **Resolved — answered** and **Reopen** |
+| D1e | On another open question click **Resolve as not relevant**, enter a reason and click **Confirm resolve** | It is listed under **Resolved** as **Resolved — not relevant** with the reason. No AI turn runs |
+| D1f | Click **Discuss with AI**, send `Summarise what is still open` | The AI replies with the resolved questions in mind and does not ask them again |
+| D2 | Click **Refresh sources** in the Sources block | Completes without an error. Source status is updated |
 | D3 | Open **Audit trail** from the session header | Audit trail page opens. It lists at least the session creation event from Stage C |
-| D4 | Return to the session. In the **Session and conversation** panel, type a short message in the message box (`#message-input`) such as `Smoke test: summarise the ticket`, and click **Send** | Button shows **AI is responding…** while streaming. Then the response appears in the conversation. It is either a reply or one or more AI questions. Both are a pass |
+| D4 | Return to the session. In the **Session and conversation** panel, expand **Discuss with AI** if it is collapsed, type a short message in the message box (`#message-input`) such as `Smoke test: summarise the ticket`, and click **Send** | Button shows **AI is responding…** while streaming. Then the response appears in the conversation. It is either a reply or one or more AI questions. Both are a pass |
 | D5 | Wait for the first AI call to finish, then open `$BASE/healthz` in a new tab | The `copilot` check appears with `"ok":true`. If it shows as failed or the request times out, see Troubleshooting |
 | D6 | Add a note. Type `Smoke note` in the notes input (`#note-input`) and click **Add note** | The note is saved and visible after reload |
 | D7 | Wait for a specification suggestion. If one appears in the **Specification** panel, click **Accept**. If it is not accepted, click **Reject** and confirm the spec is unchanged | Accept or reject updates the spec. No error is shown |
@@ -127,7 +134,12 @@ Copy this table into the test log and fill it in.
 | B4 log out returns to /login | | |
 | B5 sign in again | | |
 | B6 denied path shows error=denied | | |
-| C2 create session | | |
+| C2 create session (nothing ingested) | | |
+| C7 Create and ingest | | |
+| D1a ingest | | |
+| D1b analyze | | |
+| D1c-D1e answer, resolve, resolve as not relevant | | |
+| D1f Discuss with AI | | |
 | C3 duplicate shows 409 dialog | | |
 | C4 malformed key rejected (400) | | |
 | C5 unreadable ticket rejected (422) | | |

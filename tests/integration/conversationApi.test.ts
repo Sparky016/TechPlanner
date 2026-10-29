@@ -60,11 +60,13 @@ interface TestSession {
   tabId: string;
 }
 
-async function createLockedSession(): Promise<TestSession> {
+// Ingested by default (AI turns need ingested sources, GI-23); ingested_at is set directly, not via /ingest.
+async function createLockedSession(opts: { ingested?: boolean } = {}): Promise<TestSession> {
   keySeq++;
   const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id) VALUES ($1, ARRAY[$1], $2) RETURNING id',
-    [`CNV-${keySeq}`, ALICE.accountId],
+    `INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id, ingested_at)
+     VALUES ($1, ARRAY[$1], $2, CASE WHEN $3 THEN now() END) RETURNING id`,
+    [`CNV-${keySeq}`, ALICE.accountId, opts.ingested ?? true],
   );
   const id = rows[0].id;
   await initWorkingCopy(id);
@@ -207,6 +209,22 @@ describe('POST /messages (SSE)', () => {
       { seq: 2, role: 'ai', content: 'Drafted scope. One question.' },
     ]);
     expect(typeof messages[0].createdAt).toBe('string');
+  });
+
+  it('returns 409 not_ingested before the sources are ingested and persists nothing (GI-23)', async () => {
+    const s = await createLockedSession({ ingested: false });
+    const res = await sendMessage(s, 'Too early');
+    expect(res.status).toBe(409);
+    expect(await errorCode(res)).toBe('not_ingested');
+    expect(fake.calls).toHaveLength(0);
+    expect(await history(s)).toEqual([]);
+
+    // The turn lock was released: once ingested, a turn runs.
+    await query('UPDATE planning_session SET ingested_at = now() WHERE id = $1', [s.id]);
+    fake.enqueue([patch('Scope', 'Now'), { type: 'done' }]);
+    const ok = await sendMessage(s, 'Now');
+    expect(ok.status).toBe(200);
+    expect((await readSse(ok)).at(-1)?.event).toBe('done');
   });
 
   it('rejects an over-long message, a missing tab id and an empty message', async () => {
@@ -373,28 +391,40 @@ describe('questions', () => {
     });
   }
 
-  it('dismisses a question with a reason and writes question.dismissed (AC4)', async () => {
+  it('dismisses (legacy alias of resolve from open) with a reason and writes question.resolved (AC4)', async () => {
     const s = await createLockedSession();
     const qid = await insertQuestion(s, 'Which IdP?');
     const other = await insertQuestion(s, 'Which region?');
 
     const res = await dismiss(s, qid, { reason: 'Out of scope' });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ id: qid, status: 'dismissed', dismissReason: 'Out of scope' });
+    expect(await res.json()).toEqual({
+      id: qid,
+      status: 'resolved',
+      dismissReason: 'Out of scope',
+      resolution: 'not_relevant',
+    });
 
-    const [row] = await query<{ status: string; dismiss_reason: string }>(
-      'SELECT status, dismiss_reason FROM ai_question WHERE id = $1',
+    const [row] = await query<{ status: string; dismiss_reason: string; resolution: string; resolved_at: Date | null }>(
+      'SELECT status, dismiss_reason, resolution, resolved_at FROM ai_question WHERE id = $1',
       [qid],
     );
-    expect(row).toEqual({ status: 'dismissed', dismiss_reason: 'Out of scope' });
+    expect(row).toEqual({
+      status: 'resolved',
+      dismiss_reason: 'Out of scope',
+      resolution: 'not_relevant',
+      resolved_at: expect.any(Date),
+    });
 
     const audits = await query<{ user_id: string; details: Record<string, unknown>; correlation_id: string }>(
-      "SELECT user_id, details, correlation_id FROM audit_record WHERE session_id = $1 AND action = 'question.dismissed'",
+      "SELECT user_id, details, correlation_id FROM audit_record WHERE session_id = $1 AND action = 'question.resolved'",
       [s.id],
     );
     expect(audits).toHaveLength(1);
     expect(audits[0].user_id).toBe(ALICE.accountId);
-    expect(audits[0].details).toMatchObject({ questionId: qid, reason: 'Out of scope' });
+    expect(audits[0].details).toMatchObject({ questionId: qid, section: 'Security', resolution: 'not_relevant', reason: 'Out of scope' });
+    const legacy = await query("SELECT 1 FROM audit_record WHERE session_id = $1 AND action = 'question.dismissed'", [s.id]);
+    expect(legacy).toHaveLength(0);
     expect(audits[0].correlation_id).toBe(res.headers.get('x-correlation-id'));
 
     const list = await questionsGET(request('GET', `/api/sessions/${s.id}/questions`), {
@@ -403,11 +433,18 @@ describe('questions', () => {
     expect(list.status).toBe(200);
     const { questions } = (await list.json()) as { questions: { id: string; status: string; dismissReason: string | null }[] };
     expect(questions.map(({ id, status, dismissReason }) => ({ id, status, dismissReason }))).toEqual([
-      { id: qid, status: 'dismissed', dismissReason: 'Out of scope' },
+      { id: qid, status: 'resolved', dismissReason: 'Out of scope' },
       { id: other, status: 'open', dismissReason: null },
     ]);
 
-    // Already dismissed -> 409; unknown -> 404; reason too long -> 413.
+    // Only from open: an answered question is rejected (use /resolve).
+    await query("UPDATE ai_question SET status = 'answered', answer_text = 'EU' WHERE id = $1", [other]);
+    const answered = await dismiss(s, other);
+    expect(answered.status).toBe(409);
+    expect(await errorCode(answered)).toBe('question_not_open');
+    await query("UPDATE ai_question SET status = 'open', answer_text = NULL WHERE id = $1", [other]);
+
+    // Already resolved -> 409; unknown -> 404; reason too long -> 413.
     const again = await dismiss(s, qid);
     expect(again.status).toBe(409);
     expect(await errorCode(again)).toBe('question_not_open');
@@ -415,11 +452,56 @@ describe('questions', () => {
     expect((await dismiss(s, other, { reason: 'r'.repeat(501) })).status).toBe(413);
   });
 
+  it('lists the answer and resolution fields, and the question a message answers (GI-12)', async () => {
+    const s = await createLockedSession();
+    const open = await insertQuestion(s, 'Which IdP?');
+    const [answered] = await query<{ id: string }>(
+      `INSERT INTO ai_question (session_id, section, text, status, answer_text, answered_at, answered_via, resolution, resolved_at)
+       VALUES ($1, 'Scope', 'Which region?', 'resolved', 'EU only', '2026-10-02T10:00:00Z', 'facilitator', 'answered',
+               '2026-10-03T10:00:00Z')
+       RETURNING id`,
+      [s.id],
+    );
+    await query(
+      `INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES
+         ($1, 1, 'facilitator', 'Hello', NULL), ($1, 2, 'facilitator', 'EU only', $2)`,
+      [s.id, answered.id],
+    );
+
+    const list = await questionsGET(request('GET', `/api/sessions/${s.id}/questions`), {
+      params: Promise.resolve({ id: s.id }),
+    });
+    expect(list.status).toBe(200);
+    const { questions } = (await list.json()) as { questions: Record<string, unknown>[] };
+    const pick = (q: Record<string, unknown>) => {
+      const { id, status, answerText, answeredAt, answeredVia, resolution, resolvedAt } = q;
+      return { id, status, answerText, answeredAt, answeredVia, resolution, resolvedAt };
+    };
+    expect(questions.map(pick)).toEqual([
+      { id: open, status: 'open', answerText: null, answeredAt: null, answeredVia: null, resolution: null, resolvedAt: null },
+      {
+        id: answered.id,
+        status: 'resolved',
+        answerText: 'EU only',
+        answeredAt: '2026-10-02T10:00:00.000Z',
+        answeredVia: 'facilitator',
+        resolution: 'answered',
+        resolvedAt: '2026-10-03T10:00:00.000Z',
+      },
+    ]);
+
+    const messages = (await history(s)) as unknown as { seq: number; questionId: string | null }[];
+    expect(messages.map(({ seq, questionId }) => ({ seq, questionId }))).toEqual([
+      { seq: 1, questionId: null },
+      { seq: 2, questionId: answered.id },
+    ]);
+  });
+
   it('dismisses without a reason', async () => {
     const s = await createLockedSession();
     const qid = await insertQuestion(s, 'Which IdP?');
     const res = await dismiss(s, qid);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ id: qid, status: 'dismissed', dismissReason: null });
+    expect(await res.json()).toEqual({ id: qid, status: 'resolved', dismissReason: null, resolution: 'not_relevant' });
   });
 });

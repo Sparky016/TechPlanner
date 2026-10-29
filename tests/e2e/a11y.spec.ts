@@ -2,11 +2,14 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
   createSession,
+  ingestButton,
   login,
+  openDiscussion,
   publishPanel,
   resetAll,
   section,
   sectionEditor,
+  waitForIntakeIdle,
   waitForTurnEnd,
 } from './support/helpers';
 
@@ -79,9 +82,19 @@ test('AC2 and AC3: keyboard-only flow; the override dialog traps focus and retur
   const keys = page.getByLabel('Jira ticket keys');
   await tabTo(page, keys);
   await page.keyboard.type('ABC-123');
-  await tabTo(page, page.getByRole('button', { name: 'Create session' }));
+  await tabTo(page, page.getByRole('button', { name: 'Create session', exact: true }));
   await page.keyboard.press('Enter');
   await page.waitForURL(/\/sessions\/[0-9a-f-]{36}$/, { timeout: 60_000 });
+
+  // Ingest from the keyboard: untick 'Analyze after ingest' (Space), then press Ingest ticket.
+  const analyzeAfterIngest = page.getByLabel('Analyze after ingest');
+  await expect(ingestButton(page)).toBeEnabled({ timeout: 30_000 });
+  await tabTo(page, analyzeAfterIngest);
+  await page.keyboard.press('Space');
+  await expect(analyzeAfterIngest).not.toBeChecked();
+  await tabTo(page, ingestButton(page));
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('list', { name: 'Sources' })).toBeVisible({ timeout: 30_000 });
   const message = page.getByRole('textbox', { name: 'Message', exact: true });
   await expect(message).toBeEnabled({ timeout: 30_000 });
 
@@ -132,4 +145,55 @@ test('AC2 and AC3: keyboard-only flow; the override dialog traps focus and retur
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
   await expect(publish).toBeFocused();
+});
+
+test('AC4: no serious or critical axe violations in the guided-intake states; the answer form manages focus', async ({
+  page,
+}) => {
+  await login(page);
+  await createSession(page, 'ABC-123', { ingest: false });
+  await expect(page.getByText('Sources not ingested yet.')).toBeVisible();
+  await expectNoSeriousViolations(page, 'workspace before ingest');
+
+  // Chained analysis: three open questions.
+  await ingestButton(page).click();
+  const questions = page.getByRole('region', { name: 'AI questions' });
+  await expect(questions.getByRole('heading', { name: 'Questions · 3 open · 0 answered', level: 2 })).toBeVisible({
+    timeout: 60_000,
+  });
+  await waitForIntakeIdle(page);
+  await expectNoSeriousViolations(page, 'workspace with open questions');
+
+  // The answer form takes focus on open and gives it back to the Answer button on Cancel.
+  const item = questions.getByRole('listitem').filter({ hasText: 'maximum export size' });
+  const answerButton = item.getByRole('button', { name: 'Answer', exact: true });
+  await answerButton.focus();
+  await page.keyboard.press('Enter');
+  const answerBox = item.getByRole('textbox', { name: 'Your answer' });
+  await expect(answerBox).toBeFocused();
+  await expectNoSeriousViolations(page, 'answer form open');
+  await item.getByRole('button', { name: 'Cancel' }).click();
+  await expect(answerButton).toBeFocused();
+
+  // Resolve-as-not-relevant form.
+  await item.getByRole('button', { name: 'Resolve as not relevant' }).click();
+  await expect(item.getByLabel('Reason (optional)')).toBeVisible();
+  await expectNoSeriousViolations(page, 'resolve form open');
+  await item.getByRole('button', { name: 'Confirm resolve' }).click();
+
+  // Resolved group expanded, and the Discuss with AI panel expanded.
+  await questions.getByRole('button', { name: 'Resolved (1)' }).click();
+  await expect(questions.getByText('Resolved — not relevant')).toBeVisible();
+  await openDiscussion(page);
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+  await expectNoSeriousViolations(page, 'workspace with resolved questions and the discussion open');
+
+  // The collapsed discussion is keyboard-operable: the toggle reports its state.
+  const toggle = page.getByRole('button', { name: 'Discuss with AI', exact: true });
+  await toggle.focus();
+  await page.keyboard.press('Enter');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeHidden();
+  await page.keyboard.press('Enter');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 });

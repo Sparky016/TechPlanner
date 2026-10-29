@@ -1,0 +1,71 @@
+id: "43"
+title: "Guided intake schema: migration 0005, session intake state, question lifecycle fields, new audit actions"
+phase: 7
+severity: high
+complexity: medium
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: []
+status: PENDING
+source: "docs/specs/guided-intake-and-question-answering.md GI-1, GI-12, §7, §8.4"
+
+objective: |
+  Add the persistent state the guided intake needs: when a session was ingested and analyzed, the answer and
+  resolution of each AI question, and which conversation message answers which question. Expose the new fields
+  read-only through the existing GET endpoints and register the new audit actions. No behaviour change yet.
+
+scope:
+  in:
+    - "db/migrations/0005_guided_intake.sql exactly as spec §7 (expand step: 'dismissed' stays allowed)"
+    - "Backfill: dismissed -> resolved/not_relevant; sessions with snapshots -> ingested_at = analyzed_at = min(retrieved_at)"
+    - "PlanningSessionRow/DbRow gain ingestedAt, analyzedAt; pure helper intakeState(row) -> 'not_ingested' | 'ingested' | 'analyzed'"
+    - "GET /api/sessions/:id and GET /api/sessions (summary) return ingestedAt, analyzedAt, intakeState"
+    - "GET /api/sessions/:id/questions returns answerText, answeredAt, answeredVia, resolution, resolvedAt (status may be 'resolved')"
+    - "GET /api/sessions/:id/messages returns questionId per message"
+    - "AUDIT_ACTIONS gains sources.ingested, question.answered, question.resolved, question.reopened (question.dismissed kept)"
+    - "Client types: SessionInfo (WorkspaceProvider) gains ingestedAt, analyzedAt, intakeState"
+  out:
+    - "Any route or UI that writes the new columns (tasks 44-50)"
+    - "Contract step (dropping 'dismissed', renaming dismiss_reason) - next release"
+
+files:
+  "db/migrations/0005_guided_intake.sql": "create"
+  "src/server/sessions/repo.ts": "update"
+  "src/app/api/sessions/route.ts": "update sessionSummary only"
+  "src/app/api/sessions/[id]/route.ts": "update"
+  "src/app/api/sessions/[id]/questions/route.ts": "update"
+  "src/app/api/sessions/[id]/messages/route.ts": "update GET only"
+  "src/server/audit/actions.ts": "update"
+  "src/server/audit/hash.test.ts": "update extra actions list"
+  "src/components/workspace/WorkspaceProvider.tsx": "update types only"
+  "tests/integration/schema.test.ts": "update: new columns, check constraints, backfill"
+
+implementation_notes: |
+  Conventions: forward-only migrations via `npm run migrate`; take 0005 unless another migration landed first.
+  The inline CHECK on ai_question.status is named ai_question_status_check (Postgres default) - verify with
+  \d ai_question before dropping it. answered_via and resolution CHECKs allow NULL.
+  Test the backfill by seeding rows with the 0004 schema, running 0005, then asserting (schema.test.ts already
+  migrates step by step - follow its pattern).
+  Keep intakeState in src/server/sessions/repo.ts; the client derives nothing itself.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Migration applies on a database at 0004 with existing sessions, snapshots and dismissed questions; backfill matches spec §7"
+    verify: "npm run test:integration -- schema"
+  - id: AC2
+    behavior: "Detail, list, questions and messages endpoints return the new fields; existing sessions report intakeState 'analyzed'"
+    verify: "npm run test:integration -- sessions conversationApi"
+  - id: AC3
+    behavior: "Lint, typecheck and unit tests pass"
+    verify: "npm run lint && npm run typecheck && npm test"
+
+risks_vulnerabilities:
+  - risk: "Backfill marks a session analyzed that never had an AI turn"
+    mitigation: "Intended (GD-6): existing sessions must not re-run ingest or analysis on open"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-43): guided intake schema, intake state and question lifecycle fields

@@ -1,0 +1,69 @@
+id: "47"
+title: "Workspace turn runner and intake controls: Ingest ticket, Analyze after ingest, Analyze ticket, ?analyze=1"
+phase: 7
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["44", "45"]
+status: PENDING
+source: "docs/specs/guided-intake-and-question-answering.md GI-3, GI-6, GI-8, GI-11, GI-22, GI-27, §6, §9"
+
+objective: |
+  Centralise AI turn streaming in the workspace so any panel can start a turn and every panel sees it, then add
+  the intake controls to the Sources block of the left panel.
+
+scope:
+  in:
+    - "lib/api/sse.ts: streamTurn(path, body?, signal?) generalises streamMessage (kept as a thin wrapper)"
+    - "WorkspaceProvider: runTurn({ path, body, label }) streams, publishes every event on the bus, exposes activeTurn { label, prompt?, reply } and turnInProgress; returns { ok, started, error }"
+    - "SessionHeader not_ingested: ticket keys, CodeRepositoryPicker, 'Ingest ticket'/'Ingest tickets' button, 'Analyze after ingest' checkbox (default checked), 'Sources not ingested yet.'"
+    - "Ingest: POST /ingest -> reloadDetail -> publish conversation_changed -> if checked, runTurn(/analyze)"
+    - "ingested (not analyzed): sources list + Refresh sources + 'Analyze ticket' button; analysis error shown in the Sources block"
+    - "analyzed: today's Sources block unchanged"
+    - "Every Ingest/Analyze/Refresh control disabled when readOnly, busy or turnInProgress"
+    - "?analyze=1: once lock.holder === 'you' and intakeState === 'ingested', runTurn(/analyze) once, then history.replaceState without the param; 409 already_analyzed ignored; lock held elsewhere -> remove param, do nothing"
+  out:
+    - "Questions UI (task 48), Discuss with AI rendering of activeTurn (task 49), New session page (task 50)"
+
+files:
+  "src/lib/api/sse.ts": "update"
+  "src/components/workspace/WorkspaceProvider.tsx": "update"
+  "src/components/workspace/left/SessionHeader.tsx": "update"
+  "src/components/workspace/left/SessionHeader.test.tsx": "create"
+  "src/components/workspace/left/SourcesList.tsx": "update (empty-state text only if needed)"
+  "src/components/workspace/left/Conversation.tsx": "update minimal: send via runTurn so turnInProgress is shared"
+  "src/components/workspace/left/workspaceLock.test.tsx": "update"
+
+implementation_notes: |
+  Conventions: apiFetch/ApiError, ErrorBanner, Tailwind classes as in SessionHeader; vitest + Testing Library with
+  mocked fetch as in Conversation.test.tsx.
+  runTurn owns setTurnInProgress so a double click cannot start two streams in one tab; the server 409 stays
+  authoritative across tabs.
+  Keep the 'Message' textbox label and 'Send'/'AI is responding…' button names: e2e helpers depend on them.
+  Announce intake progress ('Ingesting…', 'Analyzing <KEY>…') in an aria-live="polite" region.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "not_ingested renders Ingest + checkbox; clicking Ingest with the box checked calls /ingest then /analyze; unchecked calls only /ingest and shows Analyze ticket"
+    verify: "npm test -- SessionHeader"
+  - id: AC2
+    behavior: "While any turn streams (started from Conversation or SessionHeader), Ingest/Analyze/Send are disabled"
+    verify: "npm test -- SessionHeader Conversation"
+  - id: AC3
+    behavior: "?analyze=1 starts exactly one analysis after the lock is acquired and the URL loses the param; read-only tab starts none"
+    verify: "npm test -- SessionHeader workspaceLock"
+  - id: AC4
+    behavior: "Lint and typecheck pass"
+    verify: "npm run lint && npm run typecheck"
+
+risks_vulnerabilities:
+  - risk: "Moving streaming into the provider re-renders all panels per token"
+    mitigation: "Keep activeTurn in its own context (or a ref + subscription) so only Conversation re-renders per token"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-47): workspace turn runner and ingest/analyze controls

@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { GET as adoStatusGET } from '@/app/api/azure-devops/status/route';
 import { PUT as codeRepositoryPUT } from '@/app/api/sessions/[id]/code-repository/route';
 import { GET as detailGET } from '@/app/api/sessions/[id]/route';
+import { POST as ingestPOST } from '@/app/api/sessions/[id]/ingest/route';
 import { POST as refreshPOST } from '@/app/api/sessions/[id]/refresh-sources/route';
 import { GET as listGET, POST as createPOST } from '@/app/api/sessions/route';
 import { resetSiteUrlCache } from '@/server/atlassian/jira';
@@ -15,7 +16,7 @@ import { db, query, withTransaction } from '@/server/db/pool';
 import { CSRF_COOKIE, CSRF_HEADER, issueCsrfToken } from '@/server/http/csrf';
 import { clearAccessCacheForTests } from '@/server/sessions/access';
 import { acquireOrRenewLock } from '@/server/sessions/lock';
-import { MAX_DIFF_CHARS, unifiedDiffExcerpt } from '@/server/sessions/refreshSources';
+import { MAX_DIFF_CHARS, unifiedDiffExcerpt } from '@/server/sessions/ingestSources';
 import { SECTION_NAMES } from '@/lib/spec/sections';
 
 // Atlassian is mocked by stubbing global fetch (undici is not a direct dependency of this project).
@@ -37,6 +38,9 @@ interface FakeIssue {
 
 let issues: Record<string, FakeIssue>;
 let pages: Record<string, { status: number; title: string; storage: string }>;
+// Jira returns 500 for GET issue/<key> after the given number of successful reads of it.
+let jiraFailAfter: Record<string, number>;
+let jiraReads: Record<string, number>;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -66,6 +70,10 @@ function jiraResponse(path: string): Response {
   const match = /^issue\/([^/]+)(\/comment|\/remotelink)?$/.exec(path);
   if (!match) return json({ error: 'unexpected jira path' }, 599);
   const key = decodeURIComponent(match[1]);
+  if (!match[2] && key in jiraFailAfter) {
+    jiraReads[key] = (jiraReads[key] ?? 0) + 1;
+    if (jiraReads[key] > jiraFailAfter[key]) return json({ errorMessages: ['Internal server error'] }, 500);
+  }
   const issue = issues[key];
   if (!issue) return notFound();
   if (match[2] === '/comment') return json({ total: 0, comments: [] });
@@ -168,6 +176,26 @@ async function createOk(cookie: string, ticketKeys: string[], confirmDuplicate?:
   return ((await res.json()) as { session: { id: string } }).session.id;
 }
 
+function ingest(cookie: string, id: string, tabId: string): Promise<Response> {
+  return ingestPOST(request('POST', `/api/sessions/${id}/ingest`, { cookie, tabId }), routeArg(id));
+}
+
+// Creates a session, takes its lock for a fresh tab and ingests it; returns the session id and tab.
+async function createIngested(cookie: string, ticketKeys: string[]): Promise<{ id: string; tab: string }> {
+  const id = await createOk(cookie, ticketKeys);
+  const tab = randomUUID();
+  await acquireOrRenewLock(id, tab);
+  expect((await ingest(cookie, id, tab)).status).toBe(200);
+  return { id, tab };
+}
+
+async function ingestAudits(sessionId: string) {
+  return query<{ result: string; details: Record<string, unknown>; ticket_ids: string[] }>(
+    "SELECT result, details, ticket_ids FROM audit_record WHERE action = 'sources.ingested' AND session_id = $1 ORDER BY id",
+    [sessionId],
+  );
+}
+
 async function snapshots(sessionId: string) {
   return query<{ kind: string; ref: string; ingest_status: string; detail: Record<string, unknown> }>(
     'SELECT kind, ref, ingest_status, detail FROM source_snapshot WHERE session_id = $1 ORDER BY id',
@@ -189,12 +217,38 @@ beforeAll(async () => {
 beforeEach(() => {
   issues = {};
   pages = {};
+  jiraFailAfter = {};
+  jiraReads = {};
   clearAccessCacheForTests();
   resetSiteUrlCache();
-  vi.stubGlobal('fetch', vi.fn(fakeFetch));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: RequestInfo | URL) => {
+      const pending = fakeFetch(input);
+      inFlight.add(pending);
+      const done = () => inFlight.delete(pending);
+      pending.then(done, done);
+      return pending;
+    }),
+  );
 });
 
-afterEach(() => {
+// A request that fails early (e.g. a 404 issue read in Promise.all) leaves its sibling reads running: they issue their
+// fetch calls after the route has already responded. Wait until those stragglers have finished, so none of them lands
+// on the next test's fresh fetch mock (which would break `not.toHaveBeenCalled()` assertions).
+const inFlight = new Set<Promise<unknown>>();
+async function drainStragglers(): Promise<void> {
+  const fetchMock = vi.mocked(fetch);
+  for (;;) {
+    const seen = fetchMock.mock.calls.length;
+    await Promise.allSettled([...inFlight]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    if (fetchMock.mock.calls.length === seen && inFlight.size === 0) return;
+  }
+}
+
+afterEach(async () => {
+  await drainStragglers();
   vi.unstubAllGlobals();
 });
 
@@ -203,7 +257,7 @@ afterAll(async () => {
 });
 
 describe('POST /api/sessions', () => {
-  it('AC1: creates the session with primary = first key, snapshots, empty working copy and draft.created audit', async () => {
+  it('AC1: creates the session with primary = first key, no sources, empty working copy and draft.created audit', async () => {
     issues['ABC-1'] = { summary: 'Primary', description: 'Build the thing' };
     issues['ABC-2'] = {
       summary: 'Secondary',
@@ -212,29 +266,30 @@ describe('POST /api/sessions', () => {
     };
     const res = await create(alice, { ticketKeys: ['abc-1', 'ABC-2', 'ABC-1'] });
     expect(res.status).toBe(201);
-    const { session } = (await res.json()) as {
-      session: { id: string; primaryTicketKey: string; ticketKeys: string[] };
+    const body = (await res.json()) as {
+      session: { id: string; primaryTicketKey: string; ticketKeys: string[]; intakeState: string };
+      ingested: boolean;
+      ingestError?: unknown;
     };
+    const { session } = body;
     expect(session.primaryTicketKey).toBe('ABC-1');
     expect(session.ticketKeys).toEqual(['ABC-1', 'ABC-2']);
+    expect(session.intakeState).toBe('not_ingested');
+    expect(body.ingested).toBe(false);
+    expect(body).not.toHaveProperty('ingestError');
 
-    const [row] = await query<{ facilitator_id: string; status: string }>(
-      'SELECT facilitator_id, status FROM planning_session WHERE id = $1',
+    const [row] = await query<{ facilitator_id: string; status: string; ingested_at: Date | null }>(
+      'SELECT facilitator_id, status, ingested_at FROM planning_session WHERE id = $1',
       [session.id],
     );
-    expect(row).toEqual({ facilitator_id: ALICE.accountId, status: 'draft' });
+    expect(row).toEqual({ facilitator_id: ALICE.accountId, status: 'draft', ingested_at: null });
 
-    const snaps = await snapshots(session.id);
-    expect(snaps.map((s) => [s.kind, s.ref, s.ingest_status])).toEqual([
-      ['jira_issue', 'ABC-1', 'ingested'],
-      ['jira_issue', 'ABC-2', 'ingested'],
-      ['attachment', '900', 'ingested'],
-    ]);
-    const [issueText] = await query<{ content_text: string }>(
-      "SELECT content_text FROM source_snapshot WHERE session_id = $1 AND ref = 'ABC-1'",
-      [session.id],
-    );
-    expect(issueText.content_text).toContain('Build the thing');
+    // GI-2: tickets are read to validate them, but nothing is ingested at creation.
+    expect(await snapshots(session.id)).toEqual([]);
+    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = $1', [session.id])).toEqual([]);
+    expect(await ingestAudits(session.id)).toEqual([]);
+    const fetched = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    expect(fetched.some((u) => u.includes('/attachment/content/'))).toBe(false);
 
     const [wc] = await query<{ sections: Record<string, { body: string }>; version: number }>(
       'SELECT sections, version FROM working_copy WHERE session_id = $1',
@@ -245,11 +300,11 @@ describe('POST /api/sessions', () => {
     expect(Object.values(wc.sections).every((s) => s.body === '')).toBe(true);
     expect(wc.version).toBe(0);
 
-    const audits = await query<{ user_id: string; ticket_ids: string[]; result: string }>(
-      "SELECT user_id, ticket_ids, result FROM audit_record WHERE action = 'draft.created' AND session_id = $1",
+    const audits = await query<{ user_id: string; ticket_ids: string[]; result: string; details: object }>(
+      "SELECT user_id, ticket_ids, result, details FROM audit_record WHERE action = 'draft.created' AND session_id = $1",
       [session.id],
     );
-    expect(audits).toEqual([{ user_id: ALICE.accountId, ticket_ids: ['ABC-1', 'ABC-2'], result: 'success' }]);
+    expect(audits).toEqual([{ user_id: ALICE.accountId, ticket_ids: ['ABC-1', 'ABC-2'], result: 'success', details: {} }]);
   });
 
   it('AC2: an unreadable key returns 422 listing it and creates nothing', async () => {
@@ -293,7 +348,7 @@ describe('POST /api/sessions', () => {
     expect(await query("SELECT id FROM planning_session WHERE primary_ticket_key = 'DUP-1'")).toHaveLength(2);
   });
 
-  it('AC4: a failing Confluence page fetch is stored as unavailable while creation succeeds', async () => {
+  it('AC4: Create and ingest stores the sources; a failing Confluence page is stored as unavailable', async () => {
     issues['CNF-1'] = {
       summary: 'With pages',
       description: `See ${SITE}/wiki/x/AbCd for background`,
@@ -305,7 +360,28 @@ describe('POST /api/sessions', () => {
     pages['111'] = { status: 200, title: 'Good page', storage: '<p>Design notes</p>' };
     pages['222'] = { status: 404, title: '', storage: '' };
 
-    const id = await createOk(alice, ['CNF-1']);
+    const res = await create(alice, { ticketKeys: ['CNF-1'], ingest: true });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as {
+      session: { id: string; intakeState: string; ingestedAt: string | null };
+      ingested: boolean;
+    };
+    expect(created).not.toHaveProperty('ingestError');
+    expect(created.ingested).toBe(true);
+    expect(created.session.intakeState).toBe('ingested');
+    expect(created.session.ingestedAt).not.toBeNull();
+    const id = created.session.id;
+    expect(await ingestAudits(id)).toMatchObject([
+      {
+        result: 'success',
+        details: {
+          via: 'create',
+          counts: { jira_issue: 1, confluence_page: 3, attachment: 0 },
+          statuses: { ingested: 2, listed: 0, unavailable: 2, truncated: 0 },
+        },
+      },
+    ]);
+
     const byRef = new Map((await snapshots(id)).map((s) => [s.ref, s]));
     expect(byRef.get('111')).toMatchObject({ kind: 'confluence_page', ingest_status: 'ingested' });
     expect(byRef.get('222')).toMatchObject({
@@ -373,14 +449,45 @@ describe('GET /api/sessions and /api/sessions/:id', () => {
       (await detailGET(request('GET', `/api/sessions/${unknown}`, { cookie: alice }), routeArg(unknown))).status,
     ).toBe(404);
   });
+  it('reports ingestedAt, analyzedAt and the derived intakeState in detail and list (GI-1)', async () => {
+    issues['INT-1'] = { summary: 'Intake', description: 'x' };
+    const id = await createOk(alice, ['INT-1']);
+    type Intake = { id: string; ingestedAt: string | null; analyzedAt: string | null; intakeState: string };
+    const detail = async (): Promise<Intake> => {
+      const res = await detailGET(request('GET', `/api/sessions/${id}`, { cookie: alice }), routeArg(id));
+      expect(res.status).toBe(200);
+      const { session } = (await res.json()) as { session: Intake };
+      return { id: session.id, ingestedAt: session.ingestedAt, analyzedAt: session.analyzedAt, intakeState: session.intakeState };
+    };
+    const listed = async (): Promise<Intake | undefined> => {
+      const res = await listGET(request('GET', '/api/sessions?ticket=INT-1', { cookie: alice }), noParams);
+      const { sessions } = (await res.json()) as { sessions: Intake[] };
+      const s = sessions.find((x) => x.id === id);
+      return s && { id: s.id, ingestedAt: s.ingestedAt, analyzedAt: s.analyzedAt, intakeState: s.intakeState };
+    };
+
+    // Creation does not set the timestamps (GI-2).
+    const none = { id, ingestedAt: null, analyzedAt: null, intakeState: 'not_ingested' };
+    expect(await detail()).toEqual(none);
+    expect(await listed()).toEqual(none);
+
+    await query("UPDATE planning_session SET ingested_at = '2026-10-01T09:00:00Z' WHERE id = $1", [id]);
+    const ingested = { id, ingestedAt: '2026-10-01T09:00:00.000Z', analyzedAt: null, intakeState: 'ingested' };
+    expect(await detail()).toEqual(ingested);
+    expect(await listed()).toEqual(ingested);
+
+    // As the 0005 backfill leaves existing sessions.
+    await query("UPDATE planning_session SET analyzed_at = ingested_at WHERE id = $1", [id]);
+    const analyzed = { ...ingested, analyzedAt: '2026-10-01T09:00:00.000Z', intakeState: 'analyzed' };
+    expect(await detail()).toEqual(analyzed);
+    expect(await listed()).toEqual(analyzed);
+  });
 });
 
 describe('POST /api/sessions/:id/refresh-sources', () => {
   it('AC5: a changed description appends one system message containing the change', async () => {
     issues['REF-1'] = { summary: 'Refresh me', description: 'Line one\nOld requirement\nLine three' };
-    const id = await createOk(alice, ['REF-1']);
-    const tab = randomUUID();
-    await acquireOrRenewLock(id, tab);
+    const { id, tab } = await createIngested(alice, ['REF-1']);
 
     // Without the lock (another tab) the refresh is rejected.
     const locked = await refreshPOST(
@@ -397,17 +504,18 @@ describe('POST /api/sessions/:id/refresh-sources', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { changed: { kind: string; ref: string }[]; messageSeq: number };
     expect(body.changed).toEqual([{ kind: 'jira_issue', ref: 'REF-1', title: 'Refresh me' }]);
-    expect(body.messageSeq).toBe(1);
+    // seq 1 is the ingest summary.
+    expect(body.messageSeq).toBe(2);
 
     const messages = await query<{ role: string; content: string }>(
       'SELECT role, content FROM conversation_message WHERE session_id = $1 ORDER BY seq',
       [id],
     );
-    expect(messages).toHaveLength(1);
-    expect(messages[0].role).toBe('system');
-    expect(messages[0].content).toContain('-Old requirement');
-    expect(messages[0].content).toContain('+New requirement');
-    expect(messages[0].content).toContain('REF-1');
+    expect(messages).toHaveLength(2);
+    expect(messages[1].role).toBe('system');
+    expect(messages[1].content).toContain('-Old requirement');
+    expect(messages[1].content).toContain('+New requirement');
+    expect(messages[1].content).toContain('REF-1');
 
     // The new batch is now the current source set (no duplicates in the detail view).
     const detail = await detailGET(request('GET', `/api/sessions/${id}`, { cookie: alice }), routeArg(id));
@@ -419,15 +527,13 @@ describe('POST /api/sessions/:id/refresh-sources', () => {
       routeArg(id),
     );
     expect(((await unchanged.json()) as { messageSeq: number | null }).messageSeq).toBeNull();
-    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = $1', [id])).toHaveLength(1);
+    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = $1', [id])).toHaveLength(2);
   });
 
   it('reports added and removed sources', async () => {
     issues['ADD-1'] = { summary: 'Add', description: 'x' };
     pages['333'] = { status: 200, title: 'New page', storage: '<p>Fresh</p>' };
-    const id = await createOk(alice, ['ADD-1']);
-    const tab = randomUUID();
-    await acquireOrRenewLock(id, tab);
+    const { id, tab } = await createIngested(alice, ['ADD-1']);
     issues['ADD-1'].remoteLinks = [
       { url: `${SITE}/wiki/spaces/ENG/pages/333/New`, title: 'New', type: 'com.atlassian.confluence' },
     ];
@@ -437,11 +543,26 @@ describe('POST /api/sessions/:id/refresh-sources', () => {
     );
     const body = (await res.json()) as { added: { ref: string }[]; removed: unknown[] };
     expect(body.added.map((a) => a.ref)).toEqual(['333']);
-    const [msg] = await query<{ content: string }>('SELECT content FROM conversation_message WHERE session_id = $1', [
-      id,
-    ]);
+    const [msg] = await query<{ content: string }>(
+      'SELECT content FROM conversation_message WHERE session_id = $1 AND seq = 2',
+      [id],
+    );
     expect(msg.content).toContain('Added sources:');
     expect(msg.content).toContain('333');
+  });
+
+  it('AC3: returns 409 not_ingested before the first ingest', async () => {
+    issues['PRE-1'] = { summary: 'Early', description: 'x' };
+    const id = await createOk(alice, ['PRE-1']);
+    const tab = randomUUID();
+    await acquireOrRenewLock(id, tab);
+    const res = await refreshPOST(
+      request('POST', `/api/sessions/${id}/refresh-sources`, { cookie: alice, tabId: tab }),
+      routeArg(id),
+    );
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('not_ingested');
+    expect(await snapshots(id)).toEqual([]);
   });
 
   it('caps the diff excerpt at 4000 chars including the truncation marker', () => {
@@ -452,6 +573,146 @@ describe('POST /api/sessions/:id/refresh-sources', () => {
     expect(excerpt.length).toBeLessThanOrEqual(4000);
     expect(excerpt.endsWith('(diff truncated)')).toBe(true);
     expect(unifiedDiffExcerpt('a', 'b')).toBe('@@ -1,1 +1,1 @@\n-a\n+b');
+  });
+});
+
+describe('POST /api/sessions/:id/ingest', () => {
+  it('AC2: stores one batch, sets ingested_at, posts the summary message and audits; a second call is 409', async () => {
+    issues['ING-1'] = {
+      summary: 'Ingest me',
+      description: 'Build it',
+      remoteLinks: [{ url: `${SITE}/wiki/spaces/ENG/pages/444/Gone`, title: 'Gone', type: 'com.atlassian.confluence' }],
+      attachments: [{ id: '901', filename: 'notes.txt', mimeType: 'text/plain', content: 'Attachment notes' }],
+    };
+    issues['ING-2'] = { summary: 'Second', description: 'More' };
+    const id = await createOk(alice, ['ING-1', 'ING-2']);
+    const tab = randomUUID();
+    await acquireOrRenewLock(id, tab);
+    // ING-2 became unreadable since creation: stored as unavailable, not a failure.
+    delete issues['ING-2'];
+
+    // Without the lock (another tab) the ingest is rejected.
+    expect((await ingest(alice, id, randomUUID())).status).toBe(423);
+    expect(await snapshots(id)).toEqual([]);
+
+    const res = await ingest(alice, id, tab);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ingestedAt: string;
+      sources: { id: string; kind: string; ref: string; ingestStatus: string; retrievedAt: string }[];
+    };
+    expect(body.sources.map((s) => [s.kind, s.ref, s.ingestStatus])).toEqual([
+      ['jira_issue', 'ING-2', 'unavailable'],
+      ['jira_issue', 'ING-1', 'ingested'],
+      ['confluence_page', '444', 'unavailable'],
+      ['attachment', '901', 'ingested'],
+    ]);
+    expect(body.sources.every((s) => s.retrievedAt === body.ingestedAt)).toBe(true);
+    expect(await snapshots(id)).toHaveLength(4);
+
+    const [row] = await query<{ ingested_at: Date | null; analyzed_at: Date | null }>(
+      'SELECT ingested_at, analyzed_at FROM planning_session WHERE id = $1',
+      [id],
+    );
+    expect(row.ingested_at?.toISOString()).toBe(body.ingestedAt);
+    expect(row.analyzed_at).toBeNull();
+
+    const messages = await query<{ seq: number; role: string; content: string }>(
+      'SELECT seq, role, content FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+      [id],
+    );
+    expect(messages).toEqual([
+      {
+        seq: 1,
+        role: 'system',
+        content:
+          `Sources ingested at ${body.ingestedAt}: 2 Jira issues, 1 Confluence page, 1 attachment ` +
+          '(0 listed only, 2 unavailable, 0 truncated).',
+      },
+    ]);
+
+    const audits = await ingestAudits(id);
+    expect(audits).toEqual([
+      {
+        result: 'success',
+        ticket_ids: ['ING-1', 'ING-2'],
+        details: {
+          via: 'ingest',
+          counts: { jira_issue: 2, confluence_page: 1, attachment: 1 },
+          statuses: { ingested: 2, listed: 0, unavailable: 2, truncated: 0 },
+        },
+      },
+    ]);
+
+    const detail = await detailGET(request('GET', `/api/sessions/${id}`, { cookie: alice }), routeArg(id));
+    expect(((await detail.json()) as { session: { intakeState: string } }).session.intakeState).toBe('ingested');
+
+    const again = await ingest(alice, id, tab);
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: { code: string } }).error.code).toBe('already_ingested');
+    expect(await snapshots(id)).toHaveLength(4);
+    expect(await ingestAudits(id)).toHaveLength(1);
+
+    // Refresh now works and reports the diff against the ingested batch (AC3).
+    issues['ING-2'] = { summary: 'Second', description: 'Back again' };
+    const refreshed = await refreshPOST(
+      request('POST', `/api/sessions/${id}/refresh-sources`, { cookie: alice, tabId: tab }),
+      routeArg(id),
+    );
+    expect(refreshed.status).toBe(200);
+    const diff = (await refreshed.json()) as { changed: { ref: string }[]; messageSeq: number };
+    expect(diff.changed.map((c) => c.ref)).toEqual(['ING-2']);
+    expect(diff.messageSeq).toBe(2);
+  });
+
+  it('AC5: a failed ingest audits the failure and leaves the session not ingested', async () => {
+    issues['FAIL-1'] = { summary: 'Flaky', description: 'x' };
+    jiraFailAfter['FAIL-1'] = 2; // creation and the access check read it; the ingest read gets a 500
+    const id = await createOk(alice, ['FAIL-1']);
+    const tab = randomUUID();
+    await acquireOrRenewLock(id, tab);
+
+    const res = await ingest(alice, id, tab);
+    expect(res.status).toBe(500);
+    const [row] = await query<{ ingested_at: Date | null }>('SELECT ingested_at FROM planning_session WHERE id = $1', [
+      id,
+    ]);
+    expect(row.ingested_at).toBeNull();
+    expect(await snapshots(id)).toEqual([]);
+    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = $1', [id])).toEqual([]);
+    expect(await ingestAudits(id)).toEqual([
+      { result: 'failure', ticket_ids: ['FAIL-1'], details: { via: 'ingest', errorCode: 'atlassian_500' } },
+    ]);
+
+    // The button stays available: once Jira recovers the ingest succeeds.
+    delete jiraFailAfter['FAIL-1'];
+    expect((await ingest(alice, id, tab)).status).toBe(200);
+    expect((await ingestAudits(id)).map((a) => a.result)).toEqual(['failure', 'success']);
+  });
+
+  it('AC4: Create and ingest returns 201 ingested:false with ingestError when Jira fails after creation', async () => {
+    issues['CAI-1'] = { summary: 'Create and fail', description: 'x' };
+    jiraFailAfter['CAI-1'] = 1;
+    const res = await create(alice, { ticketKeys: ['CAI-1'], ingest: true });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      session: { id: string; intakeState: string; ingestedAt: string | null };
+      ingested: boolean;
+      ingestError: { code: string; message: string; correlationId: string };
+    };
+    expect(body.ingested).toBe(false);
+    expect(body.session).toMatchObject({ intakeState: 'not_ingested', ingestedAt: null });
+    expect(body.ingestError.code).toBe('atlassian_500');
+    expect(body.ingestError.message).toBeTruthy();
+    expect(body.ingestError.correlationId).toBe(res.headers.get('x-correlation-id'));
+    expect(await snapshots(body.session.id)).toEqual([]);
+    expect(await ingestAudits(body.session.id)).toEqual([
+      {
+        result: 'failure',
+        ticket_ids: ['CAI-1'],
+        details: { via: 'create', errorCode: body.ingestError.code },
+      },
+    ]);
   });
 });
 

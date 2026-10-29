@@ -9,7 +9,7 @@ import { resetDatabase } from './setup';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { resetConfigForTests } from '@/server/config';
 import { db, query } from '@/server/db/pool';
-import { runFacilitatorTurn, type FacilitatorEvent } from '@/server/facilitator/runTurn';
+import { runFacilitatorTurn, type FacilitatorEvent, type TurnKind } from '@/server/facilitator/runTurn';
 import { stopQueue } from '@/server/jobs/queue';
 import { FakeLlmClient, getLlmClient, resetLlmClientForTests, type FakeStep } from '@/server/llm';
 import { isEvaluationPending } from '@/server/readiness/schedule';
@@ -40,7 +40,8 @@ function patch(section: string, content: string, op = 'replace'): FakeStep {
   return { type: 'tool-call', name: 'apply_section_patch', args: { section, op, content } };
 }
 
-const turn = (sessionId: string, text: string) => collect(runFacilitatorTurn({ sessionId, user: USER, text }));
+const run = (sessionId: string, t: TurnKind) => collect(runFacilitatorTurn({ sessionId, user: USER, turn: t }));
+const turn = (sessionId: string, text: string) => run(sessionId, { kind: 'message', text });
 
 beforeAll(async () => {
   await resetDatabase();
@@ -174,6 +175,57 @@ describe('runFacilitatorTurn persistence', () => {
     fake.enqueue([{ type: 'tool-call', name: 'ask_question', args: { text: 'What is the rollback plan?' } }, { type: 'done' }]);
     await turn(sessionId, 'Hi.');
     expect(await isEvaluationPending(sessionId)).toBe(false);
+  });
+
+  it('analysis: persists the system notice and sets analyzed_at with the AI message (GI-10)', async () => {
+    const sessionId = await createSession();
+    fake.enqueue([{ type: 'text-delta', text: 'Summary.' }, patch('Scope', 'Drafted.'), { type: 'done' }]);
+    const events = await run(sessionId, { kind: 'analysis' });
+    expect(events.at(-1)).toEqual({ type: 'done', messageSeq: 2 });
+    const messages = await query<{ role: string; content: string }>(
+      'SELECT role, content FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+      [sessionId],
+    );
+    expect(messages).toEqual([
+      { role: 'system', content: 'Initial analysis requested by Ada.' },
+      { role: 'ai', content: 'Summary.' },
+    ]);
+    const [session] = await query<{ analyzed_at: Date | null }>('SELECT analyzed_at FROM planning_session WHERE id = $1', [
+      sessionId,
+    ]);
+    expect(session.analyzed_at).toBeInstanceOf(Date);
+    const [audit] = await query<{ details: Record<string, unknown> }>(
+      "SELECT details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1",
+      [sessionId],
+    );
+    expect(audit.details).toMatchObject({ turnKind: 'analysis', messageSeq: 2 });
+  });
+
+  it('answer: persists only the AI message and names the question in the prompt (GI-14)', async () => {
+    const sessionId = await createSession();
+    const [q] = await query<{ id: string }>(
+      "INSERT INTO ai_question (session_id, section, text, status) VALUES ($1, 'Security', 'Which IdP?', 'answered') RETURNING id",
+      [sessionId],
+    );
+    // The answer route (task 46) persists the answer message before the turn.
+    await query(
+      "INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES ($1, 1, 'facilitator', 'Okta', $2)",
+      [sessionId, q.id],
+    );
+    fake.enqueue([patch('Security', 'IdP: Okta.'), { type: 'done' }]);
+    await run(sessionId, { kind: 'answer', questionId: q.id, text: 'Okta' });
+
+    const messages = await query<{ role: string }>('SELECT role FROM conversation_message WHERE session_id = $1 ORDER BY seq', [
+      sessionId,
+    ]);
+    expect(messages).toEqual([{ role: 'facilitator' }, { role: 'ai' }]);
+    expect(fake.calls[0].system).toContain(`The facilitator answered question ${q.id}: "Which IdP?".`);
+    expect(fake.calls[0].messages.at(-1)).toEqual({ role: 'user', content: 'Okta' });
+    const [audit] = await query<{ details: Record<string, unknown> }>(
+      "SELECT details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1",
+      [sessionId],
+    );
+    expect(audit.details).toMatchObject({ turnKind: 'answer', questionId: q.id });
   });
 
   it('keeps the facilitator message and emits an error event when the model fails', async () => {

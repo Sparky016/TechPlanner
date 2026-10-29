@@ -16,7 +16,7 @@ npm run dev                                       # http://localhost:3000
 
 Scripts: `lint`, `typecheck`, `test` (unit, `src/**/*.test.ts`), `test:integration`
 (`tests/integration/**`, sequential, needs the dev database), `test:e2e` (Playwright), `build`, `start`.
-`worker`, `audit:verify` and `eval:llm` print "not implemented" until their tasks land.
+`npm run build` needs the required configuration variables set (dummy values are enough), as in the Dockerfile.
 
 ### Configuration
 
@@ -74,6 +74,7 @@ Use `http://localhost:3000` for local development.
 **Optional settings**
 
 - `CONTEXT_TOKEN_BUDGET` defaults to `150000`.
+- `ANALYSIS_MAX_QUESTIONS` defaults to `8`: the most questions the AI asks in the initial analysis turn (other turns ask at most 3).
 - `COPILOT_CLI_PATH` is only needed when the Copilot CLI isn't on the default path. The Docker image sets it.
 - `DOWNSTREAM_WEBHOOK_URL` and `DOWNSTREAM_WEBHOOK_SECRET` go together. The secret is required when the URL is set.
 - `METRICS_TOKEN` enables `GET /metrics` with a bearer token. Leave it empty to return 404.
@@ -90,6 +91,20 @@ When set, the facilitator agent can search and read code in your Azure DevOps re
 6. Pick the session's repository in that panel (or when creating the session). The agent investigates that repository first, and `search_code` searches it by default. With no repository picked, the agent searches every allowed repository.
 
 The agent gets these tools: `list_repositories`, `search_code`, `list_code_directory`, `read_code_file` (at most 25 repository reads per turn, files cut at 40,000 characters) and `update_ticket_code_findings`. The last one upserts a block between `TECH-PLANNER-CODE-START` and `TECH-PLANNER-CODE-END` in the ticket description, as the signed-in facilitator, only when the facilitator asks for or agrees to it. The rest of the description is never changed, and each update is audited as `jira.updated` (`step: code_findings`).
+
+### Session flow (guided intake)
+
+1. **New session**: enter the Jira ticket keys and, optionally, the code repository. **Create session** only validates the tickets; nothing is ingested. **Create and ingest** also ingests and then starts the analysis in the workspace.
+2. **Ingest ticket** (Sources block): pulls the tickets, linked Confluence pages and attachments. Set or change the code repository first if the AI should read code. **Analyze after ingest** (checked by default) chains the analysis; otherwise press **Analyze ticket**.
+3. **Analysis**: the AI summarises the tickets, drafts the specification and asks up to `ANALYSIS_MAX_QUESTIONS` initial questions.
+4. **Questions**: **Answer** a question and the AI works the answer into the specification; **Resolve** an answered question, or **Resolve as not relevant** with an optional reason. **Reopen** brings one back.
+5. **Discuss with AI**: an overview chat with the specification, all questions and the sources as context; it can update the specification.
+
+The design is in [docs/specs/guided-intake-and-question-answering.md](docs/specs/guided-intake-and-question-answering.md) and [ADR-0017](docs/adr/0017-guided-intake-and-question-lifecycle.md). Before ingestion, AI turns and **Refresh sources** are refused (`409 not_ingested`).
+
+### LLM evals
+
+`npm run eval:llm` checks the facilitator and evaluator against the real model (needs `COPILOT_GITHUB_TOKEN`; `-- --validate-only` needs nothing). `-- --mode analysis` scores the initial analysis turn only. See [evals/README.md](evals/README.md).
 
 ### Verify Jira access with Atlassian CLI
 
