@@ -8,9 +8,9 @@ The test has six stages. Each stage builds on the one before it, so stop and inv
 
 | # | Requirement | How to check |
 |---|-------------|--------------|
-| P1 | Postgres is running and healthy | `docker compose -f docker-compose.dev.yml ps` shows `techplanner-db-1` as `healthy` |
+| P1 | Native MySQL 8.4 is running and bootstrapped | `mysql -uroot -p -e "SELECT VERSION()"` reports 8.4.x, and `mysql -utechplanner_app -papp-dev-password -h127.0.0.1 techplanner -e "SELECT 1"` works. If not, install MySQL and run `mysql -uroot -p < scripts/mysql-bootstrap.sql` (see [README.md](./README.md) "Database"). No Docker is needed |
 | P2 | Migrations are applied | `npm run migrate` prints `No pending migrations` (or applies them and exits 0) |
-| P3 | `.env` is configured | Copy `.env.example` to `.env` if needed. Set `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET`, `ATLASSIAN_SITE`, and `SESSION_SECRET` (see [README.md](./README.md)) |
+| P3 | `.env` is configured | Copy `.env.example` to `.env` if needed. Set `DATABASE_URL` (app user) and `MIGRATE_DATABASE_URL` (owner user) to the `mysql://` URLs from the README, and set `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET`, `ATLASSIAN_SITE`, and `SESSION_SECRET` (see [README.md](./README.md)) |
 | P4 | Port 3000 is free | `APP_BASE_URL` and `OAUTH_REDIRECT_URI` use `http://localhost:3000`. If another process holds port 3000, `npm run dev` moves to 3001, and the OAuth callback fails. Stop the other process first |
 | P5 | Dev server is running | Run `npm run dev` in a separate terminal. Wait for `Ready` and confirm it is listening on `http://localhost:3000` |
 | P6 | Test accounts and resources exist | An Atlassian account that can access `ATLASSIAN_SITE`, a disposable Jira project and ticket for publish tests (for example `SMOKE-1`), and a disposable Confluence space. Do not use production tickets |
@@ -108,7 +108,7 @@ Use a disposable ticket and a disposable Confluence space. Publishing writes to 
 |------|--------|-----------------|
 | F1 | Delete or archive the Confluence test page and the Jira test comment, label, and attachment | Test artefacts are removed. Leave the disposable ticket if it is shared |
 | F2 | Stop `npm run dev` (Ctrl+C) | Process exits |
-| F3 | Optional: `docker compose -f docker-compose.dev.yml ps` | Database container is still `healthy`. Stop it with `docker compose -f docker-compose.dev.yml down` only if you do not need it |
+| F3 | Optional: `mysql -uroot -p -e "SELECT COUNT(*) FROM techplanner.audit_record"` | The audit table has rows from this run. The MySQL service keeps running; stop it (for example `sudo systemctl stop mysql`) only if you do not need it |
 
 ## Results table
 
@@ -157,7 +157,7 @@ The smoke test passes when Stages A through E1-E5 are all PASS. The optional E6-
 | Symptom | Likely cause | What to do |
 |---------|--------------|------------|
 | `npm run dev` prints a port other than 3000 | Another process holds port 3000 | Find it with `Get-NetTCPConnection -LocalPort 3000` and stop that process, then restart `npm run dev`. Do not change `OAUTH_REDIRECT_URI` to avoid this, because the Atlassian app must match it |
-| `/healthz` returns `503` with `database` failing | Postgres is down or the URL in `.env` is wrong | Run `docker compose -f docker-compose.dev.yml up -d` and check `ps` |
+| `/healthz` returns `503` with `database` failing | MySQL is down, or `DATABASE_URL` in `.env` is wrong or is not a `mysql://` URL | Start the MySQL service (for example `sudo systemctl start mysql` or `brew services start mysql@8.4`) and re-check the user, password and database in `DATABASE_URL` |
 | `/healthz` returns `503` with `copilot` failing | Copilot CLI is not signed in, or the first cold start exceeded the 2 s check timeout | Run the Send action again (D4), then re-check `/healthz`. Sign in to the Copilot CLI if the failure persists |
 | OAuth returns to `/login?error=state` or `oauth` | Callback host differs from `OAUTH_REDIRECT_URI`, or the browser was on a different port | Use `http://localhost:3000` only, and make sure the Atlassian app redirect URL matches |
 | OAuth returns to `/login?error=site` | The account has no access to `ATLASSIAN_SITE` | Use an account that belongs to the configured site |

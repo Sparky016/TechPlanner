@@ -3,8 +3,11 @@
 #   docker build -t techplanner .
 #   docker compose --env-file prod.env -f docker-compose.prod.example.yml up -d
 #
-# Order is enforced by depends_on: postgres healthy -> migrate (one-shot) completes -> worker and web start.
-# In production, point DATABASE_URL at the managed database and drop the postgres service.
+# MySQL 8.4 runs natively on the hosting server, not in a container (docs/runbook.md §7). The containers reach it
+# through host.docker.internal, which host-gateway maps to the Docker bridge gateway; MySQL must listen there.
+# Order is enforced by depends_on: migrate (one-shot) completes -> worker and web start.
+# Credentials: web and worker get the restricted app user (DATABASE_URL). Only migrate gets the owner user
+# (MIGRATE_DATABASE_URL, passed to it as DATABASE_URL) and APP_DB_USER, the grantee of the per-table grants.
 # Required variables use ${VAR:?}: compose refuses to start without them, and no secret has a default here.
 
 name: techplanner-prod
@@ -15,7 +18,6 @@ x-app-env: &app-env
   ATLASSIAN_CLOUD_ID: ${ATLASSIAN_CLOUD_ID:?}
   OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:?}
   TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?}
-  DATABASE_URL: ${DATABASE_URL:?}
   APP_BASE_URL: ${APP_BASE_URL:?}
   COPILOT_GITHUB_TOKEN: ${COPILOT_GITHUB_TOKEN:?}
   FACILITATOR_MODEL: ${FACILITATOR_MODEL:?}
@@ -32,30 +34,17 @@ x-app-env: &app-env
   LLM_FAKE: ${LLM_FAKE:-0}
 
 services:
-  # Local stand-in for the managed database. Not published on the host.
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-techplanner}
-      POSTGRES_USER: ${POSTGRES_USER:-techplanner}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
-    volumes:
-      - techplanner-prod-pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-
   migrate:
     image: ${TECHPLANNER_IMAGE:-techplanner}
     environment:
       <<: *app-env
       ROLE: migrate
-    depends_on:
-      postgres:
-        condition: service_healthy
+      # Owner user (DDL). Present in this service only; web and worker never see it.
+      DATABASE_URL: ${MIGRATE_DATABASE_URL:?}
+      # Must equal the 'user'@'host' the app user was created with (e.g. 'techplanner_app'@'172.17.%').
+      APP_DB_USER: ${APP_DB_USER:?}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     restart: 'no'
 
   worker:
@@ -63,6 +52,9 @@ services:
     environment:
       <<: *app-env
       ROLE: worker
+      DATABASE_URL: ${DATABASE_URL:?}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -73,6 +65,9 @@ services:
     environment:
       <<: *app-env
       ROLE: web
+      DATABASE_URL: ${DATABASE_URL:?}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     ports:
       - '${WEB_PORT:-3000}:3000'
     depends_on:
@@ -81,6 +76,3 @@ services:
       worker:
         condition: service_started
     restart: unless-stopped
-
-volumes:
-  techplanner-prod-pgdata:

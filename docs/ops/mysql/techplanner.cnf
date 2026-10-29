@@ -1,0 +1,36 @@
+# TechPlanner settings for the native MySQL 8.4 server on the hosting server.
+# Install as /etc/mysql/mysql.conf.d/techplanner.cnf (Ubuntu, MySQL APT repo), then `systemctl restart mysql`.
+# Source: docs/specs/mysql-migration.md §11a; procedure: docs/runbook.md §7.
+
+[mysqld]
+# --- Network -----------------------------------------------------------------------------------------------------
+# Loopback (admin, backups, audit:verify on the host) plus the Docker bridge gateway, which the containers reach as
+# host.docker.internal (extra_hosts: host-gateway). Never 0.0.0.0. Check the gateway with:
+#   docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}'     (usually 172.17.0.1)
+# Docker must be running before MySQL binds the address: the runbook adds a systemd drop-in for that ordering.
+# If the compose project uses its own network instead of the default bridge, use that network's gateway.
+bind-address = 127.0.0.1,172.17.0.1
+mysqlx = OFF
+
+# --- Character set, time zone, SQL mode ----------------------------------------------------------------------------
+character_set_server = utf8mb4
+collation_server = utf8mb4_0900_ai_ci
+default_time_zone = '+00:00'
+sql_mode = STRICT_ALL_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO
+
+# --- Binary log (point-in-time recovery between nightly dumps) ------------------------------------------------------
+log_bin = ON
+# The app sets READ COMMITTED per connection. InnoDB only allows that with row-based logging, so pin it explicitly
+# (it is the 8.4 default, but a later edit must not change it).
+binlog_format = ROW
+# 7 days.
+binlog_expire_logs_seconds = 604800
+# Migrations 0001 and 0002 create triggers. With the binary log on, CREATE TRIGGER needs either SUPER for the
+# migrating user or this setting. The triggers only compare columns and SIGNAL, so they are deterministic and safe
+# to replicate; this is preferred to giving the owner SUPER. Deprecated in 8.4 (a startup warning) but still honoured.
+log_bin_trust_function_creators = ON
+
+# --- InnoDB ----------------------------------------------------------------------------------------------------------
+# About 50% of the RAM left after the app containers (web, worker, Copilot CLI). Example for a 4 GB host that gives
+# ~1.5 GB to containers: 1G. Do not exceed what is free; the default (128M) is too small beyond a toy.
+innodb_buffer_pool_size = 1G
