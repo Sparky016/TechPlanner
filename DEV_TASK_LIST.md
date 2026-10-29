@@ -69,7 +69,7 @@ Phases:
 | 48 | 7 | [Questions UI: grouped list, Answer, Resolve, Edit answer, Reopen](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46, 47 | DONE | 3c3e655 |
 | 49 | 7 | [Discuss with AI: collapsible overview conversation](DEV_TASK_49.yml) | medium | medium | sonnet / medium | 47 | DONE | bb1b80d |
 | 50 | 7 | [New session page: Create and ingest](DEV_TASK_50.yml) | medium | low | sonnet / low | 44, 47 | DONE | 903de87 |
-| 51 | 7 | [Guided intake verification and docs (E2E, a11y, evals, SPEC_DOC, ADR 0017)](DEV_TASK_51.yml) | medium | medium | sonnet / medium | 48, 49, 50 | PENDING | |
+| 51 | 7 | [Guided intake verification and docs (E2E, a11y, evals, SPEC_DOC, ADR 0017)](DEV_TASK_51.yml) | medium | medium | sonnet / medium | 48, 49, 50 | IN_PROGRESS | |
 
 ## Execution notes
 
@@ -314,3 +314,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 12:0x | 49 | worker complete @ bb1b80d (Conversation 9 tests, unit 385; left-panel overlap fix: aside children shrink-0, message list max-h-80; region renamed 'Discuss with AI'; collapsed panel hides Message/Send once questions exist) → eval dispatched (sonnet/low, detached worktree)
 2026-10-29 12:1x | 49 | eval PASS → DONE @ bb1b80d (Conversation+SessionHeader 23, unit 385; layout fix judged sound; follow-up: E2E must open the Discuss with AI toggle once questions exist)
 2026-10-29 12:1x | 48 | eval PASS → DONE @ 3c3e655 (QuestionsList 9, unit 381; no role=status clash with publish-panel E2E queries; follow-up: focus not moved after Resolve/Reopen regroups an item)
+2026-10-29 12:2x | 51 | worker dispatched (sonnet/medium) with extras: create-time ingestError shown in workspace (GI-26), runbook ANALYSIS_MAX_QUESTIONS, fix flaky SpecEditor.test.tsx and sessions.test.ts:302 at root, eval --mode analysis plumbing
