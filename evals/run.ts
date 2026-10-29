@@ -322,7 +322,7 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
     for (const [i, text] of messages.entries()) {
       const turn = i + 1;
       try {
-        for await (const event of runFacilitatorTurn({ sessionId: facSession, user, text })) {
+        for await (const event of runFacilitatorTurn({ sessionId: facSession, user, turn: { kind: 'message', text } })) {
           if (event.type === 'question') result.questions.push({ turn, text: event.text, section: event.section });
           else if (event.type === 'error') result.turnErrors.push(`turn ${turn}: ${event.code}: ${event.message}`);
         }

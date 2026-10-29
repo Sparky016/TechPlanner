@@ -6,10 +6,25 @@ import { MAX_QUESTIONS_PER_TURN } from './tools';
 import { attr, neutralise, UNTRUSTED_TAG } from './untrusted';
 
 // Server-only: never import from src/lib or client components.
-// Facilitator prompt (SR-3.1–SR-3.4, SR-5.2, SR-8.1–SR-8.3, PRD §9). Source material is untrusted (LLM-6): it is
-// wrapped in delimited blocks the model is told to treat as data only.
+// Facilitator prompt (SR-3.1–SR-3.4, SR-5.2, SR-8.1–SR-8.3, PRD §9; turn kinds GI-10, GI-14). Source material is
+// untrusted (LLM-6): it is wrapped in delimited blocks the model is told to treat as data only.
 
 export { UNTRUSTED_TAG } from './untrusted';
+
+/** The question an answer turn works in (ANSWER_TEXT). */
+export interface AnsweredQuestionRef {
+  id: string;
+  text: string;
+}
+
+/**
+ * The kind of turn being prompted (spec §8.2); a message turn when omitted. The analysis turn carries its question
+ * limit (ANALYSIS_MAX_QUESTIONS); every other turn uses MAX_QUESTIONS_PER_TURN.
+ */
+export type PromptTurn =
+  | { kind: 'message' }
+  | { kind: 'analysis'; maxQuestions: number }
+  | { kind: 'answer'; question: AnsweredQuestionRef };
 
 export interface FacilitatorPromptOptions {
   gatePasses: boolean;
@@ -18,9 +33,10 @@ export interface FacilitatorPromptOptions {
   codeInvestigation?: boolean;
   /** The repository the facilitator picked for this session, if any. */
   codeRepository?: string | null;
+  turn?: PromptTurn;
 }
 
-const BASE_PROMPT = `You are the AI technical facilitator in a live planning session. Act as a senior software architect working with the facilitator to turn Jira tickets into an implementation-ready technical specification.
+const basePrompt = (maxQuestions: number): string => `You are the AI technical facilitator in a live planning session. Act as a senior software architect working with the facilitator to turn Jira tickets into an implementation-ready technical specification.
 
 Your responsibilities:
 - ask follow-up questions;
@@ -34,7 +50,7 @@ Your responsibilities:
 Rules:
 - Never merely transcribe the discussion. Every turn you must call apply_section_patch, or ask_question, or both.
 - Do not accept vague statements as complete. A statement with no quantity, owner, condition or acceptance test where one is needed (e.g. "should be fast", "handle errors properly") must not be written up as complete; ask a concrete follow-up question instead.
-- Prioritise questions: first those targeting open Critical issues, then Warnings, then Informational issues. Ask at most ${MAX_QUESTIONS_PER_TURN} questions per turn.
+- Prioritise questions: first those targeting open Critical issues, then Warnings, then Informational issues. Ask at most ${maxQuestions} questions per turn.
 - Keep the ${SECTION_NAMES.length}-section structure: never add, remove or rename sections. Use the exact section names when patching.
 - A section that genuinely does not apply must state "Not applicable — <reason>".
 - Use apply_section_patch with op "replace" to rewrite a section body and op "append" to add an item to it. Keep the facilitator's existing content unless it is wrong.
@@ -66,12 +82,47 @@ function codeRepositoryText(repository: string | null): string {
     : 'Session repository: none selected. Call list_repositories to find the right repository; if it is unclear which one holds the code, ask the facilitator to select it in the session panel.';
 }
 
-export function buildFacilitatorSystemPrompt(opts: FacilitatorPromptOptions): string {
+// GI-10 / spec §8.3. With clarification ended (GI-24) ask_question is not offered, so step 4 drafts instead of asking.
+export function ANALYSIS_TEXT(maxQuestions: number, clarificationEnded = false): string {
+  const step4 = clarificationEnded
+    ? '4) Clarification has ended, so do not ask questions; note the remaining gaps in the sections they affect.'
+    : `4) Ask up to ${maxQuestions} questions, most critical gaps first (Problem Statement, Scope, Functional Requirements, Technical Design, Acceptance Criteria). Do not ask what the sources or the code already answer.`;
   return [
-    BASE_PROMPT,
+    'This is the initial analysis of newly ingested tickets.',
+    '1) Reply with a short summary of your understanding of the work.',
+    '2) Draft every section the sources support with apply_section_patch; leave the rest empty.',
+    '3) Record contradictions, risks, dependencies and assumptions in their sections.',
+    step4,
+  ].join('\n');
+}
+
+// GI-14 / spec §8.3. The route has already stored the answer and persisted it as the last conversation message.
+export function ANSWER_TEXT(question: AnsweredQuestionRef, clarificationEnded = false): string {
+  const followUp = clarificationEnded
+    ? 'If the answer is vague or reveals a new gap, say so in your reply; you cannot ask new questions.'
+    : 'If the answer is vague or reveals a new gap, ask one targeted follow-up question.';
+  return [
+    `The facilitator answered question ${question.id}: "${question.text}". Their answer is the last message.`,
+    'Work it into every affected section with apply_section_patch.',
+    followUp,
+    'Do not call mark_question_answered for this question; it is already answered.',
+  ].join(' ');
+}
+
+function turnText(turn: PromptTurn, clarificationEnded: boolean): string[] {
+  if (turn.kind === 'analysis') return [ANALYSIS_TEXT(turn.maxQuestions, clarificationEnded)];
+  if (turn.kind === 'answer') return [ANSWER_TEXT(turn.question, clarificationEnded)];
+  return [];
+}
+
+export function buildFacilitatorSystemPrompt(opts: FacilitatorPromptOptions): string {
+  const turn = opts.turn ?? { kind: 'message' };
+  return [
+    basePrompt(turn.kind === 'analysis' ? turn.maxQuestions : MAX_QUESTIONS_PER_TURN),
     gateText(opts.gatePasses),
     ...(opts.clarificationEnded ? [CLARIFICATION_ENDED_TEXT] : []),
     ...(opts.codeInvestigation ? [CODE_INVESTIGATION_TEXT, codeRepositoryText(opts.codeRepository ?? null)] : []),
+    ...turnText(turn, opts.clarificationEnded),
   ].join('\n\n');
 }
 
@@ -142,3 +193,10 @@ export function buildFacilitatorMessages(ctx: SessionContext, opts: { supportsIm
 /** The single corrective follow-up (SR-3.2) when a turn neither patched nor asked. */
 export const CORRECTIVE_MESSAGE =
   'You neither updated the Working Copy nor asked a question. Every turn must call apply_section_patch or ask_question (or both). Do so now for the facilitator\'s last message.';
+
+/** SR-3.2 for every turn kind: the analysis turn has no facilitator message to point at. */
+export function correctiveMessage(kind: PromptTurn['kind']): string {
+  return kind === 'analysis'
+    ? 'You neither updated the Working Copy nor asked a question. Every turn must call apply_section_patch or ask_question (or both). Do so now for the initial analysis.'
+    : CORRECTIVE_MESSAGE;
+}

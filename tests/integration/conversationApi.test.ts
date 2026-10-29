@@ -60,11 +60,13 @@ interface TestSession {
   tabId: string;
 }
 
-async function createLockedSession(): Promise<TestSession> {
+// Ingested by default (AI turns need ingested sources, GI-23); ingested_at is set directly, not via /ingest.
+async function createLockedSession(opts: { ingested?: boolean } = {}): Promise<TestSession> {
   keySeq++;
   const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id) VALUES ($1, ARRAY[$1], $2) RETURNING id',
-    [`CNV-${keySeq}`, ALICE.accountId],
+    `INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id, ingested_at)
+     VALUES ($1, ARRAY[$1], $2, CASE WHEN $3 THEN now() END) RETURNING id`,
+    [`CNV-${keySeq}`, ALICE.accountId, opts.ingested ?? true],
   );
   const id = rows[0].id;
   await initWorkingCopy(id);
@@ -207,6 +209,22 @@ describe('POST /messages (SSE)', () => {
       { seq: 2, role: 'ai', content: 'Drafted scope. One question.' },
     ]);
     expect(typeof messages[0].createdAt).toBe('string');
+  });
+
+  it('returns 409 not_ingested before the sources are ingested and persists nothing (GI-23)', async () => {
+    const s = await createLockedSession({ ingested: false });
+    const res = await sendMessage(s, 'Too early');
+    expect(res.status).toBe(409);
+    expect(await errorCode(res)).toBe('not_ingested');
+    expect(fake.calls).toHaveLength(0);
+    expect(await history(s)).toEqual([]);
+
+    // The turn lock was released: once ingested, a turn runs.
+    await query('UPDATE planning_session SET ingested_at = now() WHERE id = $1', [s.id]);
+    fake.enqueue([patch('Scope', 'Now'), { type: 'done' }]);
+    const ok = await sendMessage(s, 'Now');
+    expect(ok.status).toBe(200);
+    expect((await readSse(ok)).at(-1)?.event).toBe('done');
   });
 
   it('rejects an over-long message, a missing tab id and an empty message', async () => {

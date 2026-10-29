@@ -13,7 +13,7 @@ import { createCodeTools } from './codeTools';
 
 export const PATCH_CONTENT_MAX = 20_000;
 export const QUESTION_TEXT_MAX = 500;
-/** SR-3.4 / D-7. */
+/** SR-3.4 / D-7: the default per-turn question limit (FacilitatorTurnState.maxQuestions). */
 export const MAX_QUESTIONS_PER_TURN = 3;
 export const QUESTION_LIMIT_MESSAGE = 'Question limit reached for this turn';
 
@@ -40,6 +40,8 @@ export interface FacilitatorTurnState {
   /** Turn start: the AI read time passed to applyAiPatch. */
   aiReadAt: Date;
   clarificationEnded: boolean;
+  /** ask_question limit for this turn: MAX_QUESTIONS_PER_TURN, or ANALYSIS_MAX_QUESTIONS for the analysis turn. */
+  maxQuestions: number;
   patches: PatchOutcome[];
   questionIds: string[];
   /** The acting facilitator; Jira writes run as this user. Absent in unit tests that only exercise patches. */
@@ -58,12 +60,13 @@ export function createTurnState(
   sessionId: string,
   aiReadAt: Date,
   clarificationEnded: boolean,
-  opts: { user?: CurrentUser; ticketKeys?: string[]; codeRepository?: string | null } = {},
+  opts: { user?: CurrentUser; ticketKeys?: string[]; codeRepository?: string | null; maxQuestions?: number } = {},
 ): FacilitatorTurnState {
   return {
     sessionId,
     aiReadAt,
     clarificationEnded,
+    maxQuestions: opts.maxQuestions ?? MAX_QUESTIONS_PER_TURN,
     patches: [],
     questionIds: [],
     user: opts.user,
@@ -123,7 +126,7 @@ function applySectionPatchTool(state: FacilitatorTurnState): LlmToolDefinition {
 function askQuestionTool(state: FacilitatorTurnState): LlmToolDefinition {
   return {
     name: 'ask_question',
-    description: `Ask the facilitator one targeted question, optionally linked to a section and/or an open issue id. At most ${MAX_QUESTIONS_PER_TURN} per turn.`,
+    description: `Ask the facilitator one targeted question, optionally linked to a section and/or an open issue id. At most ${state.maxQuestions} per turn.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -136,7 +139,7 @@ function askQuestionTool(state: FacilitatorTurnState): LlmToolDefinition {
     },
     handler: async (args) => {
       const { text, section, issueId } = args as AskQuestionArgs;
-      if (state.questionIds.length >= MAX_QUESTIONS_PER_TURN) return QUESTION_LIMIT_MESSAGE;
+      if (state.questionIds.length >= state.maxQuestions) return QUESTION_LIMIT_MESSAGE;
       let target: SectionName | null = section ?? null;
       if (issueId !== undefined) {
         const [issue] = await query<{ section: SectionName }>(
