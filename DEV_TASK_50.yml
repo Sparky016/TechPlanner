@@ -1,0 +1,47 @@
+id: "50"
+title: "New session page: Create and ingest"
+phase: 7
+severity: medium
+complexity: low
+model: sonnet
+effort: low
+eval_model: haiku
+eval_effort: low
+depends_on: ["44", "47"]
+status: PENDING
+source: "docs/specs/guided-intake-and-question-answering.md GI-25, GI-26, GD-8"
+
+objective: |
+  Offer a one-step path on the New session page that creates the session, ingests it and lands in the workspace
+  with the analysis starting.
+
+scope:
+  in:
+    - "Two submit buttons below the repository select: 'Create session' (primary, unchanged request) and 'Create and ingest' (ingest: true)"
+    - "Busy label 'Creating and ingesting…' on the clicked button; both disabled while busy"
+    - "ingested:true -> /sessions/:id?analyze=1; ingested:false -> /sessions/:id (workspace shows Ingest ticket); duplicate confirmation keeps the chosen mode"
+  out:
+    - "Workspace auto-start (task 47)"
+
+files:
+  "src/app/(app)/sessions/new/page.tsx": "update"
+  "src/app/(app)/sessions/new/page.test.tsx": "update"
+
+implementation_notes: |
+  Conventions: existing submit(confirmDuplicate) - add a mode parameter and remember it for the duplicate
+  'Create anyway' path.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Create and ingest posts ingest:true and navigates with ?analyze=1 on success, without it when ingested is false"
+    verify: "npm test -- sessions/new"
+  - id: AC2
+    behavior: "Create session posts no ingest flag (unchanged behaviour)"
+    verify: "npm test -- sessions/new"
+
+risks_vulnerabilities: []
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-50): create and ingest from the new session page

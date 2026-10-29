@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-06 16:00
+updated: 2026-10-29
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -13,6 +13,7 @@ Phases:
 4. **Publish**: step contract and converters, Confluence/Jira/webhook steps, orchestration with override and retry
 5. **UI**: shell and pages, three-panel workspace, history and audit views
 6. **Hardening & verification**: Docker/runbook, E2E, LLM evals, performance, accessibility
+7. **Guided intake** (`docs/specs/guided-intake-and-question-answering.md`): explicit ingest, initial analysis, question answer/resolve, Discuss with AI
 
 ## Tasks
 
@@ -60,6 +61,15 @@ Phases:
 | 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | DONE | c8195de |
 | 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | DONE | a3b00e2 |
 | 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | DONE | 74e6a0b |
+| 43 | 7 | [Guided intake schema: migration 0005, intake state, question lifecycle fields, audit actions](DEV_TASK_43.yml) | high | medium | opus / medium | — | PENDING | |
+| 44 | 7 | [Explicit source ingestion: no ingest at creation, POST /ingest, create-and-ingest](DEV_TASK_44.yml) | high | high | opus / medium | 43 | PENDING | |
+| 45 | 7 | [Facilitator turn kinds, shared SSE turn helper and analysis turn (POST /analyze)](DEV_TASK_45.yml) | high | high | opus / high | 43 | PENDING | |
+| 46 | 7 | [Question lifecycle API: answer, resolve, reopen; full question context](DEV_TASK_46.yml) | high | high | opus / medium | 45 | PENDING | |
+| 47 | 7 | [Workspace turn runner and intake controls (Ingest, Analyze, ?analyze=1)](DEV_TASK_47.yml) | high | high | opus / medium | 44, 45 | PENDING | |
+| 48 | 7 | [Questions UI: grouped list, Answer, Resolve, Edit answer, Reopen](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46, 47 | PENDING | |
+| 49 | 7 | [Discuss with AI: collapsible overview conversation](DEV_TASK_49.yml) | medium | medium | sonnet / medium | 47 | PENDING | |
+| 50 | 7 | [New session page: Create and ingest](DEV_TASK_50.yml) | medium | low | sonnet / low | 44, 47 | PENDING | |
+| 51 | 7 | [Guided intake verification and docs (E2E, a11y, evals, SPEC_DOC, ADR 0017)](DEV_TASK_51.yml) | medium | medium | sonnet / medium | 48, 49, 50 | PENDING | |
 
 ## Execution notes
 
@@ -84,6 +94,7 @@ Phases:
   - 0001 is task 02.
   - 0002 is task 03.
   - 0003 is task 19.
+  - 0004 is the code-repository change (ADR-0016); 0005 is task 43.
   - Any further migration takes the next free number at commit time. Migrations are forward-only.
 - **Parallel integration tests** must each use their own database (e.g. `techplanner_t03`): `resetDatabase()` drops the whole public schema.
 - **Integration tests** need `docker compose -f docker-compose.dev.yml up -d` (Postgres 16). Atlassian is always mocked with undici MockAgent or the task-39 mock server.
@@ -93,6 +104,7 @@ Phases:
   - Phase 1: start 01 and 10 together. Once 01 is done, 02, 04 and 05 can run in parallel.
   - Phase 2: 12 can run alongside the 11 → 13/14 chain.
   - Phase 4: 28 → (29, 30, 31) in parallel → 27.
+  - Phase 7: 43 → (44, 45) in parallel → (46, 47) in parallel → (48, 49, 50) in parallel → 51. 44 and 45 touch disjoint files; 47 and 49 both edit `Conversation.tsx` (47 only swaps its send path to `runTurn`), so land 47 first.
 - **Stakeholder ratification:** SPEC_DOC §12 asks for D-1, D-2, D-8 and D-9 to be ratified. Tasks 01, 12, 30 and 31 assume the spec's resolved positions. If the decisions change, rework those tasks and the tasks that depend on them.
 
 ## Open knowledge gaps

@@ -1,0 +1,76 @@
+id: "44"
+title: "Explicit source ingestion: stop ingesting at creation, POST /ingest, Create-and-ingest option"
+phase: 7
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["43"]
+status: PENDING
+source: "docs/specs/guided-intake-and-question-answering.md GI-2, GI-4-GI-7, GI-26, §9"
+
+objective: |
+  Session creation validates tickets but no longer pulls sources. A new ingest endpoint performs the first
+  ingestion, sharing one core with Refresh sources, and POST /api/sessions can ingest straight after creation.
+
+scope:
+  in:
+    - "createSession: keep key validation, fetchIssues readability check and duplicate check; drop collectSources/insertSnapshots; draft.created details drop sourceCount"
+    - "git mv src/server/sessions/refreshSources.ts -> ingestSources.ts; export ingestSources(user, sessionId) and refreshSources(user, sessionId) over one core"
+    - "First ingest: one snapshot batch, ingested_at set, one system message with counts by kind and status (GI-4 wording), audit sources.ingested (success and failure)"
+    - "POST /api/sessions/:id/ingest (lock required) -> { ingestedAt, sources }; 409 already_ingested"
+    - "POST /api/sessions/:id/refresh-sources before ingest -> 409 not_ingested"
+    - "POST /api/sessions body gains ingest?: boolean; after the create transaction commits, run ingestSources; respond { session, ingested, ingestError? } (GI-26); 201 in both cases"
+  out:
+    - "AI analysis (task 45); UI (tasks 47, 50)"
+
+files:
+  "src/server/sessions/createSession.ts": "update"
+  "src/server/sessions/refreshSources.ts": "rename to ingestSources.ts and update"
+  "src/server/sessions/ingestSources.ts": "create (via rename)"
+  "src/app/api/sessions/[id]/ingest/route.ts": "create"
+  "src/app/api/sessions/[id]/refresh-sources/route.ts": "update import and not_ingested guard"
+  "src/app/api/sessions/route.ts": "update POST"
+  "tests/integration/sessions.test.ts": "update AC1 (no snapshots at creation); add ingest, refresh-before-ingest and create-and-ingest cases"
+
+implementation_notes: |
+  Conventions: withApiHandler, requireSessionAccess, requireLock(session.id, readTabId(req)), recordAudit,
+  undici MockAgent for Atlassian as in sessions.test.ts.
+  Concurrency: collect sources outside the transaction (slow Atlassian calls), then in the transaction
+  `SELECT ingested_at FROM planning_session WHERE id = $1 FOR UPDATE`; if already set, roll back and throw
+  409 already_ingested. Same row lock already serialises conversation seq (refreshSources pattern).
+  Unreadable tickets become 'unavailable' jira_issue snapshots exactly as refresh does today.
+  Create-and-ingest runs without a session lock (no tab can hold it yet). Map an ingest failure to
+  ingestError { code, message, correlationId } using the HttpError/AtlassianApiError code; never fail the 201.
+  sources.ingested details: { counts: { jira_issue, confluence_page, attachment }, statuses: { ingested, listed,
+  unavailable, truncated }, via: 'ingest' | 'create' }; failure records carry errorCode.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Creating a session writes no source_snapshot rows and leaves ingested_at NULL"
+    verify: "npm run test:integration -- sessions"
+  - id: AC2
+    behavior: "POST /ingest stores one batch, sets ingested_at, appends the summary system message and audits sources.ingested; a second call returns 409 already_ingested"
+    verify: "npm run test:integration -- sessions"
+  - id: AC3
+    behavior: "Refresh before ingest returns 409 not_ingested; refresh after ingest behaves as before (diff message)"
+    verify: "npm run test:integration -- sessions"
+  - id: AC4
+    behavior: "POST /api/sessions with ingest:true returns 201 ingested:true with snapshots stored (an unreachable Confluence page is stored as unavailable, as today); when Jira returns 500 on the post-create fetch it returns 201 ingested:false with ingestError and no snapshots"
+    verify: "npm run test:integration -- sessions"
+  - id: AC5
+    behavior: "A failed ingest audits sources.ingested with result failure and leaves ingested_at NULL"
+    verify: "npm run test:integration -- sessions"
+
+risks_vulnerabilities:
+  - risk: "Create-and-ingest makes POST /api/sessions slow (same as today's creation)"
+    mitigation: "Accepted: equals current behaviour; the New session button shows a busy state (task 50)"
+  - risk: "Two tabs race on ingest"
+    mitigation: "Session lock plus FOR UPDATE re-check inside the transaction"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-44): explicit source ingestion and create-and-ingest

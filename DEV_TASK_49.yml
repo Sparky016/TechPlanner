@@ -1,0 +1,52 @@
+id: "49"
+title: "Discuss with AI: collapsible overview conversation showing every turn"
+phase: 7
+severity: medium
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["47"]
+status: PENDING
+source: "docs/specs/guided-intake-and-question-answering.md GI-20, GI-23, §6"
+
+objective: |
+  Reframe the conversation as the Discuss with AI overview chat: collapsible, disabled before ingestion,
+  showing the stream of any turn (analysis, answers, messages) and labelling answer messages.
+
+scope:
+  in:
+    - "Section titled 'Discuss with AI', toggled by a 'Discuss with AI' button below Questions; collapsed by default once any question exists, expanded otherwise; open state remembered per session in localStorage (try/catch)"
+    - "Render activeTurn from the provider (prompt bubble when present, streamed reply) regardless of which panel started it; auto-expand while a turn streams"
+    - "Messages with questionId render 'Answer to: <question text, truncated to 120 chars>' above the answer"
+    - "Reload messages on done as well as conversation_changed"
+    - "Disabled with hint 'Ingest the ticket to start the discussion.' while intakeState = not_ingested (Notes stay enabled)"
+    - "Left panel order in sessions/[id]/page.tsx: SessionHeader, QuestionsList, Conversation, NotesInput (already) - keep"
+  out:
+    - "Separate discussion threads (GD-5)"
+
+files:
+  "src/components/workspace/left/Conversation.tsx": "update"
+  "src/components/workspace/left/Conversation.test.tsx": "update"
+  "src/app/(app)/sessions/[id]/page.tsx": "update only if layout needs it"
+
+implementation_notes: |
+  Conventions: question texts for 'Answer to:' come from GET /questions (already loaded by QuestionsList) - fetch
+  once in Conversation or lift into the provider; do not add a server join.
+  Keep the 'Message' label and 'Send' button names (e2e helpers).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "A turn started from Questions or Sources streams into the Discuss with AI panel and the panel expands"
+    verify: "npm test -- Conversation"
+  - id: AC2
+    behavior: "Answer messages show the 'Answer to:' label; panel disabled before ingest"
+    verify: "npm test -- Conversation"
+
+risks_vulnerabilities: []
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-49): Discuss with AI overview conversation

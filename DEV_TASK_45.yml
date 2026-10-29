@@ -1,0 +1,84 @@
+id: "45"
+title: "Facilitator turn kinds, shared SSE turn route helper and the analysis turn (POST /analyze)"
+phase: 7
+severity: high
+complexity: high
+model: opus
+effort: high
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["43"]
+status: PENDING
+source: "docs/specs/guided-intake-and-question-answering.md GI-8-GI-10, GI-22-GI-24, §8.1, §8.2, §8.3 ANALYSIS_TEXT"
+
+objective: |
+  Generalise one facilitation turn to three kinds (message, analysis, answer), extract the SSE turn-route
+  boilerplate so every turn route shares the advisory turn lock, and add the initial analysis turn.
+
+scope:
+  in:
+    - "runFacilitatorTurn(input) takes `turn: { kind: 'message'; text } | { kind: 'analysis' } | { kind: 'answer'; questionId; text }`"
+    - "analysis: persist system message 'Initial analysis requested by <name>.', append ANALYSIS_TEXT, maxQuestions = ANALYSIS_MAX_QUESTIONS, set analyzed_at in the AI-message transaction on success only"
+    - "answer: the runner only appends ANSWER_TEXT(question) (persistence is task 46); define the type and prompt hook here so 46 adds a route only"
+    - "FacilitatorTurnState.maxQuestions replaces the MAX_QUESTIONS_PER_TURN constant inside ask_question; the constant stays as the default"
+    - "ai.suggestion details gain turnKind and (answer) questionId"
+    - "Config ANALYSIS_MAX_QUESTIONS (int, default 8) in config.ts and .env.example"
+    - "src/server/http/turnStream.ts: turnStreamResponse(ctx, session, run) - advisory lock acquire/409, first-token metric, error mapping, release in finally; messages route refactored onto it"
+    - "POST /api/sessions/:id/analyze: 409 not_ingested / already_analyzed / turn_in_progress"
+    - "POST /api/sessions/:id/messages: 409 not_ingested before ingest"
+    - "End clarification: analysis runs without ask_question (existing createFacilitatorTools behaviour)"
+  out:
+    - "Answer/resolve/reopen routes and context question groups (task 46); UI (task 47)"
+
+files:
+  "src/server/facilitator/runTurn.ts": "update"
+  "src/server/facilitator/tools.ts": "update (maxQuestions on state)"
+  "src/server/facilitator/prompt.ts": "update (ANALYSIS_TEXT, ANSWER_TEXT, options.turn)"
+  "src/server/facilitator/facilitator.test.ts": "update"
+  "src/server/facilitator/__snapshots__/facilitator.test.ts.snap": "update"
+  "src/server/config.ts": "update"
+  "src/server/config.test.ts": "update"
+  ".env.example": "update"
+  "src/server/http/turnStream.ts": "create"
+  "src/app/api/sessions/[id]/messages/route.ts": "update POST to use turnStream"
+  "src/app/api/sessions/[id]/analyze/route.ts": "create"
+  "tests/integration/conversationApi.test.ts": "update (sessions must be ingested; not_ingested case)"
+  "tests/integration/intakeApi.test.ts": "create (analyze)"
+  "tests/integration/facilitator.test.ts": "update for the new input shape"
+
+implementation_notes: |
+  Conventions: FakeLlmClient.enqueue scripts with tool-call steps (ask_question, apply_section_patch) as in
+  facilitator.test.ts; integration tests set ingested_at via SQL instead of calling /ingest to stay independent
+  of task 44.
+  Keep the SR-3.2 corrective follow-up for every kind.
+  turnStream must keep today's semantics exactly: dedicated pool client for the advisory lock, release on abort,
+  `event: error` with correlationId. NFR-5 follow-up (pool exhaustion under many concurrent streams) is
+  unchanged by this task - do not widen it; note it in the commit body if touched.
+  evals/run.ts calls runFacilitatorTurn directly: update its call to the new input shape (turn: { kind: 'message' })
+  so `npm run eval:llm -- --validate-only` still passes.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "POST /analyze on an ingested session streams token/patch/question/done; analyzed_at set; up to 8 questions accepted, the 9th gets the limit message"
+    verify: "npm run test:integration -- intakeApi"
+  - id: AC2
+    behavior: "Analyze before ingest -> 409 not_ingested; after analysis -> 409 already_analyzed; concurrent with a message turn -> 409 turn_in_progress"
+    verify: "npm run test:integration -- intakeApi"
+  - id: AC3
+    behavior: "LLM error during analysis: SSE error event, system message kept, analyzed_at stays NULL"
+    verify: "npm run test:integration -- intakeApi"
+  - id: AC4
+    behavior: "Message turns behave as before (existing conversationApi suite green) and return 409 not_ingested before ingest"
+    verify: "npm run test:integration -- conversationApi"
+  - id: AC5
+    behavior: "Unit tests cover per-kind prompt assembly and maxQuestions; eval harness validates"
+    verify: "npm test && npm run eval:llm -- --validate-only"
+
+risks_vulnerabilities:
+  - risk: "Refactoring the messages route regresses lock release on client abort"
+    mitigation: "Keep the existing abort test in conversationApi.test.ts and run it against the helper"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-45): facilitator turn kinds, shared turn stream and initial analysis

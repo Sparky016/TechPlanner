@@ -105,7 +105,7 @@ IDs `GI-<n>` (Guided Intake). Each states the SPEC_DOC requirement it amends, if
   - A ticket that became unreadable since creation is stored as an `unavailable` `jira_issue` snapshot (same as `refreshSources`), not a failure.
   - A failure of the whole request (Atlassian outage, token expiry) leaves `ingested_at` NULL, audits `sources.ingested` with `result: failure`, and the button stays available.
 - **GI-5** Ingestion and refresh share one core in `src/server/sessions/refreshSources.ts` (rename to `ingestSources.ts`): first ingest = refresh with an empty previous batch, but with the summary message of GI-4 instead of an all-"added" diff.
-- **GI-6** After ingestion, **Refresh sources** and the sources list appear as today. **Ingest ticket** is no longer shown.
+- **GI-6** After ingestion, **Refresh sources** and the sources list appear as today. **Ingest ticket** is no longer shown. `POST /refresh-sources` before ingestion returns `409 not_ingested`.
 - **GI-7** Changing the code repository is allowed in every state. Changing it does not re-ingest (code is read live by the code tools, ADR-0016).
 
 ### 5.3 Analyze
@@ -351,14 +351,18 @@ None. The three questions from the first draft are settled in GD-7, GD-8 and GD-
 
 ## 14. Implementation plan
 
-| # | Task | Main files | Depends on |
-|---|---|---|---|
-| 1 | Migration 0005 + repo mapping (`ingestedAt`, `analyzedAt`, `intakeState`, question columns) | `db/migrations/0005_guided_intake.sql`, `sessions/repo.ts`, `api/sessions/[id]/route.ts` | — |
-| 2 | Stop ingest at creation; `ingestSources` core + `POST /ingest`; `sources.ingested` audit | `createSession.ts`, `refreshSources.ts` → `ingestSources.ts`, `api/sessions/[id]/ingest/route.ts`, `audit/actions.ts` | 1 |
-| 3 | Turn kinds in `runFacilitatorTurn`; shared SSE turn helper; `POST /analyze`; `not_ingested` guard on `/messages` | `facilitator/runTurn.ts`, `facilitator/tools.ts`, `facilitator/prompt.ts`, `api/sessions/[id]/analyze/route.ts`, `api/sessions/[id]/messages/route.ts`, `config.ts` | 1, 2 |
-| 4 | Answer / resolve / reopen routes; `mark_question_answered` summary; context groups | `api/sessions/[id]/questions/[qid]/{answer,resolve,reopen}/route.ts`, `facilitator/context.ts`, `facilitator/prompt.ts`, `facilitator/tools.ts` | 3 |
-| 5 | Left panel: Ingest/Analyze controls, `turnInProgress` in `WorkspaceProvider`, `streamTurn` client | `SessionHeader.tsx`, `SourcesList.tsx`, `WorkspaceProvider.tsx`, `lib/api/sse.ts` | 2, 3 |
-| 6 | Questions UI: groups, Answer form, Resolve, Edit answer, Reopen | `QuestionsList.tsx` | 4, 5 |
-| 7 | Discuss with AI: collapsible conversation, "Answer to" rendering, reload on `done` | `Conversation.tsx`, `sessions/[id]/page.tsx` | 5 |
-| 8 | **Create and ingest**: `ingest` option on `POST /api/sessions`, second button on the New session page, `?analyze=1` auto-start in the workspace | `api/sessions/route.ts`, `createSession.ts`, `sessions/new/page.tsx`, `SessionHeader.tsx` | 2, 5 |
-| 9 | Docs: SPEC_DOC §6/§7.2/§7.3/FR-2/FR-3 amendments, README, MANUAL_TEST; e2e, a11y and eval updates | `SPEC_DOC.md`, `README.md`, `MANUAL_TEST.md`, `tests/e2e/*`, `evals/*` | 6, 7, 8 |
+Broken down into `DEV_TASK_43.yml`–`DEV_TASK_51.yml` (phase 7 in `DEV_TASK_LIST.md`); the task files hold scope, files and acceptance criteria.
+
+| Task | Covers | Depends on |
+|---|---|---|
+| 43 | Migration 0005, intake state, question/message fields on GET endpoints, new audit actions | — |
+| 44 | No ingest at creation; `POST /ingest`; refresh guard; `ingest: true` on `POST /api/sessions` | 43 |
+| 45 | Turn kinds, shared SSE turn helper, `POST /analyze`, `not_ingested` guard, `ANALYSIS_MAX_QUESTIONS` | 43 |
+| 46 | Answer / resolve / reopen routes, `/dismiss` alias, `mark_question_answered` summary, full question context | 45 |
+| 47 | Workspace `runTurn` / `turnInProgress`, Ingest / Analyze controls, `?analyze=1` | 44, 45 |
+| 48 | Questions UI | 46, 47 |
+| 49 | Discuss with AI | 47 |
+| 50 | New session page: Create and ingest | 44, 47 |
+| 51 | E2E, a11y, evals, SPEC_DOC / CONTEXT / ADR 0017 / README / MANUAL_TEST | 48, 49, 50 |
+
+Lanes: 43 → (44 ∥ 45) → (46 ∥ 47) → (48 ∥ 49 ∥ 50) → 51.

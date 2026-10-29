@@ -1,0 +1,78 @@
+id: "51"
+title: "Guided intake verification and docs: E2E, a11y, evals, SPEC_DOC/ADR/README/MANUAL_TEST"
+phase: 7
+severity: medium
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["48", "49", "50"]
+status: PENDING
+source: "docs/specs/guided-intake-and-question-answering.md §10, §11, §12"
+
+objective: |
+  Prove the full flow end to end, keep the existing suites green under the new intake step, and fold the change
+  into the project's specification and decision records.
+
+scope:
+  in:
+    - "tests/e2e/support/helpers.ts: createSession(page, keys, { ingest?: 'button' | 'create' | false, analyze?: boolean }); default = Create session, then Ingest with 'Analyze after ingest' unchecked, so existing specs keep their scripted LLM turns"
+    - "tests/e2e/intake.spec.ts: (1) Create session -> set repository -> Ingest (chained) -> questions -> answer one -> section updates -> resolve -> resolve another as not relevant -> Discuss with AI patches a section; (2) Create and ingest -> analysis streams; reload starts no second analysis"
+    - "Update session-create.spec.ts (sources appear only after ingest), clarification.spec.ts (resolve replaces dismiss), a11y.spec.ts (new controls and states)"
+    - "tests/e2e/fixtures/llm-script.json: rules for the analysis and answer turns"
+    - "evals: analysis mode - run the analysis turn on each fixture and score seeded Critical gaps from it; set ingested_at in the harness's session insert"
+    - "SPEC_DOC.md: amend FR-2 (SR-2.1/2.6/2.8), FR-3 (SR-3.5), §6, §7.2, §7.3, §10 AC-2/AC-3 per the spec; CONTEXT.md: Intake state, Resolved question"
+    - "docs/adr/0017-guided-intake-and-question-lifecycle.md (GD-1..GD-9) + README index row"
+    - "README.md and MANUAL_TEST.md: new flow"
+  out:
+    - "Contract migration removing 'dismissed' and /dismiss (next release follow-up)"
+
+files:
+  "tests/e2e/support/helpers.ts": "update"
+  "tests/e2e/intake.spec.ts": "create"
+  "tests/e2e/session-create.spec.ts": "update"
+  "tests/e2e/clarification.spec.ts": "update"
+  "tests/e2e/a11y.spec.ts": "update"
+  "tests/e2e/fixtures/llm-script.json": "update"
+  "evals/run.ts": "update"
+  "evals/README.md": "update"
+  "SPEC_DOC.md": "update"
+  "CONTEXT.md": "update"
+  "docs/adr/0017-guided-intake-and-question-lifecycle.md": "create"
+  "docs/adr/README.md": "update"
+  "README.md": "update"
+  "MANUAL_TEST.md": "update"
+
+implementation_notes: |
+  Conventions: Playwright suite and mocks from task 39 (`npm run test:e2e`); axe config from task 42.
+  LLM_FAKE_SCRIPT rules are chosen per run: match the analysis turn on its system-prompt marker and the answer turn
+  on the ANSWER_TEXT marker so ordering between specs does not matter.
+  Real-model eval runs need COPILOT_GITHUB_TOKEN; without it run --validate-only and record that AC4 was not run.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "intake.spec.ts passes both flows"
+    verify: "npm run test:e2e -- intake"
+  - id: AC2
+    behavior: "Full E2E and a11y suites pass (0 serious/critical axe violations)"
+    verify: "npm run test:e2e"
+  - id: AC3
+    behavior: "Unit and integration suites, lint, typecheck and build pass"
+    verify: "npm run lint && npm run typecheck && npm test && npm run test:integration && npm run build"
+  - id: AC4
+    behavior: "Analysis-mode eval asks about each seeded Critical gap in the analysis turn for >= the current baseline pass rate"
+    verify: "npm run eval:llm -- --mode analysis"
+  - id: AC5
+    behavior: "SPEC_DOC, CONTEXT, ADR 0017, README and MANUAL_TEST describe the new flow; no reference to automatic ingestion at creation remains"
+    verify: "grep -n 'ingest' SPEC_DOC.md README.md MANUAL_TEST.md"
+
+risks_vulnerabilities:
+  - risk: "Auto analysis consumes scripted LLM turns meant for later steps in existing E2E specs"
+    mitigation: "Helper default ingests without analysis; analysis covered only in intake.spec.ts"
+
+knowledge_gaps:
+  - "COPILOT_GITHUB_TOKEN availability for AC4 (same gap as task 40)"
+
+commit_message: |
+  test(task-51): guided intake E2E, evals and documentation
