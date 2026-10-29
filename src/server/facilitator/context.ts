@@ -31,6 +31,13 @@ export interface ContextQuestion {
   issueId: string | null;
   section: SectionName | null;
   text: string;
+  /** Legacy 'dismissed' rows are reported as resolved / not_relevant. */
+  status: 'open' | 'answered' | 'resolved';
+  answerText: string | null;
+  answeredVia: 'facilitator' | 'ai' | null;
+  resolution: 'answered' | 'not_relevant' | null;
+  /** The resolve reason (stored in dismiss_reason). */
+  reason: string | null;
 }
 
 export interface SessionContext {
@@ -47,7 +54,8 @@ export interface SessionContext {
   workingCopy: WorkingCopy;
   /** Issues that are not resolved: open and accepted-risk. */
   issues: ContextIssue[];
-  openQuestions: ContextQuestion[];
+  /** Every AI question, oldest first (GI-21): the prompt groups them into open, answered and resolved. */
+  questions: ContextQuestion[];
   gatePasses: boolean;
   clarificationEnded: boolean;
 }
@@ -71,6 +79,26 @@ interface QuestionRow {
   issue_id: string | null;
   section: SectionName | null;
   text: string;
+  status: 'open' | 'answered' | 'resolved' | 'dismissed';
+  answer_text: string | null;
+  answered_via: 'facilitator' | 'ai' | null;
+  resolution: 'answered' | 'not_relevant' | null;
+  dismiss_reason: string | null;
+}
+
+function mapQuestion(q: QuestionRow): ContextQuestion {
+  const status = q.status === 'dismissed' ? 'resolved' : q.status;
+  return {
+    id: q.id,
+    issueId: q.issue_id,
+    section: q.section,
+    text: q.text,
+    status,
+    answerText: q.answer_text,
+    answeredVia: q.answered_via,
+    resolution: status === 'resolved' ? (q.resolution ?? 'not_relevant') : q.resolution,
+    reason: q.dismiss_reason,
+  };
 }
 
 export async function loadSessionContext(sessionId: string): Promise<SessionContext> {
@@ -91,7 +119,8 @@ export async function loadSessionContext(sessionId: string): Promise<SessionCont
       [sessionId],
     ),
     query<QuestionRow>(
-      "SELECT id, issue_id, section, text FROM ai_question WHERE session_id = $1 AND status = 'open' ORDER BY created_at, id",
+      `SELECT id, issue_id, section, text, status, answer_text, answered_via, resolution, dismiss_reason
+         FROM ai_question WHERE session_id = $1 ORDER BY created_at, id`,
       [sessionId],
     ),
   ]);
@@ -108,7 +137,7 @@ export async function loadSessionContext(sessionId: string): Promise<SessionCont
     messages: all.filter((m) => m.role !== 'note'),
     workingCopy,
     issues,
-    openQuestions: questionRows.map((q) => ({ id: q.id, issueId: q.issue_id, section: q.section, text: q.text })),
+    questions: questionRows.map(mapQuestion),
     gatePasses: gatePasses(issues),
     clarificationEnded: session.clarificationEnded,
   };

@@ -13,6 +13,8 @@ import { createCodeTools } from './codeTools';
 
 export const PATCH_CONTENT_MAX = 20_000;
 export const QUESTION_TEXT_MAX = 500;
+/** GI-19: max length of the answer summary mark_question_answered stores as answer_text. */
+export const ANSWER_SUMMARY_MAX = 2_000;
 /** SR-3.4 / D-7: the default per-turn question limit (FacilitatorTurnState.maxQuestions). */
 export const MAX_QUESTIONS_PER_TURN = 3;
 export const QUESTION_LIMIT_MESSAGE = 'Question limit reached for this turn';
@@ -92,6 +94,7 @@ interface AskQuestionArgs {
 
 interface MarkQuestionAnsweredArgs {
   questionId: string;
+  answerSummary?: string;
 }
 
 function applySectionPatchTool(state: FacilitatorTurnState): LlmToolDefinition {
@@ -163,20 +166,35 @@ function askQuestionTool(state: FacilitatorTurnState): LlmToolDefinition {
 function markQuestionAnsweredTool(state: FacilitatorTurnState): LlmToolDefinition {
   return {
     name: 'mark_question_answered',
-    description: 'Mark one of the open AI questions as answered once the conversation has resolved it.',
+    description:
+      'Mark one of the open AI questions as answered once the conversation has answered it, with a short summary of the answer (answerSummary). Only open questions can be marked.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       required: ['questionId'],
-      properties: { questionId: { type: 'string', pattern: UUID_PATTERN } },
+      properties: {
+        questionId: { type: 'string', pattern: UUID_PATTERN },
+        answerSummary: { type: 'string', maxLength: ANSWER_SUMMARY_MAX },
+      },
     },
+    // GI-19: only open -> answered; the summary is stored as answer_text with answered_via 'ai'.
     handler: async (args) => {
-      const { questionId } = args as MarkQuestionAnsweredArgs;
+      const { questionId, answerSummary } = args as MarkQuestionAnsweredArgs;
+      const summary = answerSummary?.trim() ? answerSummary.trim() : null;
       const rows = await query(
-        "UPDATE ai_question SET status = 'answered' WHERE id = $1 AND session_id = $2 AND status = 'open' RETURNING id",
+        `UPDATE ai_question SET status = 'answered', answer_text = $3, answered_at = now(), answered_via = 'ai'
+          WHERE id = $1 AND session_id = $2 AND status = 'open' RETURNING id`,
+        [questionId, state.sessionId, summary],
+      );
+      if (rows.length > 0) return `Question ${questionId} marked answered`;
+      const [current] = await query<{ status: string }>(
+        'SELECT status FROM ai_question WHERE id = $1 AND session_id = $2',
         [questionId, state.sessionId],
       );
-      return rows.length > 0 ? `Question ${questionId} marked answered` : `No open question with id ${questionId}`;
+      if (!current) return `No open question with id ${questionId}`;
+      return current.status === 'answered'
+        ? `Question ${questionId} is already answered`
+        : `Question ${questionId} is resolved and cannot be changed`;
     },
   };
 }

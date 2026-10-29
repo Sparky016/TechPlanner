@@ -41,10 +41,13 @@ import {
   buildFacilitatorMessages,
   buildFacilitatorSystemPrompt,
   CORRECTIVE_MESSAGE,
+  DISCUSSION_TEXT,
+  RESOLVED_QUESTIONS_RULE,
   UNTRUSTED_TAG,
 } from './prompt';
 import { QuestionNotFoundError, runFacilitatorTurn, type FacilitatorEvent, type TurnKind } from './runTurn';
 import { createFacilitatorTools, createTurnState, QUESTION_LIMIT_MESSAGE } from './tools';
+import type { ContextQuestion } from './context';
 
 const SESSION = '00000000-0000-4000-8000-000000000001';
 const QUESTION = '00000000-0000-4000-8000-0000000000aa';
@@ -72,7 +75,7 @@ function context(overrides: Partial<SessionContext> = {}): SessionContext {
       ) as never,
     },
     issues: [],
-    openQuestions: [],
+    questions: [],
     gatePasses: false,
     clarificationEnded: false,
     ...overrides,
@@ -142,6 +145,54 @@ describe('facilitator tools', () => {
     expect(createTurnState(SESSION, new Date(), false).maxQuestions).toBe(3);
   });
 
+  describe('mark_question_answered (GI-19)', () => {
+    const markTool = () =>
+      createFacilitatorTools(createTurnState(SESSION, new Date(), false)).find((t) => t.name === 'mark_question_answered')!;
+    const updates = () => vi.mocked(query).mock.calls.filter(([text]) => /UPDATE ai_question/.test(text));
+
+    it('stores the answerSummary as answer_text with answered_via ai, only for an open question', async () => {
+      vi.mocked(query).mockImplementation(async (text: string) =>
+        (/UPDATE ai_question/.test(text) ? [{ id: QUESTION }] : []) as never,
+      );
+      const out = await executeToolCall(markTool(), { questionId: QUESTION, answerSummary: '  Okta via SAML  ' });
+      expect(out).toMatchObject({ ok: true, result: `Question ${QUESTION} marked answered` });
+      const [[text, params]] = updates();
+      expect(text).toMatch(/answer_text = \$3, answered_at = now\(\), answered_via = 'ai'/);
+      expect(text).toMatch(/status = 'open'/);
+      expect(params).toEqual([QUESTION, SESSION, 'Okta via SAML']);
+    });
+
+    it('marks without a summary (answer_text stays NULL)', async () => {
+      vi.mocked(query).mockImplementation(async (text: string) =>
+        (/UPDATE ai_question/.test(text) ? [{ id: QUESTION }] : []) as never,
+      );
+      await executeToolCall(markTool(), { questionId: QUESTION });
+      expect(updates()[0][1]).toEqual([QUESTION, SESSION, null]);
+    });
+
+    it('refuses resolved and already answered questions, and rejects an oversize summary', async () => {
+      let status = 'resolved';
+      vi.mocked(query).mockImplementation(async (text: string) =>
+        (/SELECT status FROM ai_question/.test(text) ? [{ status }] : []) as never,
+      );
+      expect((await executeToolCall(markTool(), { questionId: QUESTION, answerSummary: 'x' })).result).toBe(
+        `Question ${QUESTION} is resolved and cannot be changed`,
+      );
+      status = 'answered';
+      expect((await executeToolCall(markTool(), { questionId: QUESTION })).result).toBe(
+        `Question ${QUESTION} is already answered`,
+      );
+      vi.mocked(query).mockResolvedValue([] as never);
+      expect((await executeToolCall(markTool(), { questionId: QUESTION })).result).toBe(
+        `No open question with id ${QUESTION}`,
+      );
+      vi.mocked(query).mockClear();
+      const big = await executeToolCall(markTool(), { questionId: QUESTION, answerSummary: 'x'.repeat(2_001) });
+      expect(big.ok).toBe(false);
+      expect(query).not.toHaveBeenCalled();
+    });
+  });
+
   it('rejects an oversize patch without calling applyAiPatch', async () => {
     const state = createTurnState(SESSION, new Date(), false);
     const tool = createFacilitatorTools(state).find((t) => t.name === 'apply_section_patch')!;
@@ -207,10 +258,11 @@ function txWrites(): string[] {
 const auditDetails = () => vi.mocked(recordAudit).mock.calls[0][0].details as Record<string, unknown>;
 
 describe('runFacilitatorTurn turn kinds (spec §8.2)', () => {
-  it('message: persists the facilitator message, adds no turn block and audits turnKind message', async () => {
+  it('message: persists the facilitator message, adds the discussion block and audits turnKind message', async () => {
     fake.enqueue([ask('Who owns this?'), { type: 'done' }]);
     await say('Hello');
     expect(txWrites()).toEqual(['message:facilitator:Hello', 'message:ai:']);
+    expect(fake.calls[0].system.endsWith(DISCUSSION_TEXT())).toBe(true);
     expect(fake.calls[0].system).not.toContain('initial analysis');
     expect(fake.calls[0].system).not.toContain('The facilitator answered question');
     expect(auditDetails()).toMatchObject({ turnKind: 'message' });
@@ -284,6 +336,7 @@ describe('runFacilitatorTurn turn kinds (spec §8.2)', () => {
     await turn({ kind: 'answer', questionId: QUESTION, text: 'Okta' });
     expect(txWrites()).toEqual(['message:ai:']);
     expect(fake.calls[0].system).toContain(ANSWER_TEXT({ id: QUESTION, text: 'Which IdP?' }));
+    expect(fake.calls[0].system).not.toContain('This is an overview discussion');
     expect(fake.calls[0].system).toContain('Ask at most 3 questions per turn');
     expect(fake.calls[0].tools.find((t) => t.name === 'ask_question')?.description).toContain('At most 3 per turn');
     expect(auditDetails()).toMatchObject({ turnKind: 'answer', questionId: QUESTION });
@@ -363,6 +416,50 @@ describe('facilitator prompt (AC6)', () => {
     expect(prompt).toContain('Do not call mark_question_answered for this question');
     expect(prompt).toMatchSnapshot();
     expect(ANSWER_TEXT({ id: QUESTION, text: 'Which IdP?' }, true)).toContain('you cannot ask new questions');
+  });
+
+  it('adds the discussion block to message turns, without ask_question once clarification has ended (GI-21)', () => {
+    const prompt = buildFacilitatorSystemPrompt({ gatePasses: false, clarificationEnded: false });
+    expect(prompt.endsWith(DISCUSSION_TEXT())).toBe(true);
+    expect(prompt).toContain(
+      'This is an overview discussion. Update the Working Copy with apply_section_patch wherever the discussion settles something, and record open points with ask_question.',
+    );
+    expect(DISCUSSION_TEXT(true)).not.toContain('ask_question');
+    expect(prompt).toContain('mark_question_answered when the conversation has answered one of the open AI questions, with answerSummary');
+  });
+
+  it('lists open, answered and resolved questions with the do-not-re-ask rule (GI-21)', () => {
+    const q = (id: string, overrides: Partial<ContextQuestion>): ContextQuestion => ({
+      id: `00000000-0000-4000-8000-00000000000${id}`,
+      issueId: null,
+      section: null,
+      text: `Question ${id}?`,
+      status: 'open',
+      answerText: null,
+      answeredVia: null,
+      resolution: null,
+      reason: null,
+      ...overrides,
+    });
+    const ctx = context({
+      questions: [
+        q('1', { section: 'Security', text: 'Which IdP?' }),
+        q('2', { section: 'Scope', text: 'Which regions?', status: 'answered', answerText: 'EU only.\nUS later.', answeredVia: 'facilitator' }),
+        q('3', { text: 'Rate limits?', status: 'answered', answerText: '100 rps per tenant', answeredVia: 'ai' }),
+        q('4', { section: 'Security', text: 'MFA?', status: 'resolved', resolution: 'answered', answerText: 'TOTP', answeredVia: 'facilitator' }),
+        q('5', { text: 'Mobile app?', status: 'resolved', resolution: 'not_relevant', reason: 'Web only' }),
+      ],
+    });
+    const text = buildContextMessage(ctx);
+    const questions = text.slice(text.indexOf('## Open AI questions'));
+    expect(questions).toContain(RESOLVED_QUESTIONS_RULE);
+    expect(questions).toContain('Do not ask these again unless new information makes them relevant; if so, explain why.');
+    expect(questions).toMatchSnapshot();
+
+    const empty = buildContextMessage(context());
+    expect(empty.slice(empty.indexOf('## Open AI questions'))).toBe(
+      ['## Open AI questions', '', 'None.', '', '## Answered questions', '', 'None.', '', '## Resolved questions', '', RESOLVED_QUESTIONS_RULE, '', 'None.'].join('\n'),
+    );
   });
 
   it('wraps sources in untrusted blocks that their content cannot close', () => {

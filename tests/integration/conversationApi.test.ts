@@ -391,28 +391,40 @@ describe('questions', () => {
     });
   }
 
-  it('dismisses a question with a reason and writes question.dismissed (AC4)', async () => {
+  it('dismisses (legacy alias of resolve from open) with a reason and writes question.resolved (AC4)', async () => {
     const s = await createLockedSession();
     const qid = await insertQuestion(s, 'Which IdP?');
     const other = await insertQuestion(s, 'Which region?');
 
     const res = await dismiss(s, qid, { reason: 'Out of scope' });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ id: qid, status: 'dismissed', dismissReason: 'Out of scope' });
+    expect(await res.json()).toEqual({
+      id: qid,
+      status: 'resolved',
+      dismissReason: 'Out of scope',
+      resolution: 'not_relevant',
+    });
 
-    const [row] = await query<{ status: string; dismiss_reason: string }>(
-      'SELECT status, dismiss_reason FROM ai_question WHERE id = $1',
+    const [row] = await query<{ status: string; dismiss_reason: string; resolution: string; resolved_at: Date | null }>(
+      'SELECT status, dismiss_reason, resolution, resolved_at FROM ai_question WHERE id = $1',
       [qid],
     );
-    expect(row).toEqual({ status: 'dismissed', dismiss_reason: 'Out of scope' });
+    expect(row).toEqual({
+      status: 'resolved',
+      dismiss_reason: 'Out of scope',
+      resolution: 'not_relevant',
+      resolved_at: expect.any(Date),
+    });
 
     const audits = await query<{ user_id: string; details: Record<string, unknown>; correlation_id: string }>(
-      "SELECT user_id, details, correlation_id FROM audit_record WHERE session_id = $1 AND action = 'question.dismissed'",
+      "SELECT user_id, details, correlation_id FROM audit_record WHERE session_id = $1 AND action = 'question.resolved'",
       [s.id],
     );
     expect(audits).toHaveLength(1);
     expect(audits[0].user_id).toBe(ALICE.accountId);
-    expect(audits[0].details).toMatchObject({ questionId: qid, reason: 'Out of scope' });
+    expect(audits[0].details).toMatchObject({ questionId: qid, section: 'Security', resolution: 'not_relevant', reason: 'Out of scope' });
+    const legacy = await query("SELECT 1 FROM audit_record WHERE session_id = $1 AND action = 'question.dismissed'", [s.id]);
+    expect(legacy).toHaveLength(0);
     expect(audits[0].correlation_id).toBe(res.headers.get('x-correlation-id'));
 
     const list = await questionsGET(request('GET', `/api/sessions/${s.id}/questions`), {
@@ -421,11 +433,18 @@ describe('questions', () => {
     expect(list.status).toBe(200);
     const { questions } = (await list.json()) as { questions: { id: string; status: string; dismissReason: string | null }[] };
     expect(questions.map(({ id, status, dismissReason }) => ({ id, status, dismissReason }))).toEqual([
-      { id: qid, status: 'dismissed', dismissReason: 'Out of scope' },
+      { id: qid, status: 'resolved', dismissReason: 'Out of scope' },
       { id: other, status: 'open', dismissReason: null },
     ]);
 
-    // Already dismissed -> 409; unknown -> 404; reason too long -> 413.
+    // Only from open: an answered question is rejected (use /resolve).
+    await query("UPDATE ai_question SET status = 'answered', answer_text = 'EU' WHERE id = $1", [other]);
+    const answered = await dismiss(s, other);
+    expect(answered.status).toBe(409);
+    expect(await errorCode(answered)).toBe('question_not_open');
+    await query("UPDATE ai_question SET status = 'open', answer_text = NULL WHERE id = $1", [other]);
+
+    // Already resolved -> 409; unknown -> 404; reason too long -> 413.
     const again = await dismiss(s, qid);
     expect(again.status).toBe(409);
     expect(await errorCode(again)).toBe('question_not_open');
@@ -483,6 +502,6 @@ describe('questions', () => {
     const qid = await insertQuestion(s, 'Which IdP?');
     const res = await dismiss(s, qid);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ id: qid, status: 'dismissed', dismissReason: null });
+    expect(await res.json()).toEqual({ id: qid, status: 'resolved', dismissReason: null, resolution: 'not_relevant' });
   });
 });
