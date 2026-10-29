@@ -1,26 +1,14 @@
 # Spec: Migrate from PostgreSQL to MySQL
 
-Status: Draft
+Status: Accepted (decisions in §13)
 Date: 2026-10-29
 Supersedes (on acceptance): ADR-0001 database choice (PostgreSQL 16)
 
 ## 1. Goal
 
-Run TechPlanner locally and in tests without `docker compose -f docker-compose.dev.yml up`. Developers point
-`DATABASE_URL` at a MySQL 8.4 LTS server they already have (native install, or an org-managed instance) and run
-`npm run migrate && npm run dev`.
-
-### 1.1 Read this first: the switch alone does not remove the server
-
-MySQL is a server process, like PostgreSQL. Moving to MySQL removes Docker only because a native or shared MySQL
-server is assumed to exist already. If the real goal is "no Docker", two cheaper options reach it with no code
-port (see §10):
-
-- Install PostgreSQL 16 natively (Homebrew, apt, the Windows installer) and keep the code as is.
-- Use an embedded Postgres (PGlite) for dev and tests.
-
-This spec covers the MySQL port as asked. §10 compares the options, and the decision should be made against it
-before work starts.
+Replace PostgreSQL with MySQL 8.4 LTS (a requirement, §13). Developers run a native MySQL 8.4 install, point
+`DATABASE_URL` at it and run `npm run migrate && npm run dev`, with no Docker container for the database. In
+production, MySQL 8.4 runs natively on the hosting server next to the TechPlanner containers (§11a).
 
 ## 2. Scope
 
@@ -32,18 +20,19 @@ In scope:
 - Job queue: `pg-boss` is Postgres-only and must be replaced.
 - Migration runner, integration test reset, E2E DB bootstrap.
 - Docs: README, runbook, `.env.example`, ADR-0001 update, compose files.
+- Production: MySQL on the hosting server, users and grants, backups (§11a).
 
 Out of scope:
 
 - Data migration of an existing production database. There is no production data yet; if that changes, add a
-  one-off export/import task (see §9).
+  one-off export/import task.
 - Any feature or behaviour change. Every integration and E2E test must pass unchanged in intent.
 
 ## 3. Target platform
 
 | Item | Choice | Reason |
 | --- | --- | --- |
-| Server | MySQL 8.4 LTS, InnoDB | CHECK constraints (8.0.16+), `SKIP LOCKED`, JSON, CTEs, `DEFAULT (expr)` |
+| Server | MySQL 8.4 LTS, InnoDB (minimum supported: 8.4) | CHECK constraints (8.0.16+), `SKIP LOCKED`, JSON, CTEs, `DEFAULT (expr)` |
 | Driver | `mysql2` (promise API, pool) | Maintained, prepared statements, TypeScript types |
 | Charset | `utf8mb4`, collation `utf8mb4_0900_bin` on audit and key columns | Full Unicode; byte-exact comparison for hashed text |
 | Session settings | `time_zone = '+00:00'`, `sql_mode` includes `STRICT_ALL_TABLES,NO_ZERO_DATE` | UTC timestamps; reject silent truncation |
@@ -78,8 +67,8 @@ Out of scope:
 | FKs, `ON DELETE CASCADE`, `UNIQUE (session_id, fingerprint)` | Same |
 | `revision_immutable()` trigger (only `published false → true`) | `BEFORE UPDATE` trigger comparing each column `OLD.c <=> NEW.c` except `published`, then `SIGNAL SQLSTATE '45000'` |
 | `audit_record` UPDATE/DELETE reject triggers | `BEFORE UPDATE` and `BEFORE DELETE` triggers with `SIGNAL SQLSTATE '45000'` |
-| `audit_record` TRUNCATE trigger | **No equivalent** (MySQL has no TRUNCATE triggers). Enforce via privileges: app user gets `SELECT, INSERT` only on `audit_record`; `DROP` (which TRUNCATE needs) is not granted to the app user. Document in runbook; this is a weakening of SR-12.3 for the table owner and needs sign-off (ADR-0013) |
-| `REVOKE ... FROM PUBLIC` | `GRANT` per app user; migration runs as a separate owner user |
+| `audit_record` TRUNCATE trigger | **No equivalent** (MySQL has no TRUNCATE triggers). Enforced by privileges: the app user gets `SELECT, INSERT` only on `audit_record`, and no `DROP` (which TRUNCATE needs). The owner user can still truncate; this weakening of SR-12.3 is accepted (§13) and recorded in ADR-0013 |
+| `REVOKE ... FROM PUBLIC` | Two users: `techplanner_owner` (DDL, runs migrations) and `techplanner_app` (DML only, used by web and worker); see §11a |
 
 Trigger bodies must be applied without `DELIMITER` (that is a CLI directive). The migration runner sends each
 statement separately (§6).
@@ -235,50 +224,93 @@ does not. Review each of the 15 `FOR UPDATE` sites:
 
 ## 10. Alternatives
 
-| Option | Removes Docker locally | Code change | Risk |
-| --- | --- | --- | --- |
-| A. MySQL 8.4 (this spec) | Yes, if MySQL is installed or shared | Large: driver, 65 files, queue rewrite, triggers, runner | Weaker audit TRUNCATE guarantee; non-transactional DDL; gap locks; hash round-trip |
-| B. Native PostgreSQL 16 | Yes | None (README only) | None |
-| C. PGlite (embedded Postgres, WASM) for dev/tests | Yes, no server at all | Small: test/dev pool factory; pg-boss compatibility must be verified | Single-connection; advisory and session locks need checking |
-| D. Managed Postgres (shared dev instance) | Yes | None | Shared state between developers |
+Rejected because MySQL is required (§13). Kept for the ADR record.
 
-Recommendation: unless there is an org requirement for MySQL, choose B (or D) for the stated goal. Choose A
-only if MySQL is mandated or is the only database available on the hosting server; then this spec applies.
+| Option | Removes Docker locally | Code change | Why rejected |
+| --- | --- | --- | --- |
+| Native PostgreSQL 16 | Yes | None | MySQL required |
+| PGlite (embedded Postgres) for dev/tests | Yes | Small | MySQL required |
+| Managed Postgres | Yes | None | MySQL required; DB runs on the hosting server |
 
 ## 11. Work breakdown
 
 Each step lands green (lint, typecheck, unit, integration).
 
-1. **ADR**: write ADR-0017 "Database: MySQL 8.4", amend ADR-0001 and ADR-0013 (TRUNCATE guarantee). Sign-off
-   gate.
+1. **ADR**: write ADR-0017 "Database: MySQL 8.4 on the hosting server", amend ADR-0001 (database) and ADR-0013
+   (TRUNCATE enforced by privileges, accepted).
 2. **Driver layer**: `mysql2` pool, `DbClient` interface, type casts, error mapping. Keep `pg` until step 6.
 3. **Schema + runner**: MySQL migrations, statement splitting, `GET_LOCK`, `app_lock` table; `schema.test.ts`
    green.
 4. **Query port**: placeholders, `RETURNING`, upserts, intervals, arrays, advisory locks, file by file; integration
    suites green.
 5. **Queue**: MySQL job table and worker; `jobs.test.ts`, readiness debounce and publish retry tests green.
-6. **Remove Postgres**: drop `pg`, `@types/pg`, `pg-boss`; delete `docker-compose.dev.yml`; replace the
-   `postgres` service in `docker-compose.prod.example.yml` with `mysql:8.4` (or remove it for managed DB).
-7. **Docs**: README dev setup (install MySQL, create user/DB, grants), `.env.example`, runbook (grants, backup,
-   TRUNCATE note), `MANUAL_TEST.md`.
+6. **Remove Postgres**: drop `pg`, `@types/pg`, `pg-boss`; delete `docker-compose.dev.yml`; remove the `postgres`
+   service from `docker-compose.prod.example.yml` and wire the containers to the host's MySQL (§11a).
+7. **Docs**: README dev setup (install MySQL 8.4, `scripts/mysql-bootstrap.sql`), `.env.example`, runbook
+   (§11a: install, users, grants, backup, restore, TRUNCATE note), `MANUAL_TEST.md`.
 8. **Verification**: full E2E suite, `npm run audit:verify` on a populated DB, `npm run perf` against the
    ADR-0007 targets.
 
-Rough size: 6–9 developer-days, about half of it in steps 4–5.
+Rough size: 7–10 developer-days, about half of it in steps 4–5; the production setup (§11a) adds about one day.
+
+## 11a. Production: MySQL on the hosting server
+
+MySQL 8.4 is installed natively on the hosting server (OS package from the MySQL APT/YUM repository), not as a
+container, so its data, upgrades and backups are independent of the app image.
+
+**Network.** `bind-address = 127.0.0.1` plus the Docker bridge gateway (e.g. `172.17.0.1`), with the firewall
+closing 3306 to everything else. The containers reach it through `extra_hosts: ["host.docker.internal:host-gateway"]`
+and `DATABASE_URL=mysql://techplanner_app:…@host.docker.internal:3306/techplanner`.
+
+**Users** (created by `scripts/mysql-bootstrap.sql`, run once as root; used for dev too, with dev passwords):
+
+```sql
+CREATE DATABASE techplanner CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE USER 'techplanner_owner'@'%' IDENTIFIED BY '…';   -- restrict host to the bridge subnet in prod
+CREATE USER 'techplanner_app'@'%'   IDENTIFIED BY '…';
+GRANT ALL PRIVILEGES ON techplanner.* TO 'techplanner_owner'@'%' WITH GRANT OPTION;
+-- No database-wide grant for techplanner_app: migrations grant per table (below).
+```
+
+Because a database-level `UPDATE, DELETE` grant cannot exclude one table, the app user's grants are per table:
+each migration that creates a table also grants on it (`SELECT, INSERT, UPDATE, DELETE`, or `SELECT, INSERT` for
+`audit_record`). The bootstrap script then grants nothing database-wide to `techplanner_app`.
+`tests/integration/schema.test.ts` asserts that `techplanner_app` cannot `UPDATE`, `DELETE` or `TRUNCATE`
+`audit_record`.
+
+**Roles.** The `migrate` service gets `DATABASE_URL` built from a new `MIGRATE_DATABASE_URL` (owner user); `web`
+and `worker` use the app user. `npm run migrate` in dev reads `MIGRATE_DATABASE_URL` when set, else
+`DATABASE_URL`.
+
+**Server settings** (`/etc/mysql/mysql.conf.d/techplanner.cnf`): `default_time_zone = '+00:00'`,
+`sql_mode = STRICT_ALL_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO`,
+`character_set_server = utf8mb4`, `log_bin = ON`, `binlog_expire_logs_seconds = 604800`,
+`innodb_buffer_pool_size` ≈ 50% of RAM left after the app containers.
+
+**Backup and restore** (runbook):
+
+- Nightly `mysqldump --single-transaction --routines --triggers techplanner | gzip` as a backup user with
+  `SELECT, SHOW VIEW, TRIGGER, LOCK TABLES, PROCESS`, kept 14 days, copied off the host.
+- Binary logs give point-in-time recovery between dumps.
+- Restore drill once before go-live: restore into a scratch database, then run `npm run audit:verify` against it.
+
+**Upgrades.** Stay on the 8.4 LTS line; take a dump before each minor upgrade.
 
 ## 12. Acceptance criteria
 
 - `npm run migrate && npm run dev` works against a native MySQL 8.4 with no Docker running.
 - `npm test`, `npm run test:integration`, `npm run test:e2e` pass against MySQL.
-- `npm run audit:verify` reports an intact chain after the E2E run.
+- `npm run audit:verify` reports an intact chain after the E2E run, and after a backup restore (§11a).
+- `docker-compose.prod.example.yml` starts web, worker and migrate against the host's MySQL with no database
+  container.
 - Audit UPDATE and DELETE are rejected by triggers; TRUNCATE is rejected for the app user by privileges.
 - Readiness debounce: two enqueues with the same `singletonKey` yield one queued job.
 - No `pg`, `pg-boss`, or `$n` placeholder remains (`grep` check in CI).
 - Perf targets in ADR-0007 still met.
 
-## 13. Open questions
+## 13. Decisions (2026-10-29)
 
-1. Is MySQL mandated (org standard, hosting server), or is "no Docker" the only requirement? Decides A vs B/C/D.
-2. Is the TRUNCATE weakening of SR-12.3 acceptable with privilege-based enforcement?
-3. Production database: managed MySQL, or MySQL on the hosting server? Affects grants and backup in the runbook.
-4. Minimum MySQL version available to developers (this spec needs 8.0.19+; 8.4 LTS recommended).
+1. MySQL is required. Postgres alternatives (§10) are rejected.
+2. TRUNCATE on `audit_record` is blocked by privileges only (no trigger). Accepted; record in ADR-0013.
+3. Production MySQL runs natively on the hosting server (§11a).
+4. MySQL 8.4 LTS is the minimum and target version for dev, CI and production.
