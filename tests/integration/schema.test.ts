@@ -1,4 +1,4 @@
-import { asOwner, migrateDatabase, resetDatabase } from './setup';
+import { asOwner, dropDatabase, migrateDatabase, resetDatabase } from './setup';
 import { randomUUID } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -66,7 +66,7 @@ describe('migrations', () => {
     owner.pathname = `/${scratch}`;
     const pools = [createDbPool(owner.toString()), createDbPool(owner.toString())];
     try {
-      await admin.query(`DROP DATABASE IF EXISTS \`${scratch}\``);
+      await dropDatabase(admin, scratch);
       await admin.query(`CREATE DATABASE \`${scratch}\``);
       const runs = await Promise.all(pools.map((p) => runMigrations(p)));
 
@@ -75,7 +75,7 @@ describe('migrations', () => {
       const recorded = await pools[0].query<{ filename: string }>('SELECT filename FROM schema_migrations');
       expect(recorded.rows.map((r) => r.filename).sort()).toEqual(files);
     } finally {
-      await admin.query(`DROP DATABASE IF EXISTS \`${scratch}\``).catch(() => undefined);
+      await dropDatabase(admin, scratch).catch(() => undefined);
       await Promise.all([admin.end(), ...pools.map((p) => p.end())]);
     }
   });

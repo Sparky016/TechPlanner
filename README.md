@@ -57,6 +57,10 @@ Tests use their own databases on the same server, so the dev data is never touch
 - E2E (`npm run test:e2e`) uses `techplanner_e2e` (`E2E_DATABASE_URL`, `E2E_MIGRATE_DATABASE_URL`); evals use
   `techplanner_eval` and `npm run perf` uses `techplanner_perf`. The owner creates these on first use.
 
+MySQL keeps table-level grants after `DROP DATABASE`, so the integration and E2E resets revoke the app user's
+per-table grants before dropping their database. The perf reset does not; its leftover rows in `mysql.tables_priv`
+are harmless (the next migration grants the same privileges again).
+
 ### Configuration
 
 All settings come from environment variables, validated by `getConfig()` in `src/server/config.ts`.

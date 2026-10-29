@@ -7,6 +7,8 @@ import { APP_ENV, ATLASSIAN_MOCK_URL, MIGRATE_DATABASE_URL, WEBHOOK_URL } from '
 
 // Owner connections (the app's own driver settings), so the reset may drop the database.
 let pool: DbPool | undefined;
+// Grantee of the migrations' per-table grants: the same setting and default scripts/migrate.ts reads.
+const APP_DB_USER = process.env.APP_DB_USER || "'techplanner_app'@'%'";
 
 function db(): DbPool {
   pool ??= createDbPool(MIGRATE_DATABASE_URL);
@@ -33,9 +35,20 @@ export function runScript(script: string): string {
  * scripts/migrate.ts runs as a child process because Playwright's loader cannot import it (import.meta).
  */
 export async function resetDatabase(): Promise<void> {
-  const name = `\`${decodeURIComponent(new URL(MIGRATE_DATABASE_URL).pathname.slice(1)).replace(/`/g, '``')}\``;
+  const database = decodeURIComponent(new URL(MIGRATE_DATABASE_URL).pathname.slice(1));
+  const name = `\`${database.replace(/`/g, '``')}\``;
   const client = await db().connect();
   try {
+    // The migrations' per-table grants to the app user outlive DROP DATABASE: revoke them first.
+    const tables = await client.query<{ name: string }>(
+      'SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?',
+      [database],
+    );
+    for (const { name: table } of tables.rows) {
+      await client.query(
+        `REVOKE IF EXISTS ALL PRIVILEGES ON ${name}.\`${table.replace(/`/g, '``')}\` FROM ${APP_DB_USER}`,
+      );
+    }
     await client.query(`DROP DATABASE IF EXISTS ${name}`);
     await client.query(`CREATE DATABASE ${name} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
   } finally {

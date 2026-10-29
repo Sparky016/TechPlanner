@@ -42,6 +42,24 @@ export async function migrateDatabase(): Promise<string[]> {
   }
 }
 
+/**
+ * Drops `name` as the owner. The migrations' per-table grants to the app user outlive DROP DATABASE (they stay in
+ * mysql.tables_priv), so they are revoked first; the owner's GRANT OPTION on the database is enough for that.
+ */
+export async function dropDatabase(admin: DbClient, name: string): Promise<void> {
+  const quoted = `\`${name.replace(/`/g, '``')}\``;
+  const tables = await admin.query<{ name: string }>(
+    'SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?',
+    [name],
+  );
+  for (const { name: table } of tables.rows) {
+    await admin.query(
+      `REVOKE IF EXISTS ALL PRIVILEGES ON ${quoted}.\`${table.replace(/`/g, '``')}\` FROM ${getConfig().APP_DB_USER}`,
+    );
+  }
+  await admin.query(`DROP DATABASE IF EXISTS ${quoted}`);
+}
+
 // Destroys all data in the target database: drops and re-creates it, then migrates.
 export async function resetDatabase(): Promise<void> {
   const name = databaseName();
@@ -49,7 +67,7 @@ export async function resetDatabase(): Promise<void> {
   // No default database: the one being dropped may not exist yet.
   const admin = createDbPool(ownerUrl(''));
   try {
-    await admin.query(`DROP DATABASE IF EXISTS ${quoted}`);
+    await dropDatabase(admin, name);
     await admin.query(`CREATE DATABASE ${quoted} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
   } finally {
     await admin.end();

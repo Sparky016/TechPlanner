@@ -36,6 +36,9 @@ image.
 - There are no TRUNCATE triggers. The owner user (`techplanner_owner`) can still truncate `audit_record`. This
   weakens SR-12.3 and is an accepted risk (spec §13.2, recorded in ADR-0013).
 - Triggers must be applied as single statements without `DELIMITER` (spec §4.2).
+- Connections run at `READ COMMITTED`, not InnoDB's default `REPEATABLE READ`, so a read after taking a lock
+  sees rows committed before the lock (the audit chain head relies on this) and behaviour matches PostgreSQL's
+  default. Statement-based binary logging does not support it, so the server keeps `binlog_format = ROW` (spec §3).
 - The job queue is custom code that must be maintained and tested (`tests/integration/jobs.test.ts`).
 - Production needs a backup and restore runbook (nightly `mysqldump`, binary logs, restore drill before go-live).
 

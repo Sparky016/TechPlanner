@@ -36,7 +36,7 @@ Out of scope:
 | Driver | `mysql2` (promise API, pool) | Maintained, prepared statements, TypeScript types |
 | Charset | `utf8mb4`, collation `utf8mb4_0900_bin` on audit and key columns | Full Unicode; byte-exact comparison for hashed text |
 | Session settings | `time_zone = '+00:00'`, `sql_mode` includes `STRICT_ALL_TABLES,NO_ZERO_DATE` | UTC timestamps; reject silent truncation |
-| Isolation | `REPEATABLE READ` (InnoDB default) | Matches current `FOR UPDATE` locking patterns |
+| Isolation | `READ COMMITTED`, set per connection (`SET SESSION transaction_isolation`) | Each statement reads a fresh snapshot, as PostgreSQL's default does. Under InnoDB's default `REPEATABLE READ` the snapshot is fixed by the first read, so a read taken before the `audit_chain` lock would make `recordAudit` see a stale chain head and fork the chain. Requires `binlog_format = ROW` (the 8.4 default) |
 
 `DATABASE_URL` becomes `mysql://techplanner:techplanner@localhost:3306/techplanner`.
 
@@ -108,7 +108,7 @@ and replace `PoolClient` imports from `pg` with it (12 files under `src/server`,
 | `LEAST`, `COALESCE`, `now()` | many | Same names; use `NOW(6)` for microsecond precision |
 | `::text`, `::bigint`, `::timestamptz` casts | 10 | Remove or `CAST(? AS ...)` |
 | `IS NOT DISTINCT FROM` | trigger only | `<=>` |
-| `SELECT ... FOR UPDATE` | 15 | Same syntax. Re-check each for gap-lock deadlocks under REPEATABLE READ (§8) |
+| `SELECT ... FOR UPDATE` | 15 | Same syntax. Re-check each for gap-lock deadlocks (§8) |
 | `pg_advisory_xact_lock(hashtext(...))` (`audit/audit.ts`, `auth/tokens.ts`, `scripts/migrate.ts`) | 3 | MySQL has no transaction-scoped advisory lock. Replace with a row lock on a dedicated `app_lock (name VARCHAR(64) PRIMARY KEY)` table: `SELECT 1 FROM app_lock WHERE name = ? FOR UPDATE` (seed rows for `audit_chain`; `INSERT ... ON DUPLICATE KEY UPDATE` + `FOR UPDATE` for per-user `refresh:<id>`). Released at commit, same semantics |
 | `pg_try_advisory_lock` / `pg_advisory_unlock` session lock (`api/sessions/[id]/messages/route.ts`) | 1 | `GET_LOCK(?, 0)` / `RELEASE_LOCK(?)`; connection-scoped, same as today. Lock names ≤ 64 chars: `turn:<uuid>` is 41 |
 | `rowCount` on results | many | `affectedRows` for writes, `rows.length` for reads; wrap in `DbClient` |
@@ -198,8 +198,10 @@ verification. Still required:
 
 ## 8. Concurrency review
 
-InnoDB `REPEATABLE READ` takes next-key/gap locks on `FOR UPDATE` over ranges and non-unique indexes; Postgres
-does not. Review each of the 15 `FOR UPDATE` sites:
+The app runs at `READ COMMITTED` (§3), where InnoDB takes only record locks for `FOR UPDATE` on searches and
+index scans, as Postgres does; gap locks remain for foreign-key and duplicate-key checks. Under `REPEATABLE READ`
+(InnoDB's default, used by any connection that does not run the session init) `FOR UPDATE` also takes
+next-key/gap locks over ranges and non-unique indexes. Review each of the 15 `FOR UPDATE` sites:
 
 - Point lookups by primary key (`planning_session`, `working_copy`, `publish_run`, `pending_suggestion`): same
   behaviour.
