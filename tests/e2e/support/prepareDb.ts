@@ -1,26 +1,20 @@
-import { Client } from 'pg';
-import { toPgPlaceholders } from '../../../src/server/db/placeholders';
-import { DATABASE_URL } from './env';
+import { createDbPool } from '../../../src/server/db/mysql';
+import { MIGRATE_DATABASE_URL } from './env';
 
 // Creates the E2E database when it does not exist yet (run by the web server command before `npm run migrate`).
 
 async function main(): Promise<void> {
-  const target = new URL(DATABASE_URL);
-  const name = decodeURIComponent(target.pathname.slice(1));
-  const admin = new URL(DATABASE_URL);
-  admin.pathname = '/postgres';
-  const client = new Client({ connectionString: admin.toString() });
-  await client.connect();
+  const admin = new URL(MIGRATE_DATABASE_URL);
+  const name = decodeURIComponent(admin.pathname.slice(1));
+  // No default database: it may not exist yet.
+  admin.pathname = '/';
+  const pool = createDbPool(admin.toString());
   try {
-    const { rowCount } = await client.query(toPgPlaceholders('SELECT 1 FROM pg_database WHERE datname = ?').text, [
-      name,
-    ]);
-    if (rowCount === 0) {
-      await client.query(`CREATE DATABASE "${name.replace(/"/g, '""')}"`);
-      console.log(`[e2e] created database ${name}`);
-    }
+    await pool.query(
+      `CREATE DATABASE IF NOT EXISTS \`${name.replace(/`/g, '``')}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
+    );
   } finally {
-    await client.end();
+    await pool.end();
   }
 }
 

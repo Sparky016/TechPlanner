@@ -169,7 +169,7 @@ async function seedUser(user: { accountId: string; displayName: string }): Promi
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES (?, ?, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, NOW(6) + INTERVAL 1 HOUR, '["read:jira-work"]')`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
@@ -182,13 +182,13 @@ async function createLockedSession(): Promise<S> {
   const id = randomUUID();
   await query(
     'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys, facilitator_id) VALUES (?, ?, ?, ?)',
-    [id, keys[0], keys, ALICE.accountId],
+    [id, keys[0], JSON.stringify(keys), ALICE.accountId],
   );
   await initWorkingCopy(id);
   for (const key of keys) {
     await query(
       `INSERT INTO source_snapshot (session_id, kind, ref, title, content_text, ingest_status, detail, retrieved_at)
-       VALUES (?, 'jira_issue', ?, ?, '', 'ingested', ?, '2026-01-01T00:00:00Z')`,
+       VALUES (?, 'jira_issue', ?, ?, '', 'ingested', ?, '2026-01-01 00:00:00')`,
       [id, key, `Summary of ${key}`, JSON.stringify({ url: `${SITE}/browse/${key}` })],
     );
   }
@@ -340,7 +340,7 @@ describe('publish orchestration', { timeout: 30000 }, () => {
     const runId = await publishAndRun(s);
 
     const revisions = await query<{ number: number; trigger: string; published: boolean }>(
-      'SELECT number, trigger, published FROM revision WHERE session_id = ?',
+      'SELECT number, `trigger`, published FROM revision WHERE session_id = ?',
       [s.id],
     );
     expect(revisions).toEqual([{ number: 1, trigger: 'publish', published: true }]);
@@ -443,14 +443,14 @@ describe('publish orchestration', { timeout: 30000 }, () => {
     passing();
     const runId = await publishAndRun(s);
     // Simulate a worker crash after the steps ran but before they were recorded as successful.
-    await query(
-      `UPDATE publish_run SET status = 'running',
-         steps = (SELECT jsonb_agg(CASE WHEN st->>'name' IN ('jira_attach', 'jira_comment')
-                                        THEN jsonb_set(st, '{status}', '"running"') ELSE st END)
-                    FROM jsonb_array_elements(steps) st)
-       WHERE id = ?`,
+    const [run] = await query<{ steps: { name: string; status: string }[] }>(
+      'SELECT steps FROM publish_run WHERE id = ?',
       [runId],
     );
+    const crashed = run.steps.map((st) =>
+      ['jira_attach', 'jira_comment'].includes(st.name) ? { ...st, status: 'running' } : st,
+    );
+    await query("UPDATE publish_run SET status = 'running', steps = ? WHERE id = ?", [JSON.stringify(crashed), runId]);
     await handlePublishRun({ runId });
     expect((await getRun(s, runId)).status).toBe('completed');
     for (const key of s.keys) {

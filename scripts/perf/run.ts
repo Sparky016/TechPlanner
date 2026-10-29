@@ -4,9 +4,8 @@ import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:
 import { cpus, platform, release, tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { Client } from 'pg';
 import { AUTOSAVE_MAX_WAIT_MS } from '../../src/components/workspace/center/useAutosave';
-import { toPgPlaceholders } from '../../src/server/db/placeholders';
+import { createDbPool } from '../../src/server/db/mysql';
 import { APP_ENV } from '../../tests/e2e/support/env';
 
 // Performance verification against NFR-1..NFR-5 (task 41). Drives the app over HTTP, the way the browser does:
@@ -36,7 +35,12 @@ const { values: args } = parseArgs({
     'app-port': { type: 'string', default: '3200' },
     'mock-port': { type: 'string', default: '4110' },
     'base-url': { type: 'string' },
-    'database-url': { type: 'string', default: 'postgres://techplanner:techplanner@localhost:5432/techplanner_perf' },
+    // App user for web and worker, owner for the reset and migrations (scripts/mysql-bootstrap.sql users).
+    'database-url': { type: 'string', default: 'mysql://techplanner_app:app-dev-password@localhost:3306/techplanner_perf' },
+    'migrate-database-url': {
+      type: 'string',
+      default: 'mysql://techplanner_owner:owner-dev-password@localhost:3306/techplanner_perf',
+    },
     json: { type: 'string' },
   },
 });
@@ -61,6 +65,7 @@ const mockPort = num(args['mock-port'], 'mock-port');
 const BASE_URL = args['base-url'] ?? `http://localhost:${appPort}`;
 const MOCK_URL = `http://localhost:${mockPort}`;
 const DATABASE_URL = args['database-url'] as string;
+const MIGRATE_DATABASE_URL = args['migrate-database-url'] as string;
 const METRICS_TOKEN = 'perf-metrics-token';
 
 // ---- statistics ----------------------------------------------------------------------------------------------
@@ -527,28 +532,17 @@ function writeFakeScript(dir: string): string {
   return path;
 }
 
+// Drops and re-creates the perf database as the owner; the caller migrates it.
 async function resetDatabase(): Promise<void> {
-  const target = new URL(DATABASE_URL);
-  const name = decodeURIComponent(target.pathname.slice(1));
-  const admin = new URL(DATABASE_URL);
-  admin.pathname = '/postgres';
-  const root = new Client({ connectionString: admin.toString() });
-  await root.connect();
+  const admin = new URL(MIGRATE_DATABASE_URL);
+  const name = `\`${decodeURIComponent(admin.pathname.slice(1)).replace(/`/g, '``')}\``;
+  admin.pathname = '/';
+  const pool = createDbPool(admin.toString());
   try {
-    const exists = await root.query(toPgPlaceholders('SELECT 1 FROM pg_database WHERE datname = ?').text, [name]);
-    if (exists.rowCount === 0) {
-      await root.query(`CREATE DATABASE "${name.replace(/"/g, '""')}"`);
-    }
+    await pool.query(`DROP DATABASE IF EXISTS ${name}`);
+    await pool.query(`CREATE DATABASE ${name} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
   } finally {
-    await root.end();
-  }
-  const db = new Client({ connectionString: DATABASE_URL });
-  await db.connect();
-  try {
-    await db.query('DROP SCHEMA public CASCADE');
-    await db.query('CREATE SCHEMA public');
-  } finally {
-    await db.end();
+    await pool.end();
   }
 }
 
@@ -563,9 +557,11 @@ async function startStack(): Promise<void> {
     OAUTH_REDIRECT_URI: `${BASE_URL}/auth/callback`,
     APP_BASE_URL: BASE_URL,
     DATABASE_URL,
+    MIGRATE_DATABASE_URL,
     METRICS_TOKEN,
     ATLASSIAN_MOCK_PORT: String(mockPort),
     E2E_DATABASE_URL: DATABASE_URL,
+    E2E_MIGRATE_DATABASE_URL: MIGRATE_DATABASE_URL,
     NODE_ENV: args.dev ? 'development' : 'production',
     PORT: String(appPort),
   };

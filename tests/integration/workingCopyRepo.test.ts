@@ -20,7 +20,7 @@ import {
 async function createSession(): Promise<string> {
   const id = randomUUID();
   await query(
-    "INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, 'ABC-1', ARRAY['ABC-1'])",
+    "INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, 'ABC-1', '[\"ABC-1\"]')",
     [id],
   );
   return id;

@@ -1,12 +1,14 @@
-import { resetDatabase } from './setup';
+import { asOwner, resetDatabase } from './setup';
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type AuditInput, recordAudit } from '@/server/audit/audit';
 import { REDACTED } from '@/server/audit/hash';
-import { db, query, withTransaction } from '@/server/db/pool';
+import { db, type DbClient, query, withTransaction } from '@/server/db/pool';
 import { verifyAuditChain } from '../../scripts/audit-verify';
+import { MIGRATIONS_DIR, splitStatements } from '../../scripts/migrate';
 
 const run = promisify(execFile);
 const TSX_CLI = join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
@@ -33,6 +35,20 @@ afterAll(async () => {
   await db.end();
 });
 
+// MySQL triggers cannot be disabled: tampering drops the UPDATE trigger and re-creates it from migration 0002.
+async function withoutUpdateTrigger(fn: (owner: DbClient) => Promise<void>): Promise<void> {
+  const sql = await readFile(join(MIGRATIONS_DIR, '0002_audit_append_only.sql'), 'utf8');
+  const create = splitStatements(sql).find((s) => s.includes('CREATE TRIGGER audit_record_no_update'))!;
+  await asOwner(async (owner) => {
+    await owner.query('DROP TRIGGER audit_record_no_update');
+    try {
+      await fn(owner);
+    } finally {
+      await owner.query(create);
+    }
+  });
+}
+
 describe('audit_record is append-only', () => {
   it('rejects UPDATE, DELETE and TRUNCATE', async () => {
     const { id } = await recordAudit({
@@ -41,11 +57,15 @@ describe('audit_record is append-only', () => {
       userId: 'acc-1',
     });
 
-    await expect(query("UPDATE audit_record SET action = 'auth.logout' WHERE id = ?", [id])).rejects.toThrow(
-      /append-only/,
-    );
-    await expect(query('DELETE FROM audit_record WHERE id = ?', [id])).rejects.toThrow(/append-only/);
-    await expect(query('TRUNCATE audit_record')).rejects.toThrow(/append-only/);
+    // The triggers reject UPDATE and DELETE for every user, so try them as the owner; the app user is refused even
+    // earlier by privileges (schema.test.ts). MySQL has no TRUNCATE trigger: the app user lacks the privilege.
+    await asOwner(async (owner) => {
+      await expect(owner.query("UPDATE audit_record SET action = 'auth.logout' WHERE id = ?", [id])).rejects.toThrow(
+        /append-only/,
+      );
+      await expect(owner.query('DELETE FROM audit_record WHERE id = ?', [id])).rejects.toThrow(/append-only/);
+    });
+    await expect(query('TRUNCATE audit_record')).rejects.toThrow(/DROP command denied/);
 
     const rows = await query<{ action: string }>('SELECT action FROM audit_record WHERE id = ?', [id]);
     expect(rows).toEqual([{ action: 'auth.login' }]);
@@ -54,11 +74,8 @@ describe('audit_record is append-only', () => {
 
 describe('hash chain', () => {
   it('50 concurrent writers produce one unbroken chain', async () => {
-    await withTransaction(async (client) => {
-      await client.query('ALTER TABLE audit_record DISABLE TRIGGER audit_record_no_truncate');
-      await client.query('TRUNCATE audit_record');
-      await client.query('ALTER TABLE audit_record ENABLE TRIGGER audit_record_no_truncate');
-    });
+    // Only the owner may truncate (no TRUNCATE trigger in MySQL).
+    await asOwner((owner) => owner.query('TRUNCATE audit_record'));
 
     const results = await Promise.all(
       Array.from({ length: 50 }, (_, i) =>
@@ -128,7 +145,7 @@ describe('hash chain', () => {
     });
   });
 
-  it('hashes non-canonical session ids in the form Postgres stores them', async () => {
+  it('hashes non-canonical session ids in the canonical form they are stored in', async () => {
     const canonical = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
     for (const sessionId of ['a0eebc999c0b4ef8bb6d6bb9bd380a11', '{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}']) {
       const { id } = await recordAudit({ action: 'draft.saved', result: 'success', sessionId });
@@ -141,7 +158,7 @@ describe('hash chain', () => {
     expect(await verifyAuditChain(db)).toEqual({ ok: true, count: 54 });
   });
 
-  it('rejects text fields Postgres would not store verbatim and keeps the chain intact', async () => {
+  it('rejects text fields the database would not store verbatim and keeps the chain intact', async () => {
     const bad: Partial<AuditInput>[] = [
       { userId: '\uDC00' },
       { userDisplayName: 'x\uD800y' },
@@ -175,10 +192,8 @@ describe('hash chain', () => {
     const ids = await query<{ id: string }>('SELECT id FROM audit_record ORDER BY id');
     const target = ids[10].id;
 
-    await withTransaction(async (client) => {
-      await client.query('ALTER TABLE audit_record DISABLE TRIGGER audit_record_no_update_delete');
-      await client.query(`UPDATE audit_record SET details = '{"index": 999}' WHERE id = ?`, [target]);
-      await client.query('ALTER TABLE audit_record ENABLE TRIGGER audit_record_no_update_delete');
+    await withoutUpdateTrigger(async (owner) => {
+      await owner.query(`UPDATE audit_record SET details = '{"index": 999}' WHERE id = ?`, [target]);
     });
 
     expect(await verifyAuditChain(db)).toEqual({ ok: false, brokenId: target });

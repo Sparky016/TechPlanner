@@ -40,7 +40,7 @@ async function seedUser(user: { accountId: string; displayName: string }): Promi
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES (?, ?, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, NOW(6) + INTERVAL 1 HOUR, '["read:jira-work"]')`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
@@ -50,7 +50,7 @@ async function createLockedSession(): Promise<{ id: string; tabId: string }> {
   const key = `REV-${keySeq}`;
   const id = randomUUID();
   await query(
-    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, ARRAY[?])',
+    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, JSON_ARRAY(?))',
     [id, key, key],
   );
   await initWorkingCopy(id);
@@ -123,7 +123,7 @@ describe('revisions API', () => {
     expect(await (await saveDraft(s)).json()).toEqual({ number: 2 });
 
     const [row] = await query<{ sections: Record<string, string>; trigger: string; author_id: string }>(
-      'SELECT sections, trigger, author_id FROM revision WHERE session_id = ? AND number = 2',
+      'SELECT sections, `trigger`, author_id FROM revision WHERE session_id = ? AND number = 2',
       [s.id],
     );
     expect(Object.keys(row.sections).sort()).toEqual([...SECTION_NAMES].sort());
@@ -151,7 +151,7 @@ describe('revisions API', () => {
   it('AC1: readiness score is taken from the latest evaluation', async () => {
     const s = await createLockedSession();
     await query(
-      "INSERT INTO evaluation (session_id, section_statuses, score, created_at) VALUES (?, '{}', 40, now() - interval '1 hour')",
+      "INSERT INTO evaluation (session_id, section_statuses, score, created_at) VALUES (?, '{}', 40, NOW(6) - INTERVAL 1 HOUR)",
       [s.id],
     );
     await query("INSERT INTO evaluation (session_id, section_statuses, score) VALUES (?, '{}', 72)", [s.id]);

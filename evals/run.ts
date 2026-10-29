@@ -14,7 +14,9 @@ import { findMatch, judgeMatch, rate, type Candidate, type CheckTally, type Seed
 
 const FIXTURES_DIR = join(process.cwd(), 'evals', 'fixtures');
 const REPORT_PATH = join(process.cwd(), 'evals', 'report.json');
-const DEFAULT_EVAL_DATABASE_URL = 'postgres://techplanner:techplanner@localhost:5432/techplanner_eval';
+// Users from scripts/mysql-bootstrap.sql: the run uses the app user; the reset (drop, create, migrate) the owner.
+const DEFAULT_EVAL_DATABASE_URL = 'mysql://techplanner_app:app-dev-password@localhost:3306/techplanner_eval';
+const DEFAULT_EVAL_MIGRATE_DATABASE_URL = 'mysql://techplanner_owner:owner-dev-password@localhost:3306/techplanner_eval';
 
 const MIN_FIXTURES = 20;
 const HELD_OUT_COUNT = 5;
@@ -213,25 +215,6 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
 // ---------------------------------------------------------------------------------------------------------------
 // Real run (server modules are imported lazily, after the environment is prepared)
 
-async function ensureDatabase(url: string): Promise<void> {
-  const { Client } = await import('pg');
-  const { toPgPlaceholders } = await import('../src/server/db/placeholders');
-  const name = decodeURIComponent(new URL(url).pathname.slice(1));
-  const admin = new URL(url);
-  admin.pathname = '/postgres';
-  const client = new Client({ connectionString: admin.toString() });
-  await client.connect();
-  try {
-    const { rowCount } = await client.query(
-      toPgPlaceholders('SELECT 1 FROM pg_database WHERE datname = ?').text,
-      [name],
-    );
-    if (rowCount === 0) await client.query(`CREATE DATABASE "${name.replace(/"/g, '""')}"`);
-  } finally {
-    await client.end();
-  }
-}
-
 function ticketText(f: Fixture): string {
   const t = f.ticket;
   const comments = t.comments.map((c) => `${c.author}: ${c.body}`);
@@ -249,10 +232,9 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
       return 2;
     }
   }
-  // Never the application database: resetDatabase() drops the whole public schema.
-  const evalDbUrl = process.env.EVAL_DATABASE_URL || DEFAULT_EVAL_DATABASE_URL;
-  process.env.DATABASE_URL = evalDbUrl;
-  await ensureDatabase(evalDbUrl);
+  // Never the application database: resetDatabase() drops and re-creates the database DATABASE_URL names.
+  process.env.DATABASE_URL = process.env.EVAL_DATABASE_URL || DEFAULT_EVAL_DATABASE_URL;
+  process.env.MIGRATE_DATABASE_URL = process.env.EVAL_MIGRATE_DATABASE_URL || DEFAULT_EVAL_MIGRATE_DATABASE_URL;
 
   const { resetDatabase } = await import('../tests/integration/setup');
   const { getConfig } = await import('@/server/config');
@@ -271,7 +253,7 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
   async function createSession(f: Fixture, run: number, purpose: string): Promise<string> {
     return withTransaction(async (client) => {
       const sessionId = randomUUID();
-      await client.query('INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, ARRAY[?])', [
+      await client.query('INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, JSON_ARRAY(?))', [
         sessionId,
         f.ticket.key,
         f.ticket.key,

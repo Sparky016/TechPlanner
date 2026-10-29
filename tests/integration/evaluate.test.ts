@@ -25,7 +25,7 @@ async function createSession(): Promise<string> {
   const key = `EVAL-${keySeq}`;
   const id = randomUUID();
   await query(
-    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, ARRAY[?])',
+    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, JSON_ARRAY(?))',
     [id, key, key],
   );
   await initWorkingCopy(id);

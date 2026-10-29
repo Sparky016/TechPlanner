@@ -50,7 +50,7 @@ async function seedUser(user: { accountId: string; displayName: string }): Promi
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES (?, ?, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, NOW(6) + INTERVAL 1 HOUR, '["read:jira-work"]')`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
@@ -58,7 +58,7 @@ async function seedUser(user: { accountId: string; displayName: string }): Promi
 async function createPlanningSession(primaryKey: string): Promise<string> {
   const id = randomUUID();
   await query(
-    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, ARRAY[?, ?])',
+    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, JSON_ARRAY(?, ?))',
     [id, primaryKey, primaryKey, `${primaryKey}-LINKED`],
   );
   return id;
@@ -241,7 +241,7 @@ describe('session lock', () => {
     const tabA = randomUUID();
     const tabB = randomUUID();
     await acquireOrRenewLock(id, tabA);
-    await query("UPDATE planning_session SET lock_expires_at = now() - interval '1 second' WHERE id = ?", [id]);
+    await query("UPDATE planning_session SET lock_expires_at = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", [id]);
     await expectHttpError(requireLock(id, tabA), 423, 'session_locked');
     expect((await acquireOrRenewLock(id, tabB)).holder).toBe('you');
     expect((await getSessionById(id))!.lockHolder).toBe(tabB);

@@ -1,10 +1,9 @@
-import './env';
+import { migrateDatabase } from './setup';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { db, query } from '@/server/db/pool';
-import { enqueue, getQueue, stopQueue, subscribeHandlers } from '@/server/jobs/queue';
+import { enqueue, getQueue, JobQueue, stopQueue, subscribeHandlers } from '@/server/jobs/queue';
 import { JOB_NAMES } from '@/server/jobs/names';
 import { clearHandlersForTests, getHandlers, NonRetryableJobError, registerHandler } from '@/server/jobs/registry';
-import { runMigrations } from '../../scripts/migrate';
 
 async function waitFor(cond: () => boolean | Promise<boolean>, timeoutMs = 30000): Promise<void> {
   const start = Date.now();
@@ -35,7 +34,7 @@ async function abandon(id: string): Promise<void> {
 
 describe('job queue', { timeout: 60000 }, () => {
   beforeAll(async () => {
-    await runMigrations(db);
+    await migrateDatabase();
   });
 
   beforeEach(async () => {
@@ -168,6 +167,43 @@ describe('job queue', { timeout: 60000 }, () => {
     await sleep(2500);
     expect(calls).toBe(0);
     expect(await stateOf(id!)).toBe('active');
+  });
+
+  it('ignores the outcome of a handler whose job was taken back after its visibility timeout', async () => {
+    let releaseFirst!: () => void;
+    const first = new Promise<void>((r) => (releaseFirst = r));
+    let releaseSecond!: () => void;
+    const second = new Promise<void>((r) => (releaseSecond = r));
+    let calls = 0;
+    registerHandler(JOB_NAMES.publishRun, async () => {
+      calls++;
+      if (calls === 1) return first;
+      await second;
+      throw new NonRetryableJobError('second activation');
+    });
+    const id = await enqueue(JOB_NAMES.publishRun, {});
+    await subscribeHandlers(getHandlers());
+    await waitFor(() => calls === 1);
+
+    // The first handler is presumed dead: its timeout passes and another worker takes the job back and runs it.
+    await query('UPDATE job SET locked_until = ? WHERE id = ?', [new Date(Date.now() - 60000), id]);
+    const other = new JobQueue();
+    other.work(JOB_NAMES.publishRun, getHandlers().get(JOB_NAMES.publishRun)!);
+    try {
+      await waitFor(() => calls === 2);
+      // The first handler now succeeds late; the job stays with the second activation.
+      releaseFirst();
+      await sleep(500);
+      expect(await stateOf(id!)).toBe('active');
+
+      releaseSecond();
+      await waitFor(async () => (await stateOf(id!)) === 'deadletter');
+      expect(await job(id!)).toMatchObject({ output: { message: 'second activation' } });
+    } finally {
+      releaseFirst();
+      releaseSecond();
+      await other.stop();
+    }
   });
 
   it('fails an expired singleton job when a newer one is already queued for its key', async () => {

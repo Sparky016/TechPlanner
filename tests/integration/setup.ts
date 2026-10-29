@@ -1,10 +1,58 @@
 import './env';
-import { db } from '@/server/db/pool';
+import { createDbPool, type DbClient } from '@/server/db/pool';
+import { getConfig } from '@/server/config';
 import { runMigrations } from '../../scripts/migrate';
 
-// Destroys all data in the target database: drops and recreates schema public, then migrates.
+// Tests run as the app user (DATABASE_URL). Dropping the database, migrating it and anything else the app user may
+// not do (bypassing the audit triggers, reading schema_migrations) runs as the owner (MIGRATE_DATABASE_URL).
+
+/** The database DATABASE_URL names; the owner's URL is pointed at the same one. */
+function databaseName(): string {
+  return decodeURIComponent(new URL(getConfig().DATABASE_URL).pathname.slice(1));
+}
+
+function ownerUrl(database: string): string {
+  const url = new URL(getConfig().MIGRATE_DATABASE_URL ?? getConfig().DATABASE_URL);
+  url.pathname = `/${encodeURIComponent(database)}`;
+  return url.toString();
+}
+
+/** Runs `fn` on one owner connection to the test database. */
+export async function asOwner<T>(fn: (client: DbClient) => Promise<T>): Promise<T> {
+  const pool = createDbPool(ownerUrl(databaseName()));
+  try {
+    const client = await pool.connect();
+    try {
+      return await fn(client);
+    } finally {
+      client.release();
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
+/** Applies pending migrations to the test database as the owner. */
+export async function migrateDatabase(): Promise<string[]> {
+  const pool = createDbPool(ownerUrl(databaseName()));
+  try {
+    return await runMigrations(pool);
+  } finally {
+    await pool.end();
+  }
+}
+
+// Destroys all data in the target database: drops and re-creates it, then migrates.
 export async function resetDatabase(): Promise<void> {
-  await db.query('DROP SCHEMA public CASCADE');
-  await db.query('CREATE SCHEMA public');
-  await runMigrations(db);
+  const name = databaseName();
+  const quoted = `\`${name.replace(/`/g, '``')}\``;
+  // No default database: the one being dropped may not exist yet.
+  const admin = createDbPool(ownerUrl(''));
+  try {
+    await admin.query(`DROP DATABASE IF EXISTS ${quoted}`);
+    await admin.query(`CREATE DATABASE ${quoted} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
+  } finally {
+    await admin.end();
+  }
+  await migrateDatabase();
 }
