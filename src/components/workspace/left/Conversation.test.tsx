@@ -171,4 +171,107 @@ describe('Conversation', () => {
     expect(item.textContent).toContain('context only');
     expect(item.querySelector('b')).toBeNull();
   });
+
+  function mockApi(opts: { intakeState?: string; questions?: { id: string; text: string }[]; messages?: unknown[] }) {
+    apiFetch.mockImplementation(async (path: string) => {
+      if (path.endsWith('/lock')) return { holder: 'you', expiresAt: null };
+      if (path.endsWith('/messages')) return { messages: opts.messages ?? [] };
+      if (path.endsWith('/questions')) return { questions: opts.questions ?? [] };
+      return { session: { intakeState: opts.intakeState ?? 'analyzed' }, sources: [] };
+    });
+  }
+
+  it('is collapsed once questions exist, and a turn started elsewhere streams in and expands it', async () => {
+    window.localStorage.clear();
+    mockApi({ questions: [{ id: 'q1', text: 'Which regions?' }] });
+    const s = controlledStream();
+    streamTurn.mockReturnValue(s.gen());
+    render(
+      <WorkspaceProvider sessionId="s1">
+        <Capture />
+        <Conversation />
+      </WorkspaceProvider>,
+    );
+    const toggle = await screen.findByRole('button', { name: 'Discuss with AI' });
+    await waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('false'));
+    expect(screen.getByRole('region', { name: 'Discuss with AI' })).toBeTruthy();
+
+    let turn!: Promise<unknown>;
+    act(() => {
+      turn = workspace!.runTurn({ path: '/answer', label: 'Answer', prompt: 'It is EU only' });
+    });
+    await act(async () => s.push({ type: 'token', text: 'Noted.' }));
+    await waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('true'));
+    expect(screen.getByTestId('streaming-reply').textContent).toContain('Noted.');
+    expect(screen.getByText('It is EU only')).toBeTruthy();
+    await act(async () => {
+      s.push({ type: 'done', messageSeq: 2 });
+      s.push(null);
+      await turn;
+    });
+  });
+
+  it('remembers the open state per session in localStorage', async () => {
+    window.localStorage.clear();
+    mockApi({ questions: [{ id: 'q1', text: 'Which regions?' }] });
+    render(
+      <WorkspaceProvider sessionId="s1">
+        <Conversation />
+      </WorkspaceProvider>,
+    );
+    const toggle = await screen.findByRole('button', { name: 'Discuss with AI' });
+    await waitFor(() => expect(toggle.getAttribute('aria-expanded')).toBe('false'));
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(window.localStorage.getItem('techplanner.discuss-open.s1')).toBe('1');
+    cleanup();
+    render(
+      <WorkspaceProvider sessionId="s1">
+        <Conversation />
+      </WorkspaceProvider>,
+    );
+    const again = await screen.findByRole('button', { name: 'Discuss with AI' });
+    await waitFor(() => expect(again.getAttribute('aria-expanded')).toBe('true'));
+  });
+
+  it('labels answer messages with the (truncated) question text', async () => {
+    window.localStorage.clear();
+    const long = 'Q'.repeat(200);
+    mockApi({
+      questions: [
+        { id: 'q1', text: 'Which regions?' },
+        { id: 'q2', text: long },
+      ],
+      messages: [
+        { seq: 1, role: 'facilitator', content: 'EU only', createdAt: '', questionId: 'q1' },
+        { seq: 2, role: 'facilitator', content: 'Long one', createdAt: '', questionId: 'q2' },
+        { seq: 3, role: 'facilitator', content: 'Plain', createdAt: '', questionId: null },
+      ],
+    });
+    render(
+      <WorkspaceProvider sessionId="s1">
+        <Conversation />
+      </WorkspaceProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Discuss with AI' }));
+    expect(await screen.findByText('Answer to: Which regions?')).toBeTruthy();
+    const truncated = screen.getByText(/^Answer to: Q+…$/);
+    expect(truncated.textContent!.length).toBe('Answer to: '.length + 120);
+    expect(screen.getAllByText(/^Answer to:/)).toHaveLength(2);
+  });
+
+  it('is disabled with a hint before ingestion', async () => {
+    window.localStorage.clear();
+    mockApi({ intakeState: 'not_ingested' });
+    render(
+      <WorkspaceProvider sessionId="s1">
+        <Conversation />
+      </WorkspaceProvider>,
+    );
+    const toggle = (await screen.findByRole('button', { name: 'Discuss with AI' })) as HTMLButtonElement;
+    expect(await screen.findByText('Ingest the ticket to start the discussion.')).toBeTruthy();
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByLabelText('Message', { selector: 'textarea' }).closest('[hidden]')).not.toBeNull();
+  });
 });

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WorkspaceProvider, type SessionInfo } from '@/components/workspace/WorkspaceProvider';
+import { useWorkspace, WorkspaceProvider, type SessionInfo } from '@/components/workspace/WorkspaceProvider';
 import { Conversation } from '@/components/workspace/left/Conversation';
 import { SessionHeader } from '@/components/workspace/left/SessionHeader';
 import type { TurnEvent } from '@/lib/api/sse';
@@ -269,11 +269,24 @@ describe('one turn at a time (GI-22)', () => {
     intakeState = 'not_ingested';
     const s = controlledStream();
     streamTurn.mockReturnValue(s.gen());
-    renderHeader({ withConversation: true });
+    // The discussion is disabled before ingestion (GI-20), so start the turn through the provider directly.
+    let run!: () => Promise<unknown>;
+    function Starter() {
+      const { runTurn } = useWorkspace();
+      run = () => runTurn({ path: '/messages', body: { text: 'Hi' }, label: 'Discussion', prompt: 'Hi' });
+      return null;
+    }
+    render(
+      <WorkspaceProvider sessionId="s1">
+        <SessionHeader />
+        <Starter />
+      </WorkspaceProvider>,
+    );
     await lockAcquired();
-    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Hi' } });
-    await waitFor(() => expect(button('Send').disabled).toBe(false));
-    fireEvent.click(button('Send'));
+    await waitFor(() => expect(button('Ingest ticket').disabled).toBe(false));
+    act(() => {
+      void run();
+    });
     await waitFor(() => expect(button('Ingest ticket').disabled).toBe(true));
     await act(async () => s.push(null));
     await waitFor(() => expect(button('Ingest ticket').disabled).toBe(false));
