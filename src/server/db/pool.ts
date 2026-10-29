@@ -1,9 +1,10 @@
 import { Pool, type PoolClient } from 'pg';
 import { getConfig } from '@/server/config';
+import { toPgPlaceholders } from './placeholders';
 
 // Server-only: never import from src/lib or client components.
-// Callers only see DbClient; everything driver-specific stays in this file, so changing database (task 46)
-// replaces this adapter rather than its callers.
+// Callers only see DbClient and write `?` placeholders; everything driver-specific stays in this file, so changing
+// database (task 46) replaces this adapter rather than its callers.
 
 /** A result row; callers name its shape with the type argument. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- same contract as the driver's untyped row
@@ -36,7 +37,10 @@ async function run<T extends DbRow>(
   sql: string,
   params: unknown[] | undefined,
 ): Promise<DbResult<T>> {
-  const result = await target.query<T>(sql, params);
+  const { text, count } = toPgPlaceholders(sql);
+  const given = params?.length ?? 0;
+  if (count !== given) throw new Error(`SQL has ${count} placeholders but ${given} parameters were given`);
+  const result = await target.query<T>(text, params);
   return { rows: result.rows, rowCount: result.rowCount ?? 0 };
 }
 

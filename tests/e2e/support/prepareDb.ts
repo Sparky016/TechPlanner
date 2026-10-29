@@ -1,4 +1,5 @@
 import { Client } from 'pg';
+import { toPgPlaceholders } from '../../../src/server/db/placeholders';
 import { DATABASE_URL } from './env';
 
 // Creates the E2E database when it does not exist yet (run by the web server command before `npm run migrate`).
@@ -11,7 +12,9 @@ async function main(): Promise<void> {
   const client = new Client({ connectionString: admin.toString() });
   await client.connect();
   try {
-    const { rowCount } = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [name]);
+    const { rowCount } = await client.query(toPgPlaceholders('SELECT 1 FROM pg_database WHERE datname = ?').text, [
+      name,
+    ]);
     if (rowCount === 0) {
       await client.query(`CREATE DATABASE "${name.replace(/"/g, '""')}"`);
       console.log(`[e2e] created database ${name}`);

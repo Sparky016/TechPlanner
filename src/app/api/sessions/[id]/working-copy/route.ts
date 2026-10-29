@@ -20,7 +20,7 @@ export const GET = withApiHandler<{ id: string }>({}, async (ctx) => {
   }
   const suggestions = await query<{ id: string; section: string; patch: unknown; created_at: Date }>(
     `SELECT id, section, patch, created_at FROM pending_suggestion
-      WHERE session_id = $1 AND status = 'pending' ORDER BY created_at, id`,
+      WHERE session_id = ? AND status = 'pending' ORDER BY created_at, id`,
     [session.id],
   );
   return Response.json(

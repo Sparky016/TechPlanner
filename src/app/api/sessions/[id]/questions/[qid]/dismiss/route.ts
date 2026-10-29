@@ -44,7 +44,7 @@ export const POST = withApiHandler<{ id: string; qid: string }>({}, async (ctx) 
 
   await withTransaction(async (client) => {
     const current = await client.query<{ status: string; section: string | null }>(
-      'SELECT status, section FROM ai_question WHERE id = $1 AND session_id = $2 FOR UPDATE',
+      'SELECT status, section FROM ai_question WHERE id = ? AND session_id = ? FOR UPDATE',
       [qid, session.id],
     );
     const question = current.rows[0];
@@ -52,9 +52,9 @@ export const POST = withApiHandler<{ id: string; qid: string }>({}, async (ctx) 
     if (question.status !== 'open') {
       throw new HttpError(409, `Question is already ${question.status}`, 'question_not_open');
     }
-    await client.query("UPDATE ai_question SET status = 'dismissed', dismiss_reason = $2 WHERE id = $1", [
-      qid,
+    await client.query("UPDATE ai_question SET status = 'dismissed', dismiss_reason = ? WHERE id = ?", [
       reason,
+      qid,
     ]);
     await recordAudit(
       {

@@ -140,14 +140,14 @@ function askQuestionTool(state: FacilitatorTurnState): LlmToolDefinition {
       let target: SectionName | null = section ?? null;
       if (issueId !== undefined) {
         const [issue] = await query<{ section: SectionName }>(
-          'SELECT section FROM issue WHERE id = $1 AND session_id = $2',
+          'SELECT section FROM issue WHERE id = ? AND session_id = ?',
           [issueId, state.sessionId],
         );
         if (!issue) return `Unknown issue id: ${issueId}`;
         target ??= issue.section;
       }
       const [row] = await query<{ id: string }>(
-        "INSERT INTO ai_question (session_id, issue_id, section, text, status) VALUES ($1, $2, $3, $4, 'open') RETURNING id",
+        "INSERT INTO ai_question (session_id, issue_id, section, text, status) VALUES (?, ?, ?, ?, 'open') RETURNING id",
         [state.sessionId, issueId ?? null, target, text],
       );
       state.questionIds.push(row.id);
@@ -170,7 +170,7 @@ function markQuestionAnsweredTool(state: FacilitatorTurnState): LlmToolDefinitio
     handler: async (args) => {
       const { questionId } = args as MarkQuestionAnsweredArgs;
       const rows = await query(
-        "UPDATE ai_question SET status = 'answered' WHERE id = $1 AND session_id = $2 AND status = 'open' RETURNING id",
+        "UPDATE ai_question SET status = 'answered' WHERE id = ? AND session_id = ? AND status = 'open' RETURNING id",
         [questionId, state.sessionId],
       );
       return rows.length > 0 ? `Question ${questionId} marked answered` : `No open question with id ${questionId}`;

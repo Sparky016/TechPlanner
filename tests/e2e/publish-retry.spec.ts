@@ -43,10 +43,10 @@ test('AC-12: with Confluence failing, Jira results persist, the UI shows the fai
   await expect(publishStep(page, 'Downstream notification')).toContainText('Pending');
 
   // Partial state is persisted and visible on reopening the session (SR-13.3).
-  const [session] = await sql<{ status: string }>('SELECT status FROM planning_session WHERE id = $1', [sessionId]);
+  const [session] = await sql<{ status: string }>('SELECT status FROM planning_session WHERE id = ?', [sessionId]);
   expect(session.status).toBe('partially_published');
   const [run] = await sql<{ id: string; steps: { name: string; status: string }[] }>(
-    'SELECT id, steps FROM publish_run WHERE session_id = $1',
+    'SELECT id, steps FROM publish_run WHERE session_id = ?',
     [sessionId],
   );
   expect(Object.fromEntries(run.steps.map((s) => [s.name, s.status]))).toMatchObject({
@@ -86,6 +86,6 @@ test('AC-12: with Confluence failing, Jira results persist, the UI shows the fai
   const deliveries = await webhookDeliveries(request);
   expect(deliveries).toHaveLength(1);
   expect(deliveries[0].signatureValid).toBe(true);
-  const [finalSession] = await sql<{ status: string }>('SELECT status FROM planning_session WHERE id = $1', [sessionId]);
+  const [finalSession] = await sql<{ status: string }>('SELECT status FROM planning_session WHERE id = ?', [sessionId]);
   expect(finalSession.status).toBe('published');
 });

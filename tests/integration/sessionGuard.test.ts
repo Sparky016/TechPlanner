@@ -44,21 +44,21 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<
 }
 
 async function seedUser(user: { accountId: string; displayName: string }): Promise<void> {
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     user.accountId,
     user.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
 
 async function createPlanningSession(primaryKey: string): Promise<string> {
   const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ($1, ARRAY[$1, $2]) RETURNING id',
-    [primaryKey, `${primaryKey}-LINKED`],
+    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES (?, ARRAY[?, ?]) RETURNING id',
+    [primaryKey, primaryKey, `${primaryKey}-LINKED`],
   );
   return rows[0].id;
 }
@@ -83,7 +83,7 @@ function routeArg(id: string) {
 
 async function takeOverAudits(sessionId: string) {
   return query<{ user_id: string; details: Record<string, unknown>; ticket_ids: string[] }>(
-    "SELECT user_id, details, ticket_ids FROM audit_record WHERE action = 'session.lock_taken_over' AND session_id = $1",
+    "SELECT user_id, details, ticket_ids FROM audit_record WHERE action = 'session.lock_taken_over' AND session_id = ?",
     [sessionId],
   );
 }
@@ -240,7 +240,7 @@ describe('session lock', () => {
     const tabA = randomUUID();
     const tabB = randomUUID();
     await acquireOrRenewLock(id, tabA);
-    await query("UPDATE planning_session SET lock_expires_at = now() - interval '1 second' WHERE id = $1", [id]);
+    await query("UPDATE planning_session SET lock_expires_at = now() - interval '1 second' WHERE id = ?", [id]);
     await expectHttpError(requireLock(id, tabA), 423, 'session_locked');
     expect((await acquireOrRenewLock(id, tabB)).holder).toBe('you');
     expect((await getSessionById(id))!.lockHolder).toBe(tabB);

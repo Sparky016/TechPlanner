@@ -22,7 +22,7 @@ export const GET = withApiHandler<{ id: string }>({}, async (ctx) => {
     loadCurrentSnapshots(session.id),
     query<PublishRunRow>(
       `SELECT id, revision_number, status, created_at, updated_at
-         FROM publish_run WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1`,
+         FROM publish_run WHERE session_id = ? ORDER BY created_at DESC LIMIT 1`,
       [session.id],
     ),
   ]);

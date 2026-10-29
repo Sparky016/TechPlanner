@@ -63,7 +63,7 @@ export async function createSession(client: DbClient, userId: string): Promise<s
   const value = randomBytes(32).toString('base64url');
   await client.query(
     `INSERT INTO app_session (id_hash, user_id, expires_at)
-     VALUES ($1, $2, now() + make_interval(hours => $3))`,
+     VALUES (?, ?, now() + make_interval(hours => ?))`,
     [hashSessionId(value), userId, IDLE_HOURS],
   );
   return value;
@@ -76,13 +76,13 @@ export async function getCurrentUser(request: Request): Promise<CurrentUser | nu
   const rows = await query<{ account_id: string; display_name: string }>(
     `UPDATE app_session s
         SET last_seen_at = now(),
-            expires_at = LEAST(s.created_at + make_interval(days => $2), now() + make_interval(hours => $3))
+            expires_at = LEAST(s.created_at + make_interval(days => ?), now() + make_interval(hours => ?))
        FROM app_user u
-      WHERE s.id_hash = $1
+      WHERE s.id_hash = ?
         AND s.expires_at > now()
         AND u.atlassian_account_id = s.user_id
      RETURNING u.atlassian_account_id AS account_id, u.display_name`,
-    [hashSessionId(value), ABSOLUTE_DAYS, IDLE_HOURS],
+    [ABSOLUTE_DAYS, IDLE_HOURS, hashSessionId(value)],
   );
   const row = rows[0];
   return row ? { accountId: row.account_id, displayName: row.display_name } : null;
@@ -99,7 +99,7 @@ export async function deleteSession(request: Request): Promise<string | null> {
   const value = readCookie(request, SESSION_COOKIE);
   if (!value) return null;
   const rows = await query<{ user_id: string | null }>(
-    'DELETE FROM app_session WHERE id_hash = $1 RETURNING user_id',
+    'DELETE FROM app_session WHERE id_hash = ? RETURNING user_id',
     [hashSessionId(value)],
   );
   return rows[0]?.user_id ?? null;

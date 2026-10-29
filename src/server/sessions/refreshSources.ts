@@ -147,14 +147,14 @@ export async function refreshSources(user: CurrentUser, sessionId: string): Prom
 
   const messageSeq = await withTransaction(async (client) => {
     // Serialises concurrent refreshes/messages for this session while seq is computed.
-    await client.query('SELECT 1 FROM planning_session WHERE id = $1 FOR UPDATE', [session.id]);
+    await client.query('SELECT 1 FROM planning_session WHERE id = ? FOR UPDATE', [session.id]);
     await insertSnapshots(client, session.id, next, retrievedAt);
     if (added.length === 0 && removed.length === 0 && changed.length === 0) return null;
     const seq = await client.query<{ seq: number }>(
       `INSERT INTO conversation_message (session_id, seq, role, content)
-       VALUES ($1, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = $1), 'system', $2)
+       VALUES (?, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = ?), 'system', ?)
        RETURNING seq`,
-      [session.id, buildMessage(retrievedAt, added, removed, changed)],
+      [session.id, session.id, buildMessage(retrievedAt, added, removed, changed)],
     );
     return seq.rows[0].seq;
   });

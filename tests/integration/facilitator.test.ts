@@ -22,9 +22,10 @@ let keySeq = 0;
 
 async function createSession(): Promise<string> {
   keySeq++;
+  const key = `FAC-${keySeq}`;
   const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ($1, ARRAY[$1]) RETURNING id',
-    [`FAC-${keySeq}`],
+    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES (?, ARRAY[?]) RETURNING id',
+    [key, key],
   );
   await initWorkingCopy(rows[0].id);
   return rows[0].id;
@@ -76,7 +77,7 @@ describe('runFacilitatorTurn persistence', () => {
     expect(question).toMatchObject({ text: 'What is the p95 login latency target?', section: 'Performance' });
 
     const messages = await query<{ seq: number; role: string; content: string }>(
-      'SELECT seq, role, content FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+      'SELECT seq, role, content FROM conversation_message WHERE session_id = ? ORDER BY seq',
       [sessionId],
     );
     expect(messages).toEqual([
@@ -86,7 +87,7 @@ describe('runFacilitatorTurn persistence', () => {
     expect(events.at(-1)).toEqual({ type: 'done', messageSeq: 2 });
 
     const questions = await query<{ id: string; section: string; text: string; status: string }>(
-      'SELECT id, section, text, status FROM ai_question WHERE session_id = $1',
+      'SELECT id, section, text, status FROM ai_question WHERE session_id = ?',
       [sessionId],
     );
     expect(questions).toEqual([
@@ -128,7 +129,7 @@ describe('runFacilitatorTurn persistence', () => {
       expect(wc?.sections.Scope.body).toBe('Human scope v2');
       expect(wc?.sections.Assumptions.body).toBe('AI assumptions');
       const pending = await query<{ section: string; status: string; patch: { content: string } }>(
-        'SELECT section, status, patch FROM pending_suggestion WHERE session_id = $1',
+        'SELECT section, status, patch FROM pending_suggestion WHERE session_id = ?',
         [sessionId],
       );
       expect(pending).toEqual([{ section: 'Scope', status: 'pending', patch: expect.objectContaining({ content: 'AI scope' }) }]);
@@ -147,11 +148,11 @@ describe('runFacilitatorTurn persistence', () => {
     await turn(sessionId, 'Start.');
 
     const audits = await query<{ user_id: string; result: string; details: Record<string, unknown> }>(
-      "SELECT user_id, result, details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1",
+      "SELECT user_id, result, details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = ?",
       [sessionId],
     );
     expect(audits).toHaveLength(1);
-    const [q] = await query<{ id: string }>('SELECT id FROM ai_question WHERE session_id = $1', [sessionId]);
+    const [q] = await query<{ id: string }>('SELECT id FROM ai_question WHERE session_id = ?', [sessionId]);
     expect(audits[0]).toMatchObject({ user_id: 'acc-1', result: 'success' });
     expect(audits[0].details).toMatchObject({
       messageSeq: 2,
@@ -165,7 +166,7 @@ describe('runFacilitatorTurn persistence', () => {
     fake.enqueue([{ type: 'text-delta', text: 'Hmm.' }, { type: 'done' }], [{ type: 'text-delta', text: 'Ok.' }, { type: 'done' }]);
     await turn(sessionId, 'Anything else?');
     expect(fake.calls).toHaveLength(3);
-    const after = await query("SELECT 1 FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1", [sessionId]);
+    const after = await query("SELECT 1 FROM audit_record WHERE action = 'ai.suggestion' AND session_id = ?", [sessionId]);
     expect(after).toHaveLength(2);
   });
 
@@ -181,7 +182,7 @@ describe('runFacilitatorTurn persistence', () => {
     fake.enqueue([{ type: 'error', code: 'transient', message: 'upstream', retryable: true }]);
     const events = await turn(sessionId, 'Hello?');
     expect(events).toEqual([{ type: 'error', code: 'transient', message: 'upstream' }]);
-    const messages = await query<{ role: string }>('SELECT role FROM conversation_message WHERE session_id = $1', [sessionId]);
+    const messages = await query<{ role: string }>('SELECT role FROM conversation_message WHERE session_id = ?', [sessionId]);
     expect(messages).toEqual([{ role: 'facilitator' }]);
   });
 });

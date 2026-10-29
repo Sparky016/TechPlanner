@@ -34,22 +34,23 @@ let cookie: string;
 let keySeq = 0;
 
 async function seedUser(user: { accountId: string; displayName: string }): Promise<void> {
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     user.accountId,
     user.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
 
 async function createLockedSession(): Promise<{ id: string; tabId: string }> {
   keySeq++;
+  const key = `REV-${keySeq}`;
   const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ($1, ARRAY[$1]) RETURNING id',
-    [`REV-${keySeq}`],
+    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES (?, ARRAY[?]) RETURNING id',
+    [key, key],
   );
   const id = rows[0].id;
   await initWorkingCopy(id);
@@ -122,7 +123,7 @@ describe('revisions API', () => {
     expect(await (await saveDraft(s)).json()).toEqual({ number: 2 });
 
     const [row] = await query<{ sections: Record<string, string>; trigger: string; author_id: string }>(
-      'SELECT sections, trigger, author_id FROM revision WHERE session_id = $1 AND number = 2',
+      'SELECT sections, trigger, author_id FROM revision WHERE session_id = ? AND number = 2',
       [s.id],
     );
     expect(Object.keys(row.sections).sort()).toEqual([...SECTION_NAMES].sort());
@@ -131,7 +132,7 @@ describe('revisions API', () => {
     expect(row).toMatchObject({ trigger: 'save', author_id: ALICE.accountId });
 
     const audits = await query<{ details: unknown }>(
-      "SELECT details FROM audit_record WHERE action = 'draft.saved' AND session_id = $1 ORDER BY id",
+      "SELECT details FROM audit_record WHERE action = 'draft.saved' AND session_id = ? ORDER BY id",
       [s.id],
     );
     expect(audits.map((a) => a.details)).toEqual([{ number: 1 }, { number: 2 }]);
@@ -150,10 +151,10 @@ describe('revisions API', () => {
   it('AC1: readiness score is taken from the latest evaluation', async () => {
     const s = await createLockedSession();
     await query(
-      "INSERT INTO evaluation (session_id, section_statuses, score, created_at) VALUES ($1, '{}', 40, now() - interval '1 hour')",
+      "INSERT INTO evaluation (session_id, section_statuses, score, created_at) VALUES (?, '{}', 40, now() - interval '1 hour')",
       [s.id],
     );
-    await query("INSERT INTO evaluation (session_id, section_statuses, score) VALUES ($1, '{}', 72)", [s.id]);
+    await query("INSERT INTO evaluation (session_id, section_statuses, score) VALUES (?, '{}', 72)", [s.id]);
     await saveDraft(s);
     const body = (await (await list(s)).json()) as { revisions: { readinessScore: number }[] };
     expect(body.revisions[0].readinessScore).toBe(72);
@@ -199,7 +200,7 @@ describe('revisions API', () => {
     await edit(s, 'Scope', 'changed');
     await edit(s, 'Risks', 'new risk');
     await saveDraft(s);
-    const before = await query('SELECT * FROM revision WHERE session_id = $1 ORDER BY number', [s.id]);
+    const before = await query('SELECT * FROM revision WHERE session_id = ? ORDER BY number', [s.id]);
 
     const res = await restore(s, '1');
     expect(res.status).toBe(200);
@@ -210,7 +211,7 @@ describe('revisions API', () => {
     expect(wc.sections['Risks'].body).toBe('');
 
     const after = await query<{ number: number; trigger: string; restored_from: number | null; sections: unknown }>(
-      'SELECT * FROM revision WHERE session_id = $1 ORDER BY number',
+      'SELECT * FROM revision WHERE session_id = ? ORDER BY number',
       [s.id],
     );
     expect(after.slice(0, 2)).toEqual(before);
@@ -218,7 +219,7 @@ describe('revisions API', () => {
     expect(after[2].sections).toEqual(after[0].sections);
 
     const audits = await query<{ details: unknown }>(
-      "SELECT details FROM audit_record WHERE action = 'revision.restored' AND session_id = $1",
+      "SELECT details FROM audit_record WHERE action = 'revision.restored' AND session_id = ?",
       [s.id],
     );
     expect(audits.map((a) => a.details)).toEqual([{ from: 1, newNumber: 3 }]);

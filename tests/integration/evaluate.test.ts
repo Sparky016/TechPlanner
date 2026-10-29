@@ -21,9 +21,10 @@ let keySeq = 0;
 
 async function createSession(): Promise<string> {
   keySeq++;
+  const key = `EVAL-${keySeq}`;
   const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ($1, ARRAY[$1]) RETURNING id',
-    [`EVAL-${keySeq}`],
+    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES (?, ARRAY[?]) RETURNING id',
+    [key, key],
   );
   await initWorkingCopy(rows[0].id);
   return rows[0].id;
@@ -83,7 +84,7 @@ describe('evaluateSession persistence', () => {
     expect(r.score).toBe(computeReadinessScore(statuses));
 
     const evals = await query<{ id: string; score: number; section_statuses: Record<string, unknown> }>(
-      'SELECT id, score, section_statuses FROM evaluation WHERE session_id = $1',
+      'SELECT id, score, section_statuses FROM evaluation WHERE session_id = ?',
       [sessionId],
     );
     expect(evals).toHaveLength(1);
@@ -95,7 +96,7 @@ describe('evaluateSession persistence', () => {
     });
 
     const issues = await query<{ severity: string; section: string; status: string }>(
-      'SELECT severity, section, status FROM issue WHERE session_id = $1 ORDER BY section',
+      'SELECT severity, section, status FROM issue WHERE session_id = ? ORDER BY section',
       [sessionId],
     );
     expect(issues).toEqual(
@@ -107,7 +108,7 @@ describe('evaluateSession persistence', () => {
     expect(r.gatePasses).toBe(false);
 
     const audits = await query<{ user_id: string; details: Record<string, unknown> }>(
-      "SELECT user_id, details FROM audit_record WHERE action = 'readiness.evaluated' AND session_id = $1",
+      "SELECT user_id, details FROM audit_record WHERE action = 'readiness.evaluated' AND session_id = ?",
       [sessionId],
     );
     expect(audits).toHaveLength(1);
@@ -135,7 +136,7 @@ describe('evaluateSession persistence', () => {
     };
     fake.enqueue(script(statuses, [warning]));
     await evaluateSession(sessionId, { userId: 'acc-1' });
-    await query("UPDATE issue SET status = 'accepted-risk' WHERE session_id = $1 AND section = 'Performance'", [
+    await query("UPDATE issue SET status = 'accepted-risk' WHERE session_id = ? AND section = 'Performance'", [
       sessionId,
     ]);
 
@@ -148,7 +149,7 @@ describe('evaluateSession persistence', () => {
     expect(r.gatePasses).toBe(true);
     expect(r.issues).toEqual([expect.objectContaining({ section: 'Performance', status: 'accepted-risk' })]);
     const rows = await query<{ section: string; status: string; resolved_at: Date | null }>(
-      'SELECT section, status, resolved_at FROM issue WHERE session_id = $1',
+      'SELECT section, status, resolved_at FROM issue WHERE session_id = ?',
       [sessionId],
     );
     for (const row of rows) {
@@ -158,10 +159,10 @@ describe('evaluateSession persistence', () => {
         expect(row.resolved_at).not.toBeNull();
       }
     }
-    const evals = await query('SELECT id FROM evaluation WHERE session_id = $1', [sessionId]);
+    const evals = await query('SELECT id FROM evaluation WHERE session_id = ?', [sessionId]);
     expect(evals).toHaveLength(2);
     const audits = await query(
-      "SELECT id FROM audit_record WHERE action = 'readiness.evaluated' AND session_id = $1",
+      "SELECT id FROM audit_record WHERE action = 'readiness.evaluated' AND session_id = ?",
       [sessionId],
     );
     expect(audits).toHaveLength(2);

@@ -163,13 +163,13 @@ const passing = () => fake.enqueue(script(statuses()));
 const failing = () => fake.enqueue(script(statuses(['Scope'])));
 
 async function seedUser(user: { accountId: string; displayName: string }): Promise<void> {
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     user.accountId,
     user.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
@@ -180,7 +180,7 @@ async function createLockedSession(): Promise<S> {
   keySeq++;
   const keys = [`PUB-${keySeq * 10 + 1}`, `PUB-${keySeq * 10 + 2}`];
   const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id) VALUES ($1, $2, $3) RETURNING id',
+    'INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id) VALUES (?, ?, ?) RETURNING id',
     [keys[0], keys, ALICE.accountId],
   );
   const id = rows[0].id;
@@ -188,7 +188,7 @@ async function createLockedSession(): Promise<S> {
   for (const key of keys) {
     await query(
       `INSERT INTO source_snapshot (session_id, kind, ref, title, content_text, ingest_status, detail, retrieved_at)
-       VALUES ($1, 'jira_issue', $2, $3, '', 'ingested', $4, '2026-01-01T00:00:00Z')`,
+       VALUES (?, 'jira_issue', ?, ?, '', 'ingested', ?, '2026-01-01T00:00:00Z')`,
       [id, key, `Summary of ${key}`, JSON.stringify({ url: `${SITE}/browse/${key}` })],
     );
   }
@@ -251,13 +251,13 @@ function stepStatuses(run: PublishRun): Record<string, string> {
 
 async function audits(sessionId: string, action: string) {
   return query<{ details: Record<string, unknown>; result: string; correlation_id: string | null }>(
-    'SELECT details, result, correlation_id FROM audit_record WHERE session_id = $1 AND action = $2 ORDER BY id',
+    'SELECT details, result, correlation_id FROM audit_record WHERE session_id = ? AND action = ? ORDER BY id',
     [sessionId, action],
   );
 }
 
 async function sessionStatus(id: string): Promise<string> {
-  const rows = await query<{ status: string }>('SELECT status FROM planning_session WHERE id = $1', [id]);
+  const rows = await query<{ status: string }>('SELECT status FROM planning_session WHERE id = ?', [id]);
   return rows[0].status;
 }
 
@@ -310,8 +310,8 @@ describe('publish orchestration', { timeout: 30000 }, () => {
     failing();
     expect((await publish(s, { overrideJustification: JUSTIFICATION })).status).toBe(409);
 
-    expect(await query('SELECT 1 FROM publish_run WHERE session_id = $1', [s.id])).toHaveLength(0);
-    expect(await query('SELECT 1 FROM revision WHERE session_id = $1', [s.id])).toHaveLength(0);
+    expect(await query('SELECT 1 FROM publish_run WHERE session_id = ?', [s.id])).toHaveLength(0);
+    expect(await query('SELECT 1 FROM revision WHERE session_id = ?', [s.id])).toHaveLength(0);
     expect(await audits(s.id, 'readiness.override')).toHaveLength(0);
     expect(requests.filter((r) => r.method !== 'GET')).toHaveLength(0);
   });
@@ -340,7 +340,7 @@ describe('publish orchestration', { timeout: 30000 }, () => {
     const runId = await publishAndRun(s);
 
     const revisions = await query<{ number: number; trigger: string; published: boolean }>(
-      'SELECT number, trigger, published FROM revision WHERE session_id = $1',
+      'SELECT number, trigger, published FROM revision WHERE session_id = ?',
       [s.id],
     );
     expect(revisions).toEqual([{ number: 1, trigger: 'publish', published: true }]);
@@ -356,7 +356,7 @@ describe('publish orchestration', { timeout: 30000 }, () => {
 
     // Step order from the step audit records.
     const trail = await query<{ action: string; details: { step?: string } }>(
-      `SELECT action, details FROM audit_record WHERE session_id = $1
+      `SELECT action, details FROM audit_record WHERE session_id = ?
          AND action IN ('confluence.updated', 'jira.updated', 'downstream.triggered') ORDER BY id`,
       [s.id],
     );
@@ -448,7 +448,7 @@ describe('publish orchestration', { timeout: 30000 }, () => {
          steps = (SELECT jsonb_agg(CASE WHEN st->>'name' IN ('jira_attach', 'jira_comment')
                                         THEN jsonb_set(st, '{status}', '"running"') ELSE st END)
                     FROM jsonb_array_elements(steps) st)
-       WHERE id = $1`,
+       WHERE id = ?`,
       [runId],
     );
     await handlePublishRun({ runId });
@@ -516,7 +516,7 @@ describe('publish orchestration', { timeout: 30000 }, () => {
     const noCsrf = await publish(s, {}, { csrf: false });
     expect(noCsrf.status).toBe(403);
     expect(fake.calls).toHaveLength(0);
-    expect(await query('SELECT 1 FROM publish_run WHERE session_id = $1', [s.id])).toHaveLength(0);
+    expect(await query('SELECT 1 FROM publish_run WHERE session_id = ?', [s.id])).toHaveLength(0);
   });
 
   it('GET returns 404 for an unknown or foreign run', async () => {

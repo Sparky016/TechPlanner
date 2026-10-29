@@ -22,16 +22,16 @@ export const GET = withApiHandler<{ id: string }>({}, async (ctx) => {
   const session = await requireSessionAccess(ctx, ctx.params.id);
 
   const [evaluation] = await query<{ score: number; section_statuses: unknown; created_at: Date }>(
-    'SELECT score, section_statuses, created_at FROM evaluation WHERE session_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1',
+    'SELECT score, section_statuses, created_at FROM evaluation WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT 1',
     [session.id],
   );
   const issues = await query<{ id: string; severity: string; section: string; description: string; status: string }>(
     `SELECT id, severity, section, description, status FROM issue
-     WHERE session_id = $1 AND status <> 'resolved' ORDER BY created_at, id`,
+     WHERE session_id = ? AND status <> 'resolved' ORDER BY created_at, id`,
     [session.id],
   );
   const openQuestions = await query<{ id: string; issue_id: string | null; section: string | null; text: string }>(
-    "SELECT id, issue_id, section, text FROM ai_question WHERE session_id = $1 AND status = 'open' ORDER BY created_at, id",
+    "SELECT id, issue_id, section, text FROM ai_question WHERE session_id = ? AND status = 'open' ORDER BY created_at, id",
     [session.id],
   );
   const gatePasses = !issues.some((i) => i.severity === 'critical' && i.status === 'open');

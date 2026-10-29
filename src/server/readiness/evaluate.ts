@@ -64,7 +64,7 @@ export class EvaluatorRunError extends Error {
 type IssueRow = ExistingIssue;
 
 const SELECT_ISSUES =
-  'SELECT id, severity, section, description, fingerprint, status FROM issue WHERE session_id = $1 ORDER BY created_at, id';
+  'SELECT id, severity, section, description, fingerprint, status FROM issue WHERE session_id = ? ORDER BY created_at, id';
 
 async function runOnce(content: string, collector: EvaluatorCollector, signal?: AbortSignal): Promise<void> {
   const events = getLlmClient().run({
@@ -132,23 +132,23 @@ async function applyReconciliation(
   const current: EvaluationIssue[] = [];
 
   for (const i of changes.keep) {
-    await client.query('UPDATE issue SET severity = $2, status = $3 WHERE id = $1', [i.id, i.severity, i.status]);
+    await client.query('UPDATE issue SET severity = ?, status = ? WHERE id = ?', [i.severity, i.status, i.id]);
     current.push(toResultIssue(i));
   }
   for (const i of changes.reopen) {
-    await client.query("UPDATE issue SET severity = $2, status = 'open', resolved_at = NULL WHERE id = $1", [
-      i.id,
+    await client.query("UPDATE issue SET severity = ?, status = 'open', resolved_at = NULL WHERE id = ?", [
       i.severity,
+      i.id,
     ]);
     current.push(toResultIssue(i));
   }
   for (const i of changes.resolve) {
-    await client.query("UPDATE issue SET status = 'resolved', resolved_at = now() WHERE id = $1", [i.id]);
+    await client.query("UPDATE issue SET status = 'resolved', resolved_at = now() WHERE id = ?", [i.id]);
   }
   for (const i of changes.insert) {
     const { rows } = await client.query<{ id: string }>(
       `INSERT INTO issue (session_id, severity, section, description, fingerprint, status)
-       VALUES ($1, $2, $3, $4, $5, 'open') RETURNING id`,
+       VALUES (?, ?, ?, ?, ?, 'open') RETURNING id`,
       [sessionId, i.severity, i.section, i.description, i.fingerprint],
     );
     current.push({ id: rows[0].id, ...i, status: 'open' });
@@ -193,12 +193,12 @@ export async function evaluateSession(sessionId: string, opts: EvaluateOptions):
   const result = await withTransaction(async (client) => {
     // Serialises concurrent evaluations of one session (the issue fingerprint is unique per session).
     const locked = await client.query<{ ticket_keys: string[] }>(
-      'SELECT ticket_keys FROM planning_session WHERE id = $1 FOR UPDATE',
+      'SELECT ticket_keys FROM planning_session WHERE id = ? FOR UPDATE',
       [sessionId],
     );
     const issues = await applyReconciliation(client, sessionId, reported);
     const { rows } = await client.query<{ id: string }>(
-      'INSERT INTO evaluation (session_id, section_statuses, score) VALUES ($1, $2, $3) RETURNING id',
+      'INSERT INTO evaluation (session_id, section_statuses, score) VALUES (?, ?, ?) RETURNING id',
       [sessionId, JSON.stringify(statuses), score],
     );
     const evaluationId = rows[0].id;

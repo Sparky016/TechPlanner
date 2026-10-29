@@ -24,7 +24,7 @@ export async function isEvaluationPending(sessionId: string): Promise<boolean> {
   if (!exists?.present) return false;
   const rows = await query(
     `SELECT 1 FROM pgboss.job
-     WHERE name = $1 AND singleton_key = $2 AND state IN ('created', 'retry', 'active') LIMIT 1`,
+     WHERE name = ? AND singleton_key = ? AND state IN ('created', 'retry', 'active') LIMIT 1`,
     [JOB_NAMES.readinessEvaluate, sessionId],
   );
   return rows.length > 0;

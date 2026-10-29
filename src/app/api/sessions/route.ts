@@ -46,13 +46,15 @@ export const GET = withApiHandler({}, async (ctx) => {
     status: ctx.req.nextUrl.searchParams.get('status') || undefined,
     ticket: ctx.req.nextUrl.searchParams.get('ticket') || undefined,
   });
+  const status = params.status ?? null;
+  const ticket = params.ticket?.toUpperCase() ?? null;
   const rows = await query<PlanningSessionDbRow>(
     `SELECT * FROM planning_session
-      WHERE facilitator_id = $1
-        AND ($2::text IS NULL OR status = $2)
-        AND ($3::text IS NULL OR $3 = ANY (ticket_keys))
+      WHERE facilitator_id = ?
+        AND (?::text IS NULL OR status = ?)
+        AND (?::text IS NULL OR ? = ANY (ticket_keys))
       ORDER BY updated_at DESC, created_at DESC`,
-    [ctx.user!.accountId, params.status ?? null, params.ticket?.toUpperCase() ?? null],
+    [ctx.user!.accountId, status, status, ticket, ticket],
   );
   return Response.json({ sessions: rows.map((r) => sessionSummary(mapSessionRow(r))) }, { headers: NO_STORE });
 });

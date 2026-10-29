@@ -25,9 +25,10 @@ export async function listSessionAudit(
   limit: number,
   action: string | null,
 ): Promise<{ records: AuditRecord[]; nextCursor: string | null }> {
-  // Query is: WHERE session_id = $1 AND ($2::bigint IS NULL OR id < $2) AND ($3::text IS NULL OR action = $3)
+  // Query is: WHERE session_id matches AND (no cursor OR id < cursor) AND (no action filter OR action matches)
   // ORDER BY id DESC LIMIT limit+1
   // This fetches one extra row to compute nextCursor; we return at most `limit` records.
+  const cursorId = cursor ? BigInt(cursor) : null;
   const rows = await query<{
     id: string;
     ts: Date;
@@ -43,12 +44,12 @@ export async function listSessionAudit(
   }>(
     `SELECT id, ts, user_id, user_display_name, session_id, ticket_ids, action, result, details, correlation_id, hash
      FROM audit_record
-     WHERE session_id = $1
-       AND ($2::bigint IS NULL OR id < $2)
-       AND ($3::text IS NULL OR action = $3)
+     WHERE session_id = ?
+       AND (?::bigint IS NULL OR id < ?)
+       AND (?::text IS NULL OR action = ?)
      ORDER BY id DESC
-     LIMIT $4`,
-    [sessionId, cursor ? BigInt(cursor) : null, action, limit + 1],
+     LIMIT ?`,
+    [sessionId, cursorId, cursorId, action, action, limit + 1],
   );
 
   const records: AuditRecord[] = rows.slice(0, limit).map(mapAuditRow);
@@ -79,13 +80,14 @@ export async function streamSessionAudit(sessionId: string): Promise<ReadableStr
             correlation_id: string | null;
             hash: Buffer;
           };
+          const after = lastId ? BigInt(lastId) : null;
           const rows: AuditRow[] = await query<AuditRow>(
             `SELECT id, ts, user_id, user_display_name, session_id, ticket_ids, action, result, details, correlation_id, hash
              FROM audit_record
-             WHERE session_id = $1 AND ($2::bigint IS NULL OR id > $2)
+             WHERE session_id = ? AND (?::bigint IS NULL OR id > ?)
              ORDER BY id ASC
              LIMIT 500`,
-            [sessionId, lastId ? BigInt(lastId) : null],
+            [sessionId, after, after],
           );
 
           if (rows.length === 0) break;

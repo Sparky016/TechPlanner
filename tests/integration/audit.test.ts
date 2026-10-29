@@ -41,13 +41,13 @@ describe('audit_record is append-only', () => {
       userId: 'acc-1',
     });
 
-    await expect(query("UPDATE audit_record SET action = 'auth.logout' WHERE id = $1", [id])).rejects.toThrow(
+    await expect(query("UPDATE audit_record SET action = 'auth.logout' WHERE id = ?", [id])).rejects.toThrow(
       /append-only/,
     );
-    await expect(query('DELETE FROM audit_record WHERE id = $1', [id])).rejects.toThrow(/append-only/);
+    await expect(query('DELETE FROM audit_record WHERE id = ?', [id])).rejects.toThrow(/append-only/);
     await expect(query('TRUNCATE audit_record')).rejects.toThrow(/append-only/);
 
-    const rows = await query<{ action: string }>('SELECT action FROM audit_record WHERE id = $1', [id]);
+    const rows = await query<{ action: string }>('SELECT action FROM audit_record WHERE id = ?', [id]);
     expect(rows).toEqual([{ action: 'auth.login' }]);
   });
 });
@@ -117,7 +117,7 @@ describe('hash chain', () => {
         reason: 'expired',
       },
     });
-    const [row] = await query<{ details: Record<string, unknown> }>('SELECT details FROM audit_record WHERE id = $1', [
+    const [row] = await query<{ details: Record<string, unknown> }>('SELECT details FROM audit_record WHERE id = ?', [
       id,
     ]);
     expect(row.details).toEqual({
@@ -132,7 +132,7 @@ describe('hash chain', () => {
     const canonical = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
     for (const sessionId of ['a0eebc999c0b4ef8bb6d6bb9bd380a11', '{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}']) {
       const { id } = await recordAudit({ action: 'draft.saved', result: 'success', sessionId });
-      const [row] = await query<{ session_id: string }>('SELECT session_id FROM audit_record WHERE id = $1', [id]);
+      const [row] = await query<{ session_id: string }>('SELECT session_id FROM audit_record WHERE id = ?', [id]);
       expect(row.session_id).toBe(canonical);
     }
     await expect(recordAudit({ action: 'draft.saved', result: 'success', sessionId: 'not-a-uuid' })).rejects.toThrow(
@@ -164,7 +164,7 @@ describe('hash chain', () => {
       ticketIds: [text],
     });
     const [row] = await query<{ user_display_name: string; ticket_ids: string[] }>(
-      'SELECT user_display_name, ticket_ids FROM audit_record WHERE id = $1',
+      'SELECT user_display_name, ticket_ids FROM audit_record WHERE id = ?',
       [id],
     );
     expect(row).toEqual({ user_display_name: text, ticket_ids: [text] });
@@ -177,7 +177,7 @@ describe('hash chain', () => {
 
     await withTransaction(async (client) => {
       await client.query('ALTER TABLE audit_record DISABLE TRIGGER audit_record_no_update_delete');
-      await client.query(`UPDATE audit_record SET details = '{"index": 999}' WHERE id = $1`, [target]);
+      await client.query(`UPDATE audit_record SET details = '{"index": 999}' WHERE id = ?`, [target]);
       await client.query('ALTER TABLE audit_record ENABLE TRIGGER audit_record_no_update_delete');
     });
 

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { Client } from 'pg';
 import { AUTOSAVE_MAX_WAIT_MS } from '../../src/components/workspace/center/useAutosave';
+import { toPgPlaceholders } from '../../src/server/db/placeholders';
 import { APP_ENV } from '../../tests/e2e/support/env';
 
 // Performance verification against NFR-1..NFR-5 (task 41). Drives the app over HTTP, the way the browser does:
@@ -534,7 +535,8 @@ async function resetDatabase(): Promise<void> {
   const root = new Client({ connectionString: admin.toString() });
   await root.connect();
   try {
-    if ((await root.query('SELECT 1 FROM pg_database WHERE datname = $1', [name])).rowCount === 0) {
+    const exists = await root.query(toPgPlaceholders('SELECT 1 FROM pg_database WHERE datname = ?').text, [name]);
+    if (exists.rowCount === 0) {
       await root.query(`CREATE DATABASE "${name.replace(/"/g, '""')}"`);
     }
   } finally {

@@ -32,13 +32,13 @@ async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
 }
 
 async function seedUser(user: { accountId: string; displayName: string }): Promise<void> {
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     user.accountId,
     user.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
@@ -49,9 +49,10 @@ let keySeq = 0;
 // A planning session with an initialised working copy and a lock held by the returned tab.
 async function createLockedSession(): Promise<{ id: string; tabId: string }> {
   keySeq++;
+  const key = `WC-${keySeq}`;
   const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ($1, ARRAY[$1]) RETURNING id',
-    [`WC-${keySeq}`],
+    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES (?, ARRAY[?]) RETURNING id',
+    [key, key],
   );
   const id = rows[0].id;
   await initWorkingCopy(id);
@@ -94,7 +95,7 @@ async function patchSection(
 
 async function audits(sessionId: string, action: string) {
   return query<{ user_id: string; details: Record<string, unknown>; ticket_ids: string[] }>(
-    'SELECT user_id, details, ticket_ids FROM audit_record WHERE action = $1 AND session_id = $2 ORDER BY id',
+    'SELECT user_id, details, ticket_ids FROM audit_record WHERE action = ? AND session_id = ? ORDER BY id',
     [action, sessionId],
   );
 }
@@ -337,7 +338,7 @@ describe('POST /api/sessions/:id/suggestions/:sid/accept and /reject', () => {
     expect((await decide('reject', a, sidB)).status).toBe(404);
     expect((await decide('accept', a, 'not-a-uuid')).status).toBe(404);
     expect((await decide('accept', { id: b.id, tabId: randomUUID() }, sidB)).status).toBe(423);
-    const [row] = await query<{ status: string }>('SELECT status FROM pending_suggestion WHERE id = $1', [sidB]);
+    const [row] = await query<{ status: string }>('SELECT status FROM pending_suggestion WHERE id = ?', [sidB]);
     expect(row.status).toBe('pending');
   });
 });

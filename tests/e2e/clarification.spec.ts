@@ -26,10 +26,10 @@ test('AC-13: ending clarification stops proactive AI questions', async ({ page }
   await page.reload();
   await expect(page.getByRole('region', { name: 'AI questions' }).getByRole('listitem')).toHaveCount(1);
 
-  const rows = await sql('SELECT 1 FROM ai_question WHERE session_id = $1', [sessionId]);
+  const rows = await sql('SELECT 1 FROM ai_question WHERE session_id = ?', [sessionId]);
   expect(rows).toHaveLength(1);
   const turns = await sql<{ details: { questions: string[]; clarificationEnded: boolean } }>(
-    "SELECT details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1 ORDER BY id",
+    "SELECT details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = ? ORDER BY id",
     [sessionId],
   );
   expect(turns.map((t) => [t.details.clarificationEnded, t.details.questions.length])).toEqual([
@@ -37,7 +37,7 @@ test('AC-13: ending clarification stops proactive AI questions', async ({ page }
     [true, 0],
   ]);
   const [session] = await sql<{ clarification_ended: boolean }>(
-    'SELECT clarification_ended FROM planning_session WHERE id = $1',
+    'SELECT clarification_ended FROM planning_session WHERE id = ?',
     [sessionId],
   );
   expect(session.clarification_ended).toBe(true);

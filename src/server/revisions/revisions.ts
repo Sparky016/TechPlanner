@@ -55,9 +55,9 @@ export class RevisionNotFoundError extends Error {
  * planning_session row lock serialises numbering, and the (session_id, number) primary key backs it up.
  */
 export async function createRevision(client: DbClient, input: CreateRevisionInput): Promise<{ number: number }> {
-  await client.query('SELECT id FROM planning_session WHERE id = $1 FOR UPDATE', [input.sessionId]);
+  await client.query('SELECT id FROM planning_session WHERE id = ? FOR UPDATE', [input.sessionId]);
   const wc = await client.query<{ sections: WorkingCopySections }>(
-    'SELECT sections FROM working_copy WHERE session_id = $1',
+    'SELECT sections FROM working_copy WHERE session_id = ?',
     [input.sessionId],
   );
   if (wc.rows.length === 0) throw new Error(`Working copy not found for session ${input.sessionId}`);
@@ -65,12 +65,12 @@ export async function createRevision(client: DbClient, input: CreateRevisionInpu
   for (const name of SECTION_NAMES) bodies[name] = wc.rows[0].sections[name]?.body ?? '';
 
   const score = await client.query<{ score: number }>(
-    'SELECT score FROM evaluation WHERE session_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1',
+    'SELECT score FROM evaluation WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT 1',
     [input.sessionId],
   );
   const { rows } = await client.query<{ number: number }>(
     `INSERT INTO revision (session_id, number, sections, trigger, readiness_score, published, author_id, restored_from)
-     SELECT $1, coalesce(max(number), 0) + 1, $2, $3, $4, $5, $6, $7 FROM revision WHERE session_id = $1
+     SELECT ?, coalesce(max(number), 0) + 1, ?, ?, ?, ?, ?, ? FROM revision WHERE session_id = ?
      RETURNING number`,
     [
       input.sessionId,
@@ -80,6 +80,7 @@ export async function createRevision(client: DbClient, input: CreateRevisionInpu
       input.published,
       input.authorId,
       input.restoredFrom ?? null,
+      input.sessionId,
     ],
   );
   return { number: rows[0].number };
@@ -114,14 +115,14 @@ function toListItem(row: RevisionRow): RevisionListItem {
 
 /** Revisions for a session, newest first (SR-11.2). */
 export async function listRevisions(sessionId: string): Promise<RevisionListItem[]> {
-  const rows = await query<RevisionRow>(`${REVISION_SELECT} WHERE r.session_id = $1 ORDER BY r.number DESC`, [
+  const rows = await query<RevisionRow>(`${REVISION_SELECT} WHERE r.session_id = ? ORDER BY r.number DESC`, [
     sessionId,
   ]);
   return rows.map(toListItem);
 }
 
 export async function getRevision(sessionId: string, number: number): Promise<Revision | null> {
-  const rows = await query<RevisionRow>(`${REVISION_SELECT} WHERE r.session_id = $1 AND r.number = $2`, [
+  const rows = await query<RevisionRow>(`${REVISION_SELECT} WHERE r.session_id = ? AND r.number = ?`, [
     sessionId,
     number,
   ]);

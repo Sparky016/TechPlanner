@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { releaseConnectionLock, tryConnectionLock } from '@/server/db/locks';
 import { db, query } from '@/server/db/pool';
 import { runFacilitatorTurn } from '@/server/facilitator/runTurn';
 import { HttpError } from '@/server/http/errors';
@@ -28,7 +29,7 @@ interface MessageRow {
 export const GET = withApiHandler<{ id: string }>({}, async (ctx) => {
   const session = await requireSessionAccess(ctx, ctx.params.id);
   const rows = await query<MessageRow>(
-    'SELECT seq, role, content, created_at FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+    'SELECT seq, role, content, created_at FROM conversation_message WHERE session_id = ? ORDER BY seq',
     [session.id],
   );
   const messages = rows.map((r) => ({ seq: r.seq, role: r.role, content: r.content, createdAt: r.created_at }));
@@ -36,7 +37,7 @@ export const GET = withApiHandler<{ id: string }>({}, async (ctx) => {
 });
 
 // Sends a facilitator message and streams the AI turn as SSE. One turn at a time per session (409 turn_in_progress),
-// enforced by a session-level advisory lock held on a dedicated connection for the life of the stream.
+// enforced by a connection-scoped lock held on a dedicated connection for the life of the stream.
 export const POST = withApiHandler<{ id: string }>({}, async (ctx) => {
   const session = await requireSessionAccess(ctx, ctx.params.id);
   await requireLock(session.id, readTabId(ctx.req));
@@ -50,13 +51,14 @@ export const POST = withApiHandler<{ id: string }>({}, async (ctx) => {
   }
 
   const client = await db.connect();
+  const turnLock = `turn:${session.id}`;
   let released = false;
   // Idempotent. If unlocking fails the connection is destroyed, which drops its session-level lock.
   const release = async (): Promise<void> => {
     if (released) return;
     released = true;
     try {
-      await client.query("SELECT pg_advisory_unlock(hashtext('turn:' || $1::text))", [session.id]);
+      await releaseConnectionLock(client, turnLock);
       client.release();
     } catch (err) {
       logger.error({ err }, 'Failed to release turn lock; discarding connection');
@@ -65,11 +67,7 @@ export const POST = withApiHandler<{ id: string }>({}, async (ctx) => {
   };
 
   try {
-    const { rows } = await client.query<{ locked: boolean }>(
-      "SELECT pg_try_advisory_lock(hashtext('turn:' || $1::text)) AS locked",
-      [session.id],
-    );
-    if (!rows[0]?.locked) {
+    if (!(await tryConnectionLock(client, turnLock))) {
       released = true;
       client.release();
       throw new HttpError(409, 'A facilitator turn is already in progress for this session', 'turn_in_progress');

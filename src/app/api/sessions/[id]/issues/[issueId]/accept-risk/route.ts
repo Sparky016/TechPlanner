@@ -26,7 +26,7 @@ export const POST = withApiHandler<{ id: string; issueId: string }>({}, async (c
 
   const issue = await withTransaction(async (client) => {
     const { rows } = await client.query<IssueRow>(
-      'SELECT id, severity, section, description, status FROM issue WHERE id = $1 AND session_id = $2 FOR UPDATE',
+      'SELECT id, severity, section, description, status FROM issue WHERE id = ? AND session_id = ? FOR UPDATE',
       [ctx.params.issueId, session.id],
     );
     const row = rows[0];
@@ -37,7 +37,7 @@ export const POST = withApiHandler<{ id: string; issueId: string }>({}, async (c
     if (row.status === 'resolved') throw new HttpError(409, 'Issue is already resolved', 'issue_resolved');
     if (row.status === 'accepted-risk') return row;
 
-    await client.query("UPDATE issue SET status = 'accepted-risk' WHERE id = $1", [row.id]);
+    await client.query("UPDATE issue SET status = 'accepted-risk' WHERE id = ?", [row.id]);
     await recordAudit(
       {
         action: 'issue.accepted_risk',

@@ -28,12 +28,12 @@ type Role = 'facilitator' | 'ai';
 
 async function insertMessage(client: DbClient, sessionId: string, role: Role, content: string): Promise<number> {
   // Serialises concurrent writers for this session while seq is computed (same pattern as refreshSources).
-  await client.query('SELECT 1 FROM planning_session WHERE id = $1 FOR UPDATE', [sessionId]);
+  await client.query('SELECT 1 FROM planning_session WHERE id = ? FOR UPDATE', [sessionId]);
   const { rows } = await client.query<{ seq: number }>(
     `INSERT INTO conversation_message (session_id, seq, role, content)
-     VALUES ($1, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = $1), $2, $3)
+     VALUES (?, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = ?), ?, ?)
      RETURNING seq`,
-    [sessionId, role, content],
+    [sessionId, sessionId, role, content],
   );
   return rows[0].seq;
 }

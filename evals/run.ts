@@ -214,13 +214,17 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
 
 async function ensureDatabase(url: string): Promise<void> {
   const { Client } = await import('pg');
+  const { toPgPlaceholders } = await import('../src/server/db/placeholders');
   const name = decodeURIComponent(new URL(url).pathname.slice(1));
   const admin = new URL(url);
   admin.pathname = '/postgres';
   const client = new Client({ connectionString: admin.toString() });
   await client.connect();
   try {
-    const { rowCount } = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [name]);
+    const { rowCount } = await client.query(
+      toPgPlaceholders('SELECT 1 FROM pg_database WHERE datname = ?').text,
+      [name],
+    );
     if (rowCount === 0) await client.query(`CREATE DATABASE "${name.replace(/"/g, '""')}"`);
   } finally {
     await client.end();
@@ -266,8 +270,8 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
   async function createSession(f: Fixture, run: number, purpose: string): Promise<string> {
     return withTransaction(async (client) => {
       const { rows } = await client.query<{ id: string }>(
-        'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ($1, ARRAY[$1]) RETURNING id',
-        [f.ticket.key],
+        'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES (?, ARRAY[?]) RETURNING id',
+        [f.ticket.key, f.ticket.key],
       );
       const sessionId = rows[0].id;
       const initial = { ...emptySections(), ...f.draft };

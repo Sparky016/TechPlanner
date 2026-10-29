@@ -24,11 +24,11 @@ export async function runMigrations(pool: DbPool, dir: string = MIGRATIONS_DIR):
     let discard = false;
     try {
       await client.query('BEGIN');
-      await client.query('SELECT pg_advisory_xact_lock($1)', [LOCK_KEY]);
-      const done = await client.query('SELECT 1 FROM schema_migrations WHERE filename = $1', [filename]);
+      await client.query('SELECT pg_advisory_xact_lock(?)', [LOCK_KEY]);
+      const done = await client.query('SELECT 1 FROM schema_migrations WHERE filename = ?', [filename]);
       if (done.rowCount === 0) {
         await client.query(await readFile(join(dir, filename), 'utf8'));
-        await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [filename]);
+        await client.query('INSERT INTO schema_migrations (filename) VALUES (?)', [filename]);
         applied.push(filename);
       }
       await client.query('COMMIT');

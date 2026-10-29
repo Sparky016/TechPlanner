@@ -62,13 +62,13 @@ describe('check constraints', () => {
   it('rejects invalid enum values on other tables', async () => {
     const sessionId = await createSession();
     await expect(
-      query("INSERT INTO conversation_message (session_id, seq, role, content) VALUES ($1, 1, 'bogus', 'x')", [
+      query("INSERT INTO conversation_message (session_id, seq, role, content) VALUES (?, 1, 'bogus', 'x')", [
         sessionId,
       ]),
     ).rejects.toMatchObject({ code: '23514' });
     await expect(
       query(
-        "INSERT INTO issue (session_id, severity, section, description, fingerprint) VALUES ($1, 'bogus', 's', 'd', 'f')",
+        "INSERT INTO issue (session_id, severity, section, description, fingerprint) VALUES (?, 'bogus', 's', 'd', 'f')",
         [sessionId],
       ),
     ).rejects.toMatchObject({ code: '23514' });
@@ -86,7 +86,7 @@ describe('withTransaction', () => {
       );
       return res.rows[0].id;
     });
-    expect(await query('SELECT 1 FROM planning_session WHERE id = $1', [id])).toHaveLength(1);
+    expect(await query('SELECT 1 FROM planning_session WHERE id = ?', [id])).toHaveLength(1);
   });
 
   it('rolls back on a thrown error and releases the client', async () => {
@@ -107,29 +107,29 @@ describe('revision immutability', () => {
   it('rejects updating sections but allows published false -> true', async () => {
     const sessionId = await createSession();
     await query(
-      "INSERT INTO revision (session_id, number, sections, trigger) VALUES ($1, 1, '{\"a\": 1}', 'save')",
+      "INSERT INTO revision (session_id, number, sections, trigger) VALUES (?, 1, '{\"a\": 1}', 'save')",
       [sessionId],
     );
 
     await expect(
-      query('UPDATE revision SET sections = \'{"a": 2}\' WHERE session_id = $1 AND number = 1', [sessionId]),
+      query('UPDATE revision SET sections = \'{"a": 2}\' WHERE session_id = ? AND number = 1', [sessionId]),
     ).rejects.toMatchObject({ code: '23001' });
     await expect(
       query(
-        'UPDATE revision SET published = true, readiness_score = 99 WHERE session_id = $1 AND number = 1',
+        'UPDATE revision SET published = true, readiness_score = 99 WHERE session_id = ? AND number = 1',
         [sessionId],
       ),
     ).rejects.toMatchObject({ code: '23001' });
 
-    await query('UPDATE revision SET published = true WHERE session_id = $1 AND number = 1', [sessionId]);
+    await query('UPDATE revision SET published = true WHERE session_id = ? AND number = 1', [sessionId]);
     const [row] = await query<{ published: boolean; sections: unknown }>(
-      'SELECT published, sections FROM revision WHERE session_id = $1 AND number = 1',
+      'SELECT published, sections FROM revision WHERE session_id = ? AND number = 1',
       [sessionId],
     );
     expect(row).toEqual({ published: true, sections: { a: 1 } });
 
     await expect(
-      query('UPDATE revision SET published = false WHERE session_id = $1 AND number = 1', [sessionId]),
+      query('UPDATE revision SET published = false WHERE session_id = ? AND number = 1', [sessionId]),
     ).rejects.toMatchObject({ code: '23001' });
   });
 });

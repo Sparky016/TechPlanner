@@ -12,7 +12,7 @@ export async function POST(request: Request): Promise<Response> {
   const userId = await deleteSession(request);
   if (userId) {
     const [user] = await query<{ display_name: string }>(
-      'SELECT display_name FROM app_user WHERE atlassian_account_id = $1',
+      'SELECT display_name FROM app_user WHERE atlassian_account_id = ?',
       [userId],
     );
     await recordAudit({

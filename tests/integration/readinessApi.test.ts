@@ -47,13 +47,13 @@ async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
 }
 
 async function seedUser(user: { accountId: string; displayName: string }): Promise<void> {
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     user.accountId,
     user.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
@@ -64,9 +64,10 @@ let fake: FakeLlmClient;
 
 async function createLockedSession(): Promise<{ id: string; tabId: string }> {
   keySeq++;
+  const key = `RDY-${keySeq}`;
   const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id) VALUES ($1, ARRAY[$1], $2) RETURNING id',
-    [`RDY-${keySeq}`, ALICE.accountId],
+    'INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id) VALUES (?, ARRAY[?], ?) RETURNING id',
+    [key, key, ALICE.accountId],
   );
   const id = rows[0].id;
   await initWorkingCopy(id);
@@ -170,7 +171,7 @@ describe('scheduleEvaluation debounce', { timeout: 90000 }, () => {
     await subscribeHandlers(getHandlers());
 
     const count = async () =>
-      Number((await query<{ n: string }>('SELECT count(*) AS n FROM evaluation WHERE session_id = $1', [s.id]))[0].n);
+      Number((await query<{ n: string }>('SELECT count(*) AS n FROM evaluation WHERE session_id = ?', [s.id]))[0].n);
     const start = Date.now();
     while ((await count()) < 1) {
       if (Date.now() - start > 60000) throw new Error('timed out waiting for the debounced evaluation');
@@ -225,7 +226,7 @@ describe('POST /issues/:issueId/accept-risk', () => {
     );
     await evaluate(s);
     const issues = await query<{ id: string; severity: string }>(
-      'SELECT id, severity FROM issue WHERE session_id = $1',
+      'SELECT id, severity FROM issue WHERE session_id = ?',
       [s.id],
     );
     const warning = issues.find((i) => i.severity === 'warning')!;
@@ -233,10 +234,10 @@ describe('POST /issues/:issueId/accept-risk', () => {
 
     const ok = await acceptRisk(s, warning.id);
     expect(ok.status).toBe(200);
-    const [row] = await query<{ status: string }>('SELECT status FROM issue WHERE id = $1', [warning.id]);
+    const [row] = await query<{ status: string }>('SELECT status FROM issue WHERE id = ?', [warning.id]);
     expect(row.status).toBe('accepted-risk');
     const audits = await query<{ user_id: string; details: { issueId: string } }>(
-      "SELECT user_id, details FROM audit_record WHERE action = 'issue.accepted_risk' AND session_id = $1",
+      "SELECT user_id, details FROM audit_record WHERE action = 'issue.accepted_risk' AND session_id = ?",
       [s.id],
     );
     expect(audits).toHaveLength(1);
@@ -246,7 +247,7 @@ describe('POST /issues/:issueId/accept-risk', () => {
     const bad = await acceptRisk(s, critical.id);
     expect(bad.status).toBe(400);
     expect(await errorCode(bad)).toBe('critical_requires_override');
-    const [still] = await query<{ status: string }>('SELECT status FROM issue WHERE id = $1', [critical.id]);
+    const [still] = await query<{ status: string }>('SELECT status FROM issue WHERE id = ?', [critical.id]);
     expect(still.status).toBe('open');
   });
 
@@ -267,7 +268,7 @@ describe('POST /end-clarification', () => {
       expect(res.status).toBe(200);
     }
     const [row] = await query<{ clarification_ended: boolean }>(
-      'SELECT clarification_ended FROM planning_session WHERE id = $1',
+      'SELECT clarification_ended FROM planning_session WHERE id = ?',
       [s.id],
     );
     expect(row.clarification_ended).toBe(true);

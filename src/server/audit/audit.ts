@@ -1,3 +1,4 @@
+import { withTxLock } from '@/server/db/locks';
 import { type DbClient, withTransaction } from '@/server/db/pool';
 import type { AuditAction } from './actions';
 import { type AuditHashPayload, computeHash, redactDetails } from './hash';
@@ -17,8 +18,8 @@ export interface AuditInput {
   correlationId?: string | null;
 }
 
-// Arbitrary but fixed key; every chain writer takes this transaction-scoped lock so chain-head reads are serialised.
-const CHAIN_LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtext('audit_chain'))";
+// Every chain writer takes this transaction-scoped lock so chain-head reads are serialised.
+const CHAIN_LOCK = 'audit_chain';
 
 // Appends one Audit Record. When `client` is given it must already be inside a transaction (the caller's);
 // the record then commits or rolls back with it. Otherwise a transaction of its own is used.
@@ -42,7 +43,7 @@ async function append(client: DbClient, input: AuditInput): Promise<{ id: string
     correlationId: input.correlationId ?? null,
   };
 
-  await client.query(CHAIN_LOCK_SQL);
+  await withTxLock(client, CHAIN_LOCK);
   const head = await client.query<{ hash: Buffer }>('SELECT hash FROM audit_record ORDER BY id DESC LIMIT 1');
   const prevHash = head.rows[0]?.hash ?? null;
   const hash = computeHash(prevHash ? prevHash.toString('hex') : '', payload);
@@ -50,7 +51,7 @@ async function append(client: DbClient, input: AuditInput): Promise<{ id: string
   const inserted = await client.query<{ id: string }>(
     `INSERT INTO audit_record
        (ts, user_id, user_display_name, session_id, ticket_ids, action, result, details, correlation_id, prev_hash, hash)
-     VALUES ($1::timestamptz, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     VALUES (?::timestamptz, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      RETURNING id`,
     [
       payload.ts,

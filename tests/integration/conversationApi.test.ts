@@ -40,13 +40,13 @@ async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
 }
 
 async function seedUser(user: { accountId: string; displayName: string }): Promise<void> {
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     user.accountId,
     user.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
@@ -62,9 +62,10 @@ interface TestSession {
 
 async function createLockedSession(): Promise<TestSession> {
   keySeq++;
+  const key = `CNV-${keySeq}`;
   const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id) VALUES ($1, ARRAY[$1], $2) RETURNING id',
-    [`CNV-${keySeq}`, ALICE.accountId],
+    'INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id) VALUES (?, ARRAY[?], ?) RETURNING id',
+    [key, key, ALICE.accountId],
   );
   const id = rows[0].id;
   await initWorkingCopy(id);
@@ -278,7 +279,7 @@ describe('POST /messages (SSE)', () => {
     const messages = await history(s);
     expect(messages.map((m) => m.content)).toContain('Abort me');
     const audits = await query<{ result: string }>(
-      "SELECT result FROM audit_record WHERE session_id = $1 AND action = 'ai.suggestion' ORDER BY id",
+      "SELECT result FROM audit_record WHERE session_id = ? AND action = 'ai.suggestion' ORDER BY id",
       [s.id],
     );
     expect(audits[0].result).toBe('failure');
@@ -361,7 +362,7 @@ describe('POST /notes', () => {
 describe('questions', () => {
   async function insertQuestion(s: TestSession, text: string): Promise<string> {
     const [row] = await query<{ id: string }>(
-      "INSERT INTO ai_question (session_id, section, text, status) VALUES ($1, 'Security', $2, 'open') RETURNING id",
+      "INSERT INTO ai_question (session_id, section, text, status) VALUES (?, 'Security', ?, 'open') RETURNING id",
       [s.id, text],
     );
     return row.id;
@@ -383,13 +384,13 @@ describe('questions', () => {
     expect(await res.json()).toEqual({ id: qid, status: 'dismissed', dismissReason: 'Out of scope' });
 
     const [row] = await query<{ status: string; dismiss_reason: string }>(
-      'SELECT status, dismiss_reason FROM ai_question WHERE id = $1',
+      'SELECT status, dismiss_reason FROM ai_question WHERE id = ?',
       [qid],
     );
     expect(row).toEqual({ status: 'dismissed', dismiss_reason: 'Out of scope' });
 
     const audits = await query<{ user_id: string; details: Record<string, unknown>; correlation_id: string }>(
-      "SELECT user_id, details, correlation_id FROM audit_record WHERE session_id = $1 AND action = 'question.dismissed'",
+      "SELECT user_id, details, correlation_id FROM audit_record WHERE session_id = ? AND action = 'question.dismissed'",
       [s.id],
     );
     expect(audits).toHaveLength(1);

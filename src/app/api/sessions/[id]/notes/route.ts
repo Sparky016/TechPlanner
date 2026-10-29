@@ -28,12 +28,12 @@ export const POST = withApiHandler<{ id: string }>({}, async (ctx) => {
 
   const row = await withTransaction(async (client) => {
     // Serialises concurrent writers for this session while seq is computed (same pattern as the facilitator turn).
-    await client.query('SELECT 1 FROM planning_session WHERE id = $1 FOR UPDATE', [session.id]);
+    await client.query('SELECT 1 FROM planning_session WHERE id = ? FOR UPDATE', [session.id]);
     const { rows } = await client.query<{ seq: number; created_at: Date }>(
       `INSERT INTO conversation_message (session_id, seq, role, content)
-       VALUES ($1, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = $1), 'note', $2)
+       VALUES (?, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = ?), 'note', ?)
        RETURNING seq, created_at`,
-      [session.id, text],
+      [session.id, session.id, text],
     );
     return rows[0];
   });

@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export const POST = withApiHandler<{ id: string }>({}, async (ctx) => {
   const session = await requireSessionAccess(ctx, ctx.params.id);
   await requireLock(session.id, readTabId(ctx.req));
-  await query('UPDATE planning_session SET clarification_ended = true, updated_at = now() WHERE id = $1', [
+  await query('UPDATE planning_session SET clarification_ended = true, updated_at = now() WHERE id = ?', [
     session.id,
   ]);
   return Response.json({ clarificationEnded: true }, { headers: { 'Cache-Control': 'no-store' } });

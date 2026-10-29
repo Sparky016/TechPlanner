@@ -1,5 +1,6 @@
 import { recordAudit } from '@/server/audit/audit';
 import { decryptSecret, encryptSecret } from '@/server/crypto/secrets';
+import { withTxLock } from '@/server/db/locks';
 import { type DbClient, query, withTransaction } from '@/server/db/pool';
 import { logger } from '@/server/observability/logger';
 import { getCorrelationId } from '@/server/observability/context';
@@ -27,14 +28,14 @@ interface TokenRow {
 }
 
 const SELECT_TOKEN = `SELECT enc_access_token, enc_refresh_token,
-                             expires_at > now() + make_interval(secs => $2) AS fresh
-                        FROM oauth_token WHERE user_id = $1`;
+                             expires_at > now() + make_interval(secs => ?) AS fresh
+                        FROM oauth_token WHERE user_id = ?`;
 
 // Inserts or replaces the user's tokens inside the caller's transaction.
 export async function storeTokens(client: DbClient, userId: string, tokens: TokenSet): Promise<void> {
   await client.query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes, updated_at)
-     VALUES ($1, $2, $3, now() + make_interval(secs => $4), $5, now())
+     VALUES (?, ?, ?, now() + make_interval(secs => ?), ?, now())
      ON CONFLICT (user_id) DO UPDATE
        SET enc_access_token = EXCLUDED.enc_access_token,
            enc_refresh_token = EXCLUDED.enc_refresh_token,
@@ -57,14 +58,14 @@ export async function storeTokens(client: DbClient, userId: string, tokens: Toke
 // Concurrent refreshes for one user are serialised; Atlassian rotates refresh tokens, so only one may win.
 export async function getValidAccessToken(userId: string, opts: { force?: boolean } = {}): Promise<string> {
   const force = opts.force === true;
-  const [row] = await query<TokenRow>(SELECT_TOKEN, [userId, REFRESH_MARGIN_SECONDS]);
+  const [row] = await query<TokenRow>(SELECT_TOKEN, [REFRESH_MARGIN_SECONDS, userId]);
   if (!row) throw new ReauthRequiredError();
   if (row.fresh && !force) return decryptSecret(row.enc_access_token);
 
   // The failure path must commit (row deleted, audit written) before the error is thrown.
   const outcome = await withTransaction(async (client): Promise<{ token: string } | { reauth: true }> => {
-    await client.query("SELECT pg_advisory_xact_lock(hashtext('refresh:' || $1))", [userId]);
-    const reread = await client.query<TokenRow>(`${SELECT_TOKEN} FOR UPDATE`, [userId, REFRESH_MARGIN_SECONDS]);
+    await withTxLock(client, `refresh:${userId}`);
+    const reread = await client.query<TokenRow>(`${SELECT_TOKEN} FOR UPDATE`, [REFRESH_MARGIN_SECONDS, userId]);
     const current = reread.rows[0];
     if (!current) return { reauth: true };
     // Another caller refreshed while we waited for the lock.
@@ -84,7 +85,7 @@ export async function getValidAccessToken(userId: string, opts: { force?: boolea
     }
 
     if (!refreshed) {
-      await client.query('DELETE FROM oauth_token WHERE user_id = $1', [userId]);
+      await client.query('DELETE FROM oauth_token WHERE user_id = ?', [userId]);
       await recordAudit(
         {
           action: 'auth.refresh_failed',

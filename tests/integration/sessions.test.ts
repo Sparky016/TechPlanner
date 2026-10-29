@@ -115,13 +115,13 @@ async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
 }
 
 async function seedUser(user: { accountId: string; displayName: string }): Promise<void> {
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     user.accountId,
     user.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
@@ -170,7 +170,7 @@ async function createOk(cookie: string, ticketKeys: string[], confirmDuplicate?:
 
 async function snapshots(sessionId: string) {
   return query<{ kind: string; ref: string; ingest_status: string; detail: Record<string, unknown> }>(
-    'SELECT kind, ref, ingest_status, detail FROM source_snapshot WHERE session_id = $1 ORDER BY id',
+    'SELECT kind, ref, ingest_status, detail FROM source_snapshot WHERE session_id = ? ORDER BY id',
     [sessionId],
   );
 }
@@ -219,7 +219,7 @@ describe('POST /api/sessions', () => {
     expect(session.ticketKeys).toEqual(['ABC-1', 'ABC-2']);
 
     const [row] = await query<{ facilitator_id: string; status: string }>(
-      'SELECT facilitator_id, status FROM planning_session WHERE id = $1',
+      'SELECT facilitator_id, status FROM planning_session WHERE id = ?',
       [session.id],
     );
     expect(row).toEqual({ facilitator_id: ALICE.accountId, status: 'draft' });
@@ -231,13 +231,13 @@ describe('POST /api/sessions', () => {
       ['attachment', '900', 'ingested'],
     ]);
     const [issueText] = await query<{ content_text: string }>(
-      "SELECT content_text FROM source_snapshot WHERE session_id = $1 AND ref = 'ABC-1'",
+      "SELECT content_text FROM source_snapshot WHERE session_id = ? AND ref = 'ABC-1'",
       [session.id],
     );
     expect(issueText.content_text).toContain('Build the thing');
 
     const [wc] = await query<{ sections: Record<string, { body: string }>; version: number }>(
-      'SELECT sections, version FROM working_copy WHERE session_id = $1',
+      'SELECT sections, version FROM working_copy WHERE session_id = ?',
       [session.id],
     );
     expect(Object.keys(wc.sections)).toHaveLength(SECTION_NAMES.length);
@@ -246,7 +246,7 @@ describe('POST /api/sessions', () => {
     expect(wc.version).toBe(0);
 
     const audits = await query<{ user_id: string; ticket_ids: string[]; result: string }>(
-      "SELECT user_id, ticket_ids, result FROM audit_record WHERE action = 'draft.created' AND session_id = $1",
+      "SELECT user_id, ticket_ids, result FROM audit_record WHERE action = 'draft.created' AND session_id = ?",
       [session.id],
     );
     expect(audits).toEqual([{ user_id: ALICE.accountId, ticket_ids: ['ABC-1', 'ABC-2'], result: 'success' }]);
@@ -400,7 +400,7 @@ describe('POST /api/sessions/:id/refresh-sources', () => {
     expect(body.messageSeq).toBe(1);
 
     const messages = await query<{ role: string; content: string }>(
-      'SELECT role, content FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+      'SELECT role, content FROM conversation_message WHERE session_id = ? ORDER BY seq',
       [id],
     );
     expect(messages).toHaveLength(1);
@@ -419,7 +419,7 @@ describe('POST /api/sessions/:id/refresh-sources', () => {
       routeArg(id),
     );
     expect(((await unchanged.json()) as { messageSeq: number | null }).messageSeq).toBeNull();
-    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = $1', [id])).toHaveLength(1);
+    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = ?', [id])).toHaveLength(1);
   });
 
   it('reports added and removed sources', async () => {
@@ -437,7 +437,7 @@ describe('POST /api/sessions/:id/refresh-sources', () => {
     );
     const body = (await res.json()) as { added: { ref: string }[]; removed: unknown[] };
     expect(body.added.map((a) => a.ref)).toEqual(['333']);
-    const [msg] = await query<{ content: string }>('SELECT content FROM conversation_message WHERE session_id = $1', [
+    const [msg] = await query<{ content: string }>('SELECT content FROM conversation_message WHERE session_id = ?', [
       id,
     ]);
     expect(msg.content).toContain('Added sources:');
@@ -562,7 +562,7 @@ describe('Azure DevOps code repository (ADR-0016)', () => {
     const cleared = await setRepository(id, tab, null);
     expect(await cleared.json()).toEqual({ codeRepository: null });
     const [row] = await query<{ code_repository: string | null }>(
-      'SELECT code_repository FROM planning_session WHERE id = $1',
+      'SELECT code_repository FROM planning_session WHERE id = ?',
       [id],
     );
     expect(row.code_repository).toBeNull();

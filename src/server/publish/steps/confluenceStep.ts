@@ -121,7 +121,7 @@ function stringOf(value: unknown): string | null {
 
 async function loadStoredPage(sessionId: string): Promise<SessionPageRow> {
   const rows = await query<SessionPageRow>(
-    'SELECT confluence_page_id, confluence_page_version FROM planning_session WHERE id = $1',
+    'SELECT confluence_page_id, confluence_page_version FROM planning_session WHERE id = ?',
     [sessionId],
   );
   return rows[0] ?? { confluence_page_id: null, confluence_page_version: null };
@@ -194,9 +194,9 @@ async function persist(ctx: PublishContext, operation: string, page: RawPage, ve
   await withTransaction(async (client) => {
     await client.query(
       `UPDATE planning_session
-          SET confluence_page_id = $2, confluence_page_version = $3, updated_at = now()
-        WHERE id = $1`,
-      [ctx.sessionId, page.id, version],
+          SET confluence_page_id = ?, confluence_page_version = ?, updated_at = now()
+        WHERE id = ?`,
+      [page.id, version, ctx.sessionId],
     );
     await recordAudit(
       {

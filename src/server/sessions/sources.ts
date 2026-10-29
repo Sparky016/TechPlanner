@@ -263,7 +263,7 @@ export async function insertSnapshots(
   for (const s of snapshots) {
     await client.query(
       `INSERT INTO source_snapshot (session_id, kind, ref, title, content_text, ingest_status, detail, retrieved_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [sessionId, s.kind, s.ref, s.title, s.contentText, s.ingestStatus, JSON.stringify(s.detail), retrievedAt],
     );
   }
@@ -287,10 +287,10 @@ export async function loadCurrentSnapshots(sessionId: string): Promise<SourceSna
   const rows = await query<SourceSnapshotRow>(
     `SELECT id, kind, ref, title, content_text, ingest_status, detail, retrieved_at
        FROM source_snapshot
-      WHERE session_id = $1
-        AND retrieved_at = (SELECT max(retrieved_at) FROM source_snapshot WHERE session_id = $1)
+      WHERE session_id = ?
+        AND retrieved_at = (SELECT max(retrieved_at) FROM source_snapshot WHERE session_id = ?)
       ORDER BY id`,
-    [sessionId],
+    [sessionId, sessionId],
   );
   return rows.map(mapSnapshotRow);
 }

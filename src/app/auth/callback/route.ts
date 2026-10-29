@@ -98,7 +98,7 @@ export async function GET(request: Request): Promise<Response> {
   const sessionValue = await withTransaction(async (client) => {
     await client.query(
       `INSERT INTO app_user (atlassian_account_id, display_name, email)
-       VALUES ($1, $2, $3)
+       VALUES (?, ?, ?)
        ON CONFLICT (atlassian_account_id) DO UPDATE
          SET display_name = EXCLUDED.display_name, email = EXCLUDED.email`,
       [profile.accountId, profile.displayName, profile.email],

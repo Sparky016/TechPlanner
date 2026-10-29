@@ -42,7 +42,7 @@ export async function createSession(
   const primary = keys[0];
   if (!options.confirmDuplicate) {
     const existing = await query<{ id: string }>(
-      'SELECT id FROM planning_session WHERE primary_ticket_key = $1 ORDER BY created_at, id',
+      'SELECT id FROM planning_session WHERE primary_ticket_key = ? ORDER BY created_at, id',
       [primary],
     );
     if (existing.length > 0) return { kind: 'duplicate', existingSessionIds: existing.map((r) => r.id) };
@@ -54,7 +54,7 @@ export async function createSession(
   const session = await withTransaction(async (client) => {
     const inserted = await client.query<PlanningSessionDbRow>(
       `INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id, code_repository)
-       VALUES ($1, $2, $3, $4)
+       VALUES (?, ?, ?, ?)
        RETURNING *`,
       [primary, keys, user.accountId, options.codeRepository ?? null],
     );

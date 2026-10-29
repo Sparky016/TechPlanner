@@ -26,18 +26,18 @@ test('AC-2: creating a session with ABC-123 shows its description, comments, att
 
   // The description and comments are snapshotted into the session as AI context (the UI lists sources by title).
   const [issue] = await sql<{ content_text: string }>(
-    "SELECT content_text FROM source_snapshot WHERE session_id = $1 AND kind = 'jira_issue' AND ref = 'ABC-123'",
+    "SELECT content_text FROM source_snapshot WHERE session_id = ? AND kind = 'jira_issue' AND ref = 'ABC-123'",
     [sessionId],
   );
   expect(issue.content_text).toContain('Users can export the report.');
   expect(issue.content_text).toContain('Exports must handle at least 10000 rows.');
   expect(issue.content_text).toContain('CSV must be UTF-8 with a header row.');
   const [page5001] = await sql<{ content_text: string }>(
-    "SELECT content_text FROM source_snapshot WHERE session_id = $1 AND kind = 'confluence_page' AND ref = '5001'",
+    "SELECT content_text FROM source_snapshot WHERE session_id = ? AND kind = 'confluence_page' AND ref = '5001'",
     [sessionId],
   );
   expect(page5001.content_text).toContain('Stream rows to the client to keep memory flat.');
 
-  const created = await sql('SELECT 1 FROM audit_record WHERE action = $1 AND session_id = $2', ['draft.created', sessionId]);
+  const created = await sql('SELECT 1 FROM audit_record WHERE action = ? AND session_id = ?', ['draft.created', sessionId]);
   expect(created).toHaveLength(1);
 });

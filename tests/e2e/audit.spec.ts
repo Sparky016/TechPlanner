@@ -142,10 +142,10 @@ test('AC-10: every SR-12.1 event of an E2E run has an Audit Record with all §14
   }
 
   // Append-only at the database level (SR-12.3).
-  await expect(sql("UPDATE audit_record SET result = 'failure' WHERE id = $1", [rows[0].id])).rejects.toThrow(
+  await expect(sql("UPDATE audit_record SET result = 'failure' WHERE id = ?", [rows[0].id])).rejects.toThrow(
     /append-only/,
   );
-  await expect(sql('DELETE FROM audit_record WHERE id = $1', [rows[0].id])).rejects.toThrow(/append-only/);
+  await expect(sql('DELETE FROM audit_record WHERE id = ?', [rows[0].id])).rejects.toThrow(/append-only/);
 
   // The chain verifier (npm run audit:verify) passes.
   // (A debounced background evaluation may append records after the query above.)

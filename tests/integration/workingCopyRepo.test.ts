@@ -24,7 +24,7 @@ async function createSession(): Promise<string> {
 }
 
 async function suggestionStatus(id: string): Promise<string> {
-  const [row] = await query<{ status: string }>('SELECT status FROM pending_suggestion WHERE id = $1', [id]);
+  const [row] = await query<{ status: string }>('SELECT status FROM pending_suggestion WHERE id = ?', [id]);
   return row.status;
 }
 
@@ -199,7 +199,7 @@ describe('AC5: concurrency', () => {
       if (ai.status !== 'fulfilled') return;
       const wc = await getWorkingCopy(sessionId);
       const suggestions = await query<{ patch: { content: string } }>(
-        'SELECT patch FROM pending_suggestion WHERE session_id = $1',
+        'SELECT patch FROM pending_suggestion WHERE session_id = ?',
         [sessionId],
       );
 

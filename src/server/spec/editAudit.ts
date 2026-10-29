@@ -80,8 +80,8 @@ async function auditUserEdit(
     client,
   );
   await client.query(
-    'UPDATE edit_audit_state SET baseline_body = $3, last_audit_at = $4 WHERE session_id = $1 AND section = $2',
-    [sessionId, section, body, now],
+    'UPDATE edit_audit_state SET baseline_body = ?, last_audit_at = ? WHERE session_id = ? AND section = ?',
+    [body, now, sessionId, section],
   );
 }
 
@@ -101,11 +101,11 @@ export async function recordSectionEdit(
   return withTransaction(async (client) => {
     await client.query(
       `INSERT INTO edit_audit_state (session_id, section, baseline_body, last_audit_at)
-       VALUES ($1, $2, $3, $4) ON CONFLICT (session_id, section) DO NOTHING`,
+       VALUES (?, ?, ?, ?) ON CONFLICT (session_id, section) DO NOTHING`,
       [sessionId, section, previousBody, now],
     );
     const { rows } = await client.query<{ baseline_body: string; last_audit_at: Date }>(
-      'SELECT baseline_body, last_audit_at FROM edit_audit_state WHERE session_id = $1 AND section = $2 FOR UPDATE',
+      'SELECT baseline_body, last_audit_at FROM edit_audit_state WHERE session_id = ? AND section = ? FOR UPDATE',
       [sessionId, section],
     );
     const state = rows[0];
@@ -124,13 +124,13 @@ export async function flushEditAudits(sessionId: string, actor: EditAuditActor):
   const now = new Date();
   return withTransaction(async (client) => {
     const wc = await client.query<{ sections: WorkingCopySections }>(
-      'SELECT sections FROM working_copy WHERE session_id = $1 FOR UPDATE',
+      'SELECT sections FROM working_copy WHERE session_id = ? FOR UPDATE',
       [sessionId],
     );
     if (wc.rows.length === 0) return 0;
     const sections = wc.rows[0].sections;
     const { rows } = await client.query<{ section: string; baseline_body: string }>(
-      'SELECT section, baseline_body FROM edit_audit_state WHERE session_id = $1 ORDER BY section FOR UPDATE',
+      'SELECT section, baseline_body FROM edit_audit_state WHERE session_id = ? ORDER BY section FOR UPDATE',
       [sessionId],
     );
     let written = 0;
@@ -151,10 +151,10 @@ export async function recordDraftUpdated(sessionId: string, version: number, act
   const cutoff = new Date(now.getTime() - DRAFT_UPDATED_WINDOW_MS);
   return withTransaction(async (client) => {
     const { rows } = await client.query(
-      `UPDATE working_copy SET last_draft_updated_audit_at = $2
-        WHERE session_id = $1 AND (last_draft_updated_audit_at IS NULL OR last_draft_updated_audit_at <= $3)
+      `UPDATE working_copy SET last_draft_updated_audit_at = ?
+        WHERE session_id = ? AND (last_draft_updated_audit_at IS NULL OR last_draft_updated_audit_at <= ?)
        RETURNING 1`,
-      [sessionId, now, cutoff],
+      [now, sessionId, cutoff],
     );
     if (rows.length === 0) return false;
     await recordAudit(

@@ -49,7 +49,7 @@ test('AC-9: Save Draft creates a revision; two revisions compare; restoring revi
   await expect(sectionEditor(page, 'Executive Summary')).toHaveText('');
 
   const rows = await sql<{ number: number; trigger: string; sections: Record<string, string> }>(
-    'SELECT number, trigger, sections FROM revision WHERE session_id = $1 ORDER BY number',
+    'SELECT number, trigger, sections FROM revision WHERE session_id = ? ORDER BY number',
     [sessionId],
   );
   expect(rows.map((r) => [r.number, r.trigger])).toEqual([

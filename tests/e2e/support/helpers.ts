@@ -1,6 +1,7 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { execSync } from 'node:child_process';
 import { Pool } from 'pg';
+import { toPgPlaceholders } from '../../../src/server/db/placeholders';
 import { APP_ENV, ATLASSIAN_MOCK_URL, DATABASE_URL, WEBHOOK_URL } from './env';
 
 // Shared spec helpers: database reset, mock control, login and the workspace interactions every spec needs.
@@ -12,12 +13,12 @@ function db(): Pool {
   return pool;
 }
 
-/** Runs SQL against the E2E database (assertions only; the app owns all writes). */
+/** Runs SQL with `?` placeholders against the E2E database (assertions only; the app owns all writes). */
 export async function sql<T extends Record<string, unknown> = Record<string, unknown>>(
   text: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  return (await db().query<T>(text, params)).rows;
+  return (await db().query<T>(toPgPlaceholders(text).text, params)).rows;
 }
 
 /** Runs an npm script against the E2E database with the app's environment; returns its stdout. */
