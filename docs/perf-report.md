@@ -106,7 +106,7 @@ Useful flags: `--iterations`, `--sessions`, `--duration-s`, `--think-ms`, `--aut
 
 ## MySQL 8.4 (2026-10-29)
 
-Task 49 verification gate. Same harness (`npm run perf`, task 41), run after the Postgres to MySQL migration. The app, worker and database all ran on one host with the app's default perf database (`techplanner_perf`) on MySQL 8.4 at 127.0.0.1:3306, no Docker.
+Task 49 verification gate. Same harness (`npm run perf`, task 41), run after the Postgres to MySQL migration. The app, worker and database all ran on one host with the app's default perf database (`techplanner_perf`) on MySQL 8.4 at 127.0.0.1:3306. The verification sandbox could not install MySQL 8.4 natively (no package source reachable), so the server was the official `mysql:8.4` image on the host network standing in for a native install; the app, worker and harness ran natively.
 
 **Real-LLM NFR-1 (first token) and NFR-2 (evaluation) were not measured.** No `COPILOT_GITHUB_TOKEN` is available, so `npm run perf -- --real-llm` was not run. Every MySQL figure below uses `LLM_FAKE=1` (scripted fake LLM), so it measures app overhead only.
 
@@ -119,7 +119,7 @@ Task 49 verification gate. Same harness (`npm run perf`, task 41), run after the
 | Memory | 16 GB |
 | Node | v22.22.0 |
 | App | production build (`next build`), `next start`, worker via tsx, all on one host |
-| Database | MySQL 8.4 at 127.0.0.1:3306, database `techplanner_perf`, app user `techplanner_app` |
+| Database | MySQL 8.4.13 (`mysql:8.4` container, host network) at 127.0.0.1:3306, database `techplanner_perf`, app user `techplanner_app` |
 | Upstream | Atlassian mock (zero upstream latency) |
 | LLM | `FakeLlmClient`, E2E scenario file |
 | Date | 2026-10-29 |

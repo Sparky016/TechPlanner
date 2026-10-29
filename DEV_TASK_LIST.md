@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-29 12:00
+updated: 2026-10-29 18:30
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -67,7 +67,7 @@ Phases:
 | 46 | 7 | [MySQL 8.4 cutover: mysql2 driver, MySQL migrations, dialect SQL, per-table grants, test harness and dev setup](DEV_TASK_46.yml) | critical | critical | opus / high | 44, 45 | DONE | 30b290d..eb2d287 |
 | 47 | 7 | [MySQL integrity and concurrency hardening: audit hash round-trip, gap-lock review, deadlock retry, pool sizing](DEV_TASK_47.yml) | high | high | opus / medium | 46 | DONE | 6467953..b94a5e2 |
 | 48 | 7 | [Production on the hosting server: native MySQL setup, compose wiring, server config, backups and runbook](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46 | DONE | becd1f6, see log |
-| 49 | 7 | [MySQL migration verification gate: full suites, perf targets, audit verify, residue checks](DEV_TASK_49.yml) | high | low | haiku / low | 47, 48 | PENDING | |
+| 49 | 7 | [MySQL migration verification gate: full suites, perf targets, audit verify, residue checks](DEV_TASK_49.yml) | high | low | haiku / low | 47, 48 | DONE | d1bd2a6 |
 
 ## Execution notes
 
@@ -308,3 +308,5 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 17:10 | 47 | worker complete @ 6467953..b94a5e2 (unit 349, integration 164, concurrency 20/20; MySQL JSON misparses ~12% of 16-17-digit doubles → assertStorableDetails rejects non-round-tripping numbers; opt-in deadlock retry on evaluate/recordSectionEdit/flushEditAudits; DB_POOL_SIZE + DB_POOL_ACQUIRE_TIMEOUT_MS → 503 db_pool_exhausted; db_pool_wait_seconds) → eval dispatched (sonnet/medium)
 2026-10-29 17:40 | 47 | eval PASS → DONE @ 6467953..b94a5e2 (all ~25 recordAudit callers pass integers/strings only; 60k-value fuzz: no accepted number fails round-trip; concurrency 20/20; integration 164 x2); orchestrator: DB_POOL_* added to prod compose + runbook
 2026-10-29 17:40 | 49 | verification gate dispatched (haiku/low)
+2026-10-29 18:30 | 49 | gate PASS → DONE @ d1bd2a6 (clean clone: lint, typecheck, build, unit 349; integration 164; e2e 13/14 — only the pre-existing clarification.spec UI failure; audit:verify OK; perf: app overhead within ADR-0007, NFR-5 run A now 0 errors (Postgres 79.5%); residue greps clean; spec Implemented). Perf run B fake-latency not applied — not comparable. Orchestrator: perf report corrected to state the sandbox MySQL was a container stand-in.
+2026-10-29 18:30 | run | PHASE 7 DONE (43-49). Open: clarification.spec UI bug (pre-existing); real-LLM NFR-1/2 unmeasured; native MySQL APT install, ufw, systemd drop-in, cron and bind-address on a real hosting server unverified (sandbox only).
