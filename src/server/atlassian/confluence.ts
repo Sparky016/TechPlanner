@@ -1,4 +1,4 @@
-import { AtlassianApiError, atlassianJson } from './client';
+import { AtlassianApiError, atlassianJson, settleAll } from './client';
 import { getSiteUrl, type JiraIssueSnapshot } from './jira';
 import { storageToMarkdown } from './storageToMarkdown';
 
@@ -81,7 +81,7 @@ export async function getPageMarkdown(userId: string, pageId: string): Promise<C
   if (!PAGE_ID_PATTERN.test(pageId)) {
     throw new AtlassianApiError(400, 'confluence', 'invalid_page_id', 'Invalid Confluence page id');
   }
-  const [siteUrl, page] = await Promise.all([
+  const [siteUrl, page] = await settleAll([
     getSiteUrl(userId),
     atlassianJson<RawPage>(userId, 'confluence', `/wiki/api/v2/pages/${pageId}?body-format=storage`),
   ]);

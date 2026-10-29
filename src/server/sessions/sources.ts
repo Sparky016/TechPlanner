@@ -1,4 +1,4 @@
-import { AtlassianApiError } from '@/server/atlassian/client';
+import { AtlassianApiError, settleAll } from '@/server/atlassian/client';
 import { discoverConfluencePageRefs, getPageMarkdown } from '@/server/atlassian/confluence';
 import { getIssueSnapshot, type JiraIssueSnapshot } from '@/server/atlassian/jira';
 import { getConfig } from '@/server/config';
@@ -44,6 +44,8 @@ interface SourceSnapshotRow {
 const FETCH_CONCURRENCY = 5;
 
 // Runs `fn` over `items` with at most `limit` calls in flight; results keep input order.
+// After a call rejects no new calls start, and the rejection is thrown only once in-flight calls have settled,
+// so no Atlassian request outlives the caller.
 export async function mapWithConcurrency<T, R>(
   items: readonly T[],
   limit: number,
@@ -51,13 +53,19 @@ export async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
+  let failed = false;
   const worker = async (): Promise<void> => {
-    while (next < items.length) {
+    while (!failed && next < items.length) {
       const index = next++;
-      results[index] = await fn(items[index]);
+      try {
+        results[index] = await fn(items[index]);
+      } catch (err) {
+        failed = true;
+        throw err;
+      }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  await settleAll(Array.from({ length: Math.min(limit, items.length) }, worker));
   return results;
 }
 

@@ -180,6 +180,39 @@ describe('getIssueSnapshot', () => {
     expect(lookups).toHaveLength(1);
   });
 
+  it('does not settle on a failed request until the other requests have settled', async () => {
+    mockJira(0);
+    const answered = fetchMock.getMockImplementation()!;
+    let releaseRemoteLinks!: () => void;
+    const remoteLinksHeld = new Promise<void>((resolve) => {
+      releaseRemoteLinks = resolve;
+    });
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/remotelink')) {
+        await remoteLinksHeld;
+        return json(remoteLinks);
+      }
+      if (url.pathname.endsWith('/issue/ABC-123')) return json({ errorMessages: ['Issue does not exist'] }, 404);
+      return answered(input, init);
+    });
+
+    let settled = false;
+    const result = getIssueSnapshot('user-1', 'ABC-123').finally(() => {
+      settled = true;
+    });
+    result.catch(() => undefined);
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/remotelink'))).toBe(true);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+
+    releaseRemoteLinks();
+    await expect(result).rejects.toMatchObject({ status: 404 });
+    expect(settled).toBe(true);
+  });
+
   it('rejects an invalid key without calling Atlassian', async () => {
     await expect(getIssueSnapshot('user-1', 'abc-1')).rejects.toBeInstanceOf(AtlassianApiError);
     expect(fetchMock).not.toHaveBeenCalled();

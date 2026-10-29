@@ -1,7 +1,7 @@
 import { accessibleResourcesUrl } from '@/server/auth/atlassianOAuth';
 import { getValidAccessToken } from '@/server/auth/tokens';
 import { getConfig } from '@/server/config';
-import { AtlassianApiError, atlassianJson } from './client';
+import { AtlassianApiError, atlassianJson, settleAll } from './client';
 import { adfToText } from './adfToText';
 
 // Server-only: never import from src/lib or client components.
@@ -197,7 +197,7 @@ export async function getIssueSnapshot(userId: string, key: string): Promise<Jir
   if (!isValidIssueKey(key)) {
     throw new AtlassianApiError(400, 'jira', 'invalid_issue_key', 'Invalid Jira issue key');
   }
-  const [siteUrl, issue, comments, remoteLinks] = await Promise.all([
+  const [siteUrl, issue, comments, remoteLinks] = await settleAll([
     getSiteUrl(userId),
     atlassianJson<RawIssue>(userId, 'jira', `/rest/api/3/issue/${key}?fields=${ISSUE_FIELDS}`),
     fetchAllComments(userId, key),
