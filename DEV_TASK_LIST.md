@@ -61,7 +61,7 @@ Phases:
 | 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | DONE | c8195de |
 | 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | DONE | a3b00e2 |
 | 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | DONE | 74e6a0b |
-| 43 | 7 | [ADRs for the MySQL migration (new ADR-0017, amend ADR-0001 and ADR-0013)](DEV_TASK_43.yml) | medium | trivial | haiku / low | — | PENDING | |
+| 43 | 7 | [ADRs for the MySQL migration (new ADR-0017, amend ADR-0001 and ADR-0013)](DEV_TASK_43.yml) | medium | trivial | haiku / low | — | DONE | c5be59e |
 | 44 | 7 | [Dialect-neutral data-access layer on PostgreSQL (DbClient, ? placeholders, no RETURNING, lock and error helpers)](DEV_TASK_44.yml) | critical | high | opus / high | 43 | PENDING | |
 | 45 | 7 | [Replace pg-boss with an in-house SQL job queue (on PostgreSQL first)](DEV_TASK_45.yml) | high | high | opus / medium | 44 | PENDING | |
 | 46 | 7 | [MySQL 8.4 cutover: mysql2 driver, MySQL migrations, dialect SQL, per-table grants, test harness and dev setup](DEV_TASK_46.yml) | critical | critical | opus / high | 44, 45 | PENDING | |
@@ -289,3 +289,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-06 16:00 | phase 6 | gate: lint, typecheck, unit 308, integration 135, e2e 14, eval --validate-only PASS; build FAIL (ENOENT .next/server/pages-manifest.json) traced to stale .next from next dev/perf runs — orchestrator clean rebuild (rm -rf .next) PASS → gate PASS
 2026-10-06 16:00 | run | ALL 42 TASKS DONE. Open: NFR-5 pool-exhaustion deadlock (follow-up task needed); token-gated 40 AC2/AC4, 41 real-LLM, 38 real-model health check; user's uncommitted ADR 0001/0002/0008/0009 status edits
 2026-10-29 12:00 | phase 7 | planned: tasks 43-49 for MySQL 8.4 migration (docs/specs/mysql-migration.md)
+2026-10-29 09:45 | 43 | worker (haiku/low) complete @ c5be59e → orchestrator eval PASS (AC1; README source cell tidied) → DONE
