@@ -64,7 +64,7 @@ Phases:
 | 43 | 7 | [Guided intake schema: migration 0005, intake state, question lifecycle fields, audit actions](DEV_TASK_43.yml) | high | medium | opus / medium | — | DONE | 12d1b6a |
 | 44 | 7 | [Explicit source ingestion: no ingest at creation, POST /ingest, create-and-ingest](DEV_TASK_44.yml) | high | high | opus / medium | 43 | DONE | 35fffc4..fcc19f1 |
 | 45 | 7 | [Facilitator turn kinds, shared SSE turn helper and analysis turn (POST /analyze)](DEV_TASK_45.yml) | high | high | opus / high | 43 | DONE | d72d83b |
-| 46 | 7 | [Question lifecycle API: answer, resolve, reopen; full question context](DEV_TASK_46.yml) | high | high | opus / medium | 45 | EVAL | f548082 |
+| 46 | 7 | [Question lifecycle API: answer, resolve, reopen; full question context](DEV_TASK_46.yml) | high | high | opus / medium | 45 | DONE | f548082 |
 | 47 | 7 | [Workspace turn runner and intake controls (Ingest, Analyze, ?analyze=1)](DEV_TASK_47.yml) | high | high | opus / medium | 44, 45 | DONE | 09d25b7 |
 | 48 | 7 | [Questions UI: grouped list, Answer, Resolve, Edit answer, Reopen](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46, 47 | DONE | 3c3e655 |
 | 49 | 7 | [Discuss with AI: collapsible overview conversation](DEV_TASK_49.yml) | medium | medium | sonnet / medium | 47 | DONE | bb1b80d |
@@ -315,3 +315,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 12:1x | 49 | eval PASS → DONE @ bb1b80d (Conversation+SessionHeader 23, unit 385; layout fix judged sound; follow-up: E2E must open the Discuss with AI toggle once questions exist)
 2026-10-29 12:1x | 48 | eval PASS → DONE @ 3c3e655 (QuestionsList 9, unit 381; no role=status clash with publish-panel E2E queries; follow-up: focus not moved after Resolve/Reopen regroups an item)
 2026-10-29 12:2x | 51 | worker dispatched (sonnet/medium) with extras: create-time ingestError shown in workspace (GI-26), runbook ANALYSIS_MAX_QUESTIONS, fix flaky SpecEditor.test.tsx and sessions.test.ts:302 at root, eval --mode analysis plumbing
+2026-10-29 12:3x | 46 | eval PASS → DONE @ f548082 (questionsApi 8, conversationApi 11, unit 375, integration 166; follow-ups: resolve reason stored untrimmed; runner does not re-check answered status at turn start — harmless)
