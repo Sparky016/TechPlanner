@@ -63,7 +63,7 @@ Phases:
 | 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | DONE | 74e6a0b |
 | 43 | 7 | [Guided intake schema: migration 0005, intake state, question lifecycle fields, audit actions](DEV_TASK_43.yml) | high | medium | opus / medium | — | DONE | 12d1b6a |
 | 44 | 7 | [Explicit source ingestion: no ingest at creation, POST /ingest, create-and-ingest](DEV_TASK_44.yml) | high | high | opus / medium | 43 | DONE | 35fffc4..fcc19f1 |
-| 45 | 7 | [Facilitator turn kinds, shared SSE turn helper and analysis turn (POST /analyze)](DEV_TASK_45.yml) | high | high | opus / high | 43 | EVAL | d72d83b |
+| 45 | 7 | [Facilitator turn kinds, shared SSE turn helper and analysis turn (POST /analyze)](DEV_TASK_45.yml) | high | high | opus / high | 43 | DONE | d72d83b |
 | 46 | 7 | [Question lifecycle API: answer, resolve, reopen; full question context](DEV_TASK_46.yml) | high | high | opus / medium | 45 | IN_PROGRESS | |
 | 47 | 7 | [Workspace turn runner and intake controls (Ingest, Analyze, ?analyze=1)](DEV_TASK_47.yml) | high | high | opus / medium | 44, 45 | IN_PROGRESS | |
 | 48 | 7 | [Questions UI: grouped list, Answer, Resolve, Edit answer, Reopen](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46, 47 | PENDING | |
@@ -302,3 +302,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 10:3x | e2e | clean baseline @ 26300f5: 13 passed, 1 failed — clarification AC-13: Notes form label intercepts the conversation Send click once a question is listed (left-panel overlap, pre-existing product bug). Assigned to 49 (layout) / 51 (spec) to fix at root
 2026-10-29 10:4x | 45 | worker complete @ d72d83b (intakeApi 7, conversationApi 11, unit 351, integration 158, eval validate-only ok; turnStreamResponse re-checks intake under the turn lock + prepare hook; e2e message flows now 409 not_ingested until 47/51) → eval dispatched (sonnet/medium, detached worktree)
 2026-10-29 10:4x | 46,47 | workers dispatched in parallel (opus/medium each; server vs client files)
+2026-10-29 11:0x | 45 | eval PASS → DONE @ d72d83b (worktree: intakeApi 7, conversationApi 11, unit 351, integration 158, eval validate-only ok; follow-ups: runbook lacks ANALYSIS_MAX_QUESTIONS (→ 51), retry after failed analysis adds a second notice message)
