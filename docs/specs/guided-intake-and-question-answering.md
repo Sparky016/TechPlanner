@@ -49,6 +49,7 @@ This change makes the session flow explicit and question-driven:
 - Adding or removing tickets after creation.
 - Background/queued ingestion (ingestion stays a synchronous request, like Refresh sources today).
 - Multi-user answering (D-3 unchanged: one editor per session).
+- Answering several questions in one AI turn (GD-9): one answer per turn.
 
 ---
 
@@ -87,7 +88,7 @@ IDs `GI-<n>` (Guided Intake). Each states the SPEC_DOC requirement it amends, if
 
   `GET /api/sessions/:id` returns `ingestedAt`, `analyzedAt` and `intakeState`.
 
-- **GI-2** *(amends SR-2.1, SR-2.6, SR-2.8)* Session creation still validates ticket key format and that every ticket is readable in Jira (`fetchIssues`), and still runs the duplicate check. It **no longer** calls `collectSources` or inserts snapshots. `draft.created` audit details drop `sourceCount`.
+- **GI-2** *(amends SR-2.1, SR-2.6, SR-2.8)* Session creation still validates ticket key format and that every ticket is readable in Jira (`fetchIssues`), and still runs the duplicate check. It **no longer** calls `collectSources` or inserts snapshots, unless the Facilitator chose **Create and ingest** (GI-25). `draft.created` audit details drop `sourceCount`.
 
 ### 5.2 Ingest ticket
 
@@ -147,7 +148,7 @@ IDs `GI-<n>` (Guided Intake). Each states the SPEC_DOC requirement it amends, if
   - from `open` → `resolved`, `resolution = 'not_relevant'`; the UI asks for an optional reason (current dismiss form, button label **Resolve as not relevant**);
   - from `resolved` → `409 question_not_open`.
 
-  Sets `resolved_at`, audits `question.resolved` (details: questionId, section, resolution, reason). Does not call the AI.
+  Sets `resolved_at`, audits `question.resolved` (details: questionId, section, resolution, reason). Does not call the AI: the AI learns of the resolution from the next turn's context (GI-21, GD-7).
   The existing `/dismiss` route stays for one release as an alias for "resolve from open" (expand/contract, §8 Deployment of SPEC_DOC), then is removed.
 - **GI-17** **Reopen** — `POST /api/sessions/:id/questions/:qid/reopen` (lock required): `resolved` → `answered` when `answer_text` is set, else `open`; clears `resolution`, `resolved_at`. Audits `question.reopened`.
 - **GI-18** Questions list layout: groups **Open** (oldest first), **Answered — awaiting resolve**, and **Resolved** (collapsed by default, with count). Each item keeps its section label and links to its issue (existing `issueId`). Header shows counts, e.g. "Questions · 4 open · 2 answered".
@@ -171,11 +172,21 @@ IDs `GI-<n>` (Guided Intake). Each states the SPEC_DOC requirement it amends, if
 
 - **GI-24** After **End clarification** (SR-8.2b): **Answer** still works (the AI incorporates the answer but cannot ask new questions — `ask_question` is not offered, unchanged); **Analyze** still works and runs without `ask_question` (the analysis then only drafts the spec). The prompt's `CLARIFICATION_ENDED_TEXT` applies to all turn kinds.
 
+### 5.7 Create and ingest (New session page)
+
+- **GI-25** The New session page has two submit buttons: **Create session** (primary; creates without ingesting, as GI-2) and **Create and ingest**. The code repository select stays above both, so a repository can still be set first.
+- **GI-26** **Create and ingest** sends `POST /api/sessions` with `ingest: true`. After the creation transaction commits, the server runs the same ingest core as `POST /ingest` (GI-4, GI-5) for the new session. No session lock is needed: the session was just created and no tab holds it yet.
+  - Ingest succeeded → response `{ session, ingested: true }`. The client navigates to `/sessions/:id?analyze=1`.
+  - Ingest failed → the session is still created (source failures never fail creation, as today). Response `{ session, ingested: false, ingestError: { code, message, correlationId } }`. The client navigates to `/sessions/:id`, where **Ingest ticket** is shown with the error.
+- **GI-27** When the workspace opens with `?analyze=1`, it starts the analysis turn (GI-9) once this tab holds the session lock and `intakeState = ingested`, then removes the parameter with `history.replaceState` so a reload does not start it again. `409 already_analyzed` is ignored silently. If the lock is held elsewhere, nothing runs and the parameter is removed.
+
 ---
 
-## 6. UI summary (amends SPEC_DOC §6, Left panel)
+## 6. UI summary (amends SPEC_DOC §6)
 
-Order, top to bottom:
+New session page: ticket keys, code repository, **Create session** and **Create and ingest** (GI-25).
+
+Workspace left panel, top to bottom:
 
 1. **Session header** — tickets, Audit trail link, code repository picker.
 2. **Sources** — before ingest: **Ingest ticket** + **Analyze after ingest**; after: sources list + **Refresh sources**; after ingest without analysis: **Analyze ticket**.
@@ -234,6 +245,7 @@ UPDATE planning_session p
 
 | Method & path | Lock | Body | Response |
 |---|---|---|---|
+| `POST /api/sessions` | — | adds `ingest?: boolean` | adds `ingested: boolean`, `ingestError?` (GI-26) |
 | `POST /api/sessions/:id/ingest` | yes | — | `{ ingestedAt, sources }`; `409 already_ingested` |
 | `POST /api/sessions/:id/analyze` | yes | — | SSE turn; `409 not_ingested` / `already_analyzed` / `turn_in_progress` |
 | `POST /api/sessions/:id/questions/:qid/answer` | yes | `{ text }` | SSE turn; `409 question_resolved` / `not_ingested` / `turn_in_progress`; `413 body_too_large` |
@@ -294,7 +306,7 @@ New actions in `src/server/audit/actions.ts`: `sources.ingested`, `question.answ
 - **Unit** — `ingestSources` first-ingest summary message and counts; turn runner per kind (analysis limit, `analyzed_at` only on success, answer instruction present); prompt snapshot for the three question groups; `mark_question_answered` with `answerSummary` and refusal on resolved questions.
 - **Component** (`vitest` + Testing Library) — `SessionHeader` states (not_ingested / ingested / analyzed, chained checkbox); `QuestionsList` grouping, Answer form, Resolve from open vs answered, Reopen, disabled while `turnInProgress` or `readOnly`; `Conversation` "Answer to:" rendering.
 - **Integration** (`tests/integration`) — creation no longer writes snapshots; `/ingest` then `/analyze` happy path with the fake LLM client; every new `409`; answer persisted when the fake client errors; migration of `dismissed` rows and of existing sessions' timestamps; audit records for each new action.
-- **E2E** (`tests/e2e`) — create session → set repository → Ingest (chained) → questions appear → answer one → spec section updates → resolve it → resolve another as not relevant → Discuss with AI updates a section. Update `clarification.spec.ts` and `a11y.spec.ts` for the new controls.
+- **E2E** (`tests/e2e`) — create session → set repository → Ingest (chained) → questions appear → answer one → spec section updates → resolve it → resolve another as not relevant → Discuss with AI updates a section. Second flow: **Create and ingest** → workspace opens with sources listed and the analysis streaming; reload does not start a second analysis. Update `clarification.spec.ts` and `a11y.spec.ts` for the new controls.
 - **Evals** — `evals/`: the analysis turn on the seeded fixtures asks about each seeded Critical gap (replaces "within its first 2 turns" with "in the analysis turn" for AC-3 of SPEC_DOC §10).
 
 ---
@@ -311,6 +323,7 @@ New actions in `src/server/audit/actions.ts`: `sources.ingested`, `question.answ
 8. **Discuss with AI** can change a section, and its context includes all questions with answers and resolutions.
 9. While any turn is streaming, all Send / Answer / Analyze controls are disabled; a second request from another client returns `409 turn_in_progress`.
 10. Each new action produces its audit record with all §14 fields; existing sessions open in `analyzed` state after the migration, with former dismissed questions shown as Resolved (not relevant).
+11. **Create and ingest** opens the workspace with sources ingested and the analysis running; if ingestion fails, the session exists and shows **Ingest ticket** with the error.
 
 ---
 
@@ -324,14 +337,15 @@ New actions in `src/server/audit/actions.ts`: `sources.ingested`, `question.answ
 | GD-4 | "Dismiss" vs "Resolve". | One terminal state `resolved` with `resolution` (`answered` / `not_relevant`); `dismissed` migrates to `resolved/not_relevant`. Matches the requested wording and lets the AI see why a question closed. | — |
 | GD-5 | Is "Discuss with AI" a new chat or the existing conversation? | The existing conversation, reframed and given full question context. A separate thread would split history the AI replays every turn (LLM-4) and duplicate the turn machinery. | Users want separate threads per topic. |
 | GD-6 | Existing sessions. | Backfilled as ingested and analyzed so nothing re-runs on open. | — |
+| GD-7 | Resolving as not relevant: tell the AI now or later? | **User decision (2026-10-29):** only on the AI's next turn, through the resolved-questions group in its context. No AI turn runs on resolve. | — |
+| GD-8 | Ingest from the New session page. | **User decision (2026-10-29):** yes, as **Create and ingest** (GI-25–GI-27). Ingest runs in the create request; analysis starts in the workspace because it needs the session lock and a streaming view. | — |
+| GD-9 | Answer several questions in one AI turn. | **User decision (2026-10-29):** not needed if it adds complexity. It does (multi-question turn instructions, per-question failure state, a batch form), so it is out of scope. | Facilitators routinely answer many questions back to back. |
 
 ---
 
 ## 13. Open questions
 
-1. Should resolving a question as **not relevant** also tell the AI immediately (a short turn that removes related placeholder text from the spec), or only via the next turn's context (current decision)?
-2. Should **Ingest ticket** be offered on the New session page as well ("Create and ingest"), for Facilitators who do not need to set a repository first?
-3. Should answering several questions in one go (batch answer → one AI turn) be supported? This spec allows one answer per turn.
+None. The three questions from the first draft are settled in GD-7, GD-8 and GD-9.
 
 ---
 
@@ -346,4 +360,5 @@ New actions in `src/server/audit/actions.ts`: `sources.ingested`, `question.answ
 | 5 | Left panel: Ingest/Analyze controls, `turnInProgress` in `WorkspaceProvider`, `streamTurn` client | `SessionHeader.tsx`, `SourcesList.tsx`, `WorkspaceProvider.tsx`, `lib/api/sse.ts` | 2, 3 |
 | 6 | Questions UI: groups, Answer form, Resolve, Edit answer, Reopen | `QuestionsList.tsx` | 4, 5 |
 | 7 | Discuss with AI: collapsible conversation, "Answer to" rendering, reload on `done` | `Conversation.tsx`, `sessions/[id]/page.tsx` | 5 |
-| 8 | Docs: SPEC_DOC §6/§7.2/§7.3/FR-2/FR-3 amendments, README, MANUAL_TEST; e2e, a11y and eval updates | `SPEC_DOC.md`, `README.md`, `MANUAL_TEST.md`, `tests/e2e/*`, `evals/*` | 6, 7 |
+| 8 | **Create and ingest**: `ingest` option on `POST /api/sessions`, second button on the New session page, `?analyze=1` auto-start in the workspace | `api/sessions/route.ts`, `createSession.ts`, `sessions/new/page.tsx`, `SessionHeader.tsx` | 2, 5 |
+| 9 | Docs: SPEC_DOC §6/§7.2/§7.3/FR-2/FR-3 amendments, README, MANUAL_TEST; e2e, a11y and eval updates | `SPEC_DOC.md`, `README.md`, `MANUAL_TEST.md`, `tests/e2e/*`, `evals/*` | 6, 7, 8 |
