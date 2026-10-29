@@ -150,11 +150,12 @@ export async function refreshSources(user: CurrentUser, sessionId: string): Prom
     await client.query('SELECT 1 FROM planning_session WHERE id = ? FOR UPDATE', [session.id]);
     await insertSnapshots(client, session.id, next, retrievedAt);
     if (added.length === 0 && removed.length === 0 && changed.length === 0) return null;
-    const nextSeq = await client.query<{ seq: number }>(
-      'SELECT coalesce(max(seq), 0) + 1 AS seq FROM conversation_message WHERE session_id = ?',
+    const nextSeq = await client.query<{ seq: string }>(
+      'SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM conversation_message WHERE session_id = ?',
       [session.id],
     );
-    const seq = nextSeq.rows[0].seq;
+    // INT + 1 is a BIGINT in MySQL, which the driver returns as a string.
+    const seq = Number(nextSeq.rows[0].seq);
     await client.query("INSERT INTO conversation_message (session_id, seq, role, content) VALUES (?, ?, 'system', ?)", [
       session.id,
       seq,

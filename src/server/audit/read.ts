@@ -45,8 +45,8 @@ export async function listSessionAudit(
     `SELECT id, ts, user_id, user_display_name, session_id, ticket_ids, action, result, details, correlation_id, hash
      FROM audit_record
      WHERE session_id = ?
-       AND (?::bigint IS NULL OR id < ?)
-       AND (?::text IS NULL OR action = ?)
+       AND (? IS NULL OR id < ?)
+       AND (? IS NULL OR action = ?)
      ORDER BY id DESC
      LIMIT ?`,
     [sessionId, cursorId, cursorId, action, action, limit + 1],
@@ -84,7 +84,7 @@ export async function streamSessionAudit(sessionId: string): Promise<ReadableStr
           const rows: AuditRow[] = await query<AuditRow>(
             `SELECT id, ts, user_id, user_display_name, session_id, ticket_ids, action, result, details, correlation_id, hash
              FROM audit_record
-             WHERE session_id = ? AND (?::bigint IS NULL OR id > ?)
+             WHERE session_id = ? AND (? IS NULL OR id > ?)
              ORDER BY id ASC
              LIMIT 500`,
             [sessionId, after, after],

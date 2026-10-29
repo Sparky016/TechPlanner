@@ -2,8 +2,8 @@ import { pathToFileURL } from 'node:url';
 import { computeHash } from '@/server/audit/hash';
 import type { DbPool } from '@/server/db/pool';
 
-// Audit chain verifier (SR-12.6): walks audit_record in id order with a server-side cursor,
-// recomputes every hash and checks every prev_hash link. Reports the first broken record.
+// Audit chain verifier (SR-12.6): walks audit_record in id order in batches (keyset pagination by id) inside one
+// read-only snapshot, recomputes every hash and checks every prev_hash link. Reports the first broken record.
 
 const BATCH_SIZE = 500;
 
@@ -28,13 +28,20 @@ export async function verifyAuditChain(pool: DbPool): Promise<VerifyResult> {
   const client = await pool.connect();
   let discard = false;
   try {
-    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    await client.query('DECLARE audit_cursor NO SCROLL CURSOR FOR SELECT * FROM audit_record ORDER BY id');
+    // Every batch reads the same snapshot, so records committed meanwhile are not half-seen. (Only this transaction:
+    // the session default is READ COMMITTED.)
+    await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+    await client.query('START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY');
     let prevHex = '';
     let count = 0;
+    let lastId = '0';
     for (;;) {
-      const { rows } = await client.query<AuditRow>(`FETCH ${BATCH_SIZE} FROM audit_cursor`);
+      const { rows } = await client.query<AuditRow>('SELECT * FROM audit_record WHERE id > ? ORDER BY id LIMIT ?', [
+        lastId,
+        BATCH_SIZE,
+      ]);
       if (rows.length === 0) break;
+      lastId = rows[rows.length - 1].id;
       for (const row of rows) {
         const storedPrevHex = row.prev_hash ? row.prev_hash.toString('hex') : '';
         const recomputed = computeHash(prevHex, {

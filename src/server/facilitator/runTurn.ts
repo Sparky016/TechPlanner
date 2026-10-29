@@ -29,11 +29,12 @@ type Role = 'facilitator' | 'ai';
 async function insertMessage(client: DbClient, sessionId: string, role: Role, content: string): Promise<number> {
   // Serialises concurrent writers for this session while seq is computed (same pattern as refreshSources).
   await client.query('SELECT 1 FROM planning_session WHERE id = ? FOR UPDATE', [sessionId]);
-  const { rows } = await client.query<{ seq: number }>(
-    'SELECT coalesce(max(seq), 0) + 1 AS seq FROM conversation_message WHERE session_id = ?',
+  const { rows } = await client.query<{ seq: string }>(
+    'SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM conversation_message WHERE session_id = ?',
     [sessionId],
   );
-  const seq = rows[0].seq;
+  // INT + 1 is a BIGINT in MySQL, which the driver returns as a string.
+  const seq = Number(rows[0].seq);
   await client.query('INSERT INTO conversation_message (session_id, seq, role, content) VALUES (?, ?, ?, ?)', [
     sessionId,
     seq,

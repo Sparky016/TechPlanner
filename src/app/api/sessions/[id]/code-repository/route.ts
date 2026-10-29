@@ -17,7 +17,7 @@ export const PUT = withApiHandler<{ id: string }>({}, async (ctx) => {
   await requireLock(session.id, readTabId(ctx.req));
   const { repository } = body.parse(await ctx.req.json().catch(() => null));
   const codeRepository = await resolveCodeRepository(repository);
-  await query('UPDATE planning_session SET code_repository = ?, updated_at = now() WHERE id = ?', [
+  await query('UPDATE planning_session SET code_repository = ?, updated_at = NOW(6) WHERE id = ?', [
     codeRepository,
     session.id,
   ]);

@@ -57,7 +57,7 @@ export async function createSession(
     await client.query(
       `INSERT INTO planning_session (id, primary_ticket_key, ticket_keys, facilitator_id, code_repository)
        VALUES (?, ?, ?, ?, ?)`,
-      [id, primary, keys, user.accountId, options.codeRepository ?? null],
+      [id, primary, JSON.stringify(keys), user.accountId, options.codeRepository ?? null],
     );
     const inserted = await client.query<PlanningSessionDbRow>('SELECT * FROM planning_session WHERE id = ?', [id]);
     const row = mapSessionRow(inserted.rows[0]);

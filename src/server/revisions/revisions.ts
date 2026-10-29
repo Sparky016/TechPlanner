@@ -68,13 +68,14 @@ export async function createRevision(client: DbClient, input: CreateRevisionInpu
     'SELECT score FROM evaluation WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT 1',
     [input.sessionId],
   );
-  const next = await client.query<{ number: number }>(
-    'SELECT coalesce(max(number), 0) + 1 AS number FROM revision WHERE session_id = ?',
+  const next = await client.query<{ number: string }>(
+    'SELECT COALESCE(MAX(number), 0) + 1 AS number FROM revision WHERE session_id = ?',
     [input.sessionId],
   );
-  const number = next.rows[0].number;
+  // INT + 1 is a BIGINT in MySQL, which the driver returns as a string.
+  const number = Number(next.rows[0].number);
   await client.query(
-    `INSERT INTO revision (session_id, number, sections, trigger, readiness_score, published, author_id, restored_from)
+    `INSERT INTO revision (session_id, number, sections, \`trigger\`, readiness_score, published, author_id, restored_from)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.sessionId,
@@ -102,7 +103,7 @@ type RevisionRow = {
   created_at: Date;
 };
 
-const REVISION_SELECT = `SELECT r.number, r.sections, r.trigger, r.readiness_score, r.published, r.author_id,
+const REVISION_SELECT = `SELECT r.number, r.sections, r.\`trigger\`, r.readiness_score, r.published, r.author_id,
        u.display_name AS author_name, r.restored_from, r.created_at
   FROM revision r LEFT JOIN app_user u ON u.atlassian_account_id = r.author_id`;
 

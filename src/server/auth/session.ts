@@ -63,7 +63,7 @@ export async function createSession(client: DbClient, userId: string): Promise<s
   const value = randomBytes(32).toString('base64url');
   await client.query(
     `INSERT INTO app_session (id_hash, user_id, expires_at)
-     VALUES (?, ?, now() + make_interval(hours => ?))`,
+     VALUES (?, ?, NOW(6) + INTERVAL ? HOUR)`,
     [hashSessionId(value), userId, IDLE_HOURS],
   );
   return value;
@@ -78,10 +78,10 @@ export async function getCurrentUser(request: Request): Promise<CurrentUser | nu
   // check: a session that was not slid (expired or deleted meanwhile) yields no row.
   await query(
     `UPDATE app_session
-        SET last_seen_at = now(),
-            expires_at = LEAST(created_at + make_interval(days => ?), now() + make_interval(hours => ?))
+        SET last_seen_at = NOW(6),
+            expires_at = LEAST(created_at + INTERVAL ? DAY, NOW(6) + INTERVAL ? HOUR)
       WHERE id_hash = ?
-        AND expires_at > now()
+        AND expires_at > NOW(6)
         AND user_id IS NOT NULL`,
     [ABSOLUTE_DAYS, IDLE_HOURS, idHash],
   );
@@ -89,7 +89,7 @@ export async function getCurrentUser(request: Request): Promise<CurrentUser | nu
     `SELECT u.atlassian_account_id AS account_id, u.display_name
        FROM app_session s JOIN app_user u ON u.atlassian_account_id = s.user_id
       WHERE s.id_hash = ?
-        AND s.expires_at > now()`,
+        AND s.expires_at > NOW(6)`,
     [idHash],
   );
   const row = rows[0];

@@ -221,7 +221,7 @@ async function enqueueRun(runId: string, options: { confluenceAction?: Confluenc
   try {
     await enqueue(JOB_NAMES.publishRun, { runId, ...(options.confluenceAction ? { options } : {}) });
   } catch (err) {
-    await query("UPDATE publish_run SET status = 'failed', updated_at = now() WHERE id = ?", [runId]);
+    await query("UPDATE publish_run SET status = 'failed', updated_at = NOW(6) WHERE id = ?", [runId]);
     throw err;
   }
 }
@@ -243,7 +243,7 @@ export async function retryRun(
     );
     if (!rows[0] || rows[0].session_id !== sessionId) return { kind: 'not_found' };
     if (rows[0].status !== 'failed') return { kind: 'not_retryable' };
-    await client.query("UPDATE publish_run SET status = 'running', updated_at = now() WHERE id = ?", [runId]);
+    await client.query("UPDATE publish_run SET status = 'running', updated_at = NOW(6) WHERE id = ?", [runId]);
     return { kind: 'retried', runId };
   });
   if (outcome.kind === 'retried') await enqueueRun(runId, options);
@@ -325,7 +325,7 @@ async function buildContext(run: RunRow, options: { confluenceAction?: Confluenc
 }
 
 async function persistSteps(runId: string, steps: StepState[]): Promise<void> {
-  await query('UPDATE publish_run SET steps = ?, updated_at = now() WHERE id = ?', [JSON.stringify(steps), runId]);
+  await query('UPDATE publish_run SET steps = ?, updated_at = NOW(6) WHERE id = ?', [JSON.stringify(steps), runId]);
 }
 
 // Step errors never escape the worker: ReauthRequiredError (propagated by the Jira steps) and unexpected errors
@@ -403,14 +403,14 @@ async function finalize(run: RunRow, base: BaseContext | null, steps: StepState[
   const completed = steps.every((s) => s.status === 'success');
   const failedSteps = steps.filter((s) => s.status !== 'success').map((s) => s.name);
   const row = await withTransaction(async (client) => {
-    await client.query('UPDATE publish_run SET status = ?, steps = ?, updated_at = now() WHERE id = ?', [
+    await client.query('UPDATE publish_run SET status = ?, steps = ?, updated_at = NOW(6) WHERE id = ?', [
       completed ? 'completed' : 'failed',
       JSON.stringify(steps),
       run.id,
     ]);
     // The update holds the row lock until commit, so this reads exactly what it wrote.
     const { rows } = await client.query<RunRow>('SELECT * FROM publish_run WHERE id = ?', [run.id]);
-    await client.query('UPDATE planning_session SET status = ?, updated_at = now() WHERE id = ?', [
+    await client.query('UPDATE planning_session SET status = ?, updated_at = NOW(6) WHERE id = ?', [
       completed ? 'published' : 'partially_published',
       run.session_id,
     ]);

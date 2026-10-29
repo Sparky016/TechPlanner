@@ -33,12 +33,12 @@ async function append(client: DbClient, input: AuditInput): Promise<{ id: string
     ts: new Date().toISOString(),
     userId: input.userId ?? null,
     userDisplayName: input.userDisplayName ?? null,
-    // uuid columns read back in canonical form; hash the form the verifier will see.
+    // Stored (and so read back) in canonical form; hash the form the verifier will see.
     sessionId: input.sessionId ? canonicalUuid(input.sessionId) : null,
     ticketIds: input.ticketIds ?? [],
     action: input.action,
     result: input.result,
-    // JSON round-trip so the hashed value is exactly what jsonb stores (drops undefined, serialises Dates).
+    // JSON round-trip so the hashed value is exactly what the JSON column stores (drops undefined, serialises Dates).
     details: JSON.parse(JSON.stringify(redactDetails(input.details ?? {}))) as Record<string, unknown>,
     correlationId: input.correlationId ?? null,
   };
@@ -53,13 +53,14 @@ async function append(client: DbClient, input: AuditInput): Promise<{ id: string
   await client.query(
     `INSERT INTO audit_record
        (ts, user_id, user_display_name, session_id, ticket_ids, action, result, details, correlation_id, prev_hash, hash)
-     VALUES (?::timestamptz, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      payload.ts,
+      // DATETIME(6) in UTC keeps the millisecond ISO timestamp exactly.
+      new Date(payload.ts),
       payload.userId,
       payload.userDisplayName,
       payload.sessionId,
-      payload.ticketIds,
+      JSON.stringify(payload.ticketIds),
       payload.action,
       payload.result,
       JSON.stringify(payload.details),
@@ -77,8 +78,8 @@ async function append(client: DbClient, input: AuditInput): Promise<{ id: string
   return { id: inserted.rows[0].id, hash };
 }
 
-// node-pg stores a lone UTF-16 surrogate as U+FFFD, so its hash would not match the stored row. Reject such text
-// rather than silently rewriting an audit fact. (details is jsonb, which already rejects lone surrogates.)
+// The driver encodes a lone UTF-16 surrogate as U+FFFD, so its hash would not match the stored row. Reject such text
+// rather than silently rewriting an audit fact. (details is a JSON column, which already rejects lone surrogates.)
 function assertWellFormed(input: AuditInput): void {
   const fields: [string, string | null | undefined][] = [
     ['userId', input.userId],
@@ -92,8 +93,8 @@ function assertWellFormed(input: AuditInput): void {
   }
 }
 
-// Postgres accepts uuids with braces, without hyphens, or in upper case, but always stores and returns the
-// lowercase 8-4-4-4-12 form. Normalise to that form so the hashed value equals the stored one; reject anything else.
+// Callers may pass a uuid with braces, without hyphens, or in upper case. Store and hash the lowercase 8-4-4-4-12
+// form (what Postgres's uuid type normalised to) so the hashed value equals the stored one; reject anything else.
 function canonicalUuid(value: string): string {
   const unbraced = /^\{.*\}$/.test(value) ? value.slice(1, -1) : value;
   const hex = unbraced.replace(/-/g, '').toLowerCase();

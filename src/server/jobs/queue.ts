@@ -5,7 +5,8 @@ import { NonRetryableJobError, type JobHandler } from './registry';
 
 // Server-only: never import from src/lib or client components.
 // Job queue on the `job` table (db/migrations/0005_job_queue.sql, spec §7.2). Every statement goes through the
-// shared pool and is MySQL-portable; the only dialect-specific SQL is in NOW and nowPlus() below.
+// shared pool. Each claim of a job stamps a fresh claim_token; finishing or retrying it matches that token, so only
+// the activation that claimed it last can record an outcome.
 
 export interface EnqueueOptions {
   singletonKey?: string;
@@ -27,16 +28,17 @@ const RETENTION_INTERVAL_MS = 60 * 60 * 1000;
 const VISIBILITY_TIMEOUTS: Partial<Record<string, number>> = {};
 
 // The database clock decides when a job is due, so every worker agrees regardless of its own clock.
-// PostgreSQL today; the MySQL cutover (task 46) swaps these for NOW(6) and TIMESTAMPADD.
-const NOW = 'now()';
-/** A timestamp `?` seconds from now; the caller passes the seconds as the next parameter. */
+const NOW = 'NOW(6)';
+/** A timestamp `?` seconds from now (fractional or negative); the caller passes the seconds as the next parameter. */
 function nowPlus(): string {
-  return `(${NOW} + ? * interval '1 second')`;
+  return `TIMESTAMPADD(MICROSECOND, ROUND(? * 1000000), ${NOW})`;
 }
 
 interface JobRow {
   id: string;
   data: unknown;
+  /** The claim this worker made (set by runNext); finish and requeue only act while it is still current. */
+  claim_token: string;
   retry_count: number;
   retry_limit: number;
   retry_delay_s: number;
@@ -75,33 +77,46 @@ export async function hasPendingJob(name: string, singletonKey: string): Promise
   return rows.length > 0;
 }
 
-// Leaves the job in `state` with `output`, unless it is no longer the active job this worker fetched.
-async function finish(id: string, state: 'completed' | 'failed' | 'deadletter', output: object | null): Promise<void> {
+// Leaves the job in `state` with `output`, unless it is no longer the active job of claim `token`.
+async function finish(
+  id: string,
+  token: string,
+  state: 'completed' | 'failed' | 'deadletter',
+  output: object | null,
+): Promise<void> {
   await db.query(
-    `UPDATE job SET state = ?, output = ?, locked_until = NULL, finished_at = ${NOW} WHERE id = ? AND state = 'active'`,
-    [state, output === null ? null : JSON.stringify(output), id],
+    `UPDATE job SET state = ?, output = ?, locked_until = NULL, finished_at = ${NOW}
+     WHERE id = ? AND state = 'active' AND claim_token = ?`,
+    [state, output === null ? null : JSON.stringify(output), id, token],
   );
 }
 
-// Queues an active job again `delaySeconds` from now; `expiredOnly` requeues it only while its visibility timeout
-// has passed. A queued job with the same singletonKey already covers the work (the 'short' policy), so the unique
-// violation that blocks requeueing marks this one failed instead.
+// Queues an active job again `delaySeconds` from now, while it is still the activation of claim `token`. A queued
+// job with the same singletonKey already covers the work (the 'short' policy), so the unique violation that blocks
+// requeueing marks this one failed instead.
 async function requeue(
   id: string,
+  token: string | null,
   delaySeconds: number,
   retryCount: number,
   message: string,
   expiredOnly = false,
 ): Promise<void> {
+  // `expiredOnly` (recovery) requeues it only while its visibility timeout has passed.
+  const guard = `claim_token <=> ?${expiredOnly ? ` AND locked_until < ${NOW}` : ''}`;
   try {
     await db.query(
       `UPDATE job SET state = 'created', retry_count = ?, start_after = ${nowPlus()}, locked_until = NULL, output = ?
-       WHERE id = ? AND state = 'active'${expiredOnly ? ` AND locked_until < ${NOW}` : ''}`,
-      [retryCount, delaySeconds, JSON.stringify({ message }), id],
+       WHERE id = ? AND state = 'active' AND ${guard}`,
+      [retryCount, delaySeconds, JSON.stringify({ message }), id, token],
     );
   } catch (err) {
     if (!isUniqueViolation(err)) throw err;
-    await finish(id, 'failed', { message, superseded: true });
+    await db.query(
+      `UPDATE job SET state = 'failed', output = ?, locked_until = NULL, finished_at = ${NOW}
+       WHERE id = ? AND state = 'active' AND ${guard}`,
+      [JSON.stringify({ message, superseded: true }), id, token],
+    );
   }
 }
 
@@ -147,13 +162,13 @@ class Worker {
 
   // Active jobs past their visibility timeout belong to a crashed worker: queue them again.
   private async recoverExpired(): Promise<void> {
-    const { rows } = await db.query<Pick<JobRow, 'id' | 'retry_count'>>(
-      `SELECT id, retry_count FROM job WHERE name = ? AND state = 'active' AND locked_until < ${NOW}`,
+    const { rows } = await db.query<{ id: string; retry_count: number; claim_token: string | null }>(
+      `SELECT id, retry_count, claim_token FROM job WHERE name = ? AND state = 'active' AND locked_until < ${NOW}`,
       [this.name],
     );
     for (const job of rows) {
       console.warn(`[jobs] ${this.name} ${job.id} visibility timeout expired, requeueing`);
-      await requeue(job.id, 0, job.retry_count, 'visibility timeout expired', true);
+      await requeue(job.id, job.claim_token, 0, job.retry_count, 'visibility timeout expired', true);
     }
   }
 
@@ -161,7 +176,7 @@ class Worker {
   private async runNext(): Promise<boolean> {
     const visibility = VISIBILITY_TIMEOUTS[this.name] ?? DEFAULT_VISIBILITY_TIMEOUT_S;
     const job = await withTransaction(async (client) => {
-      const { rows } = await client.query<JobRow>(
+      const { rows } = await client.query<Omit<JobRow, 'claim_token'>>(
         `SELECT id, data, retry_count, retry_limit, retry_delay_s FROM job
          WHERE name = ? AND state = 'created' AND start_after <= ${NOW}
          ORDER BY start_after LIMIT 1 FOR UPDATE SKIP LOCKED`,
@@ -169,11 +184,13 @@ class Worker {
       );
       const row = rows[0];
       if (!row) return undefined;
-      await client.query(`UPDATE job SET state = 'active', locked_until = ${nowPlus()} WHERE id = ?`, [
+      const claimToken = randomUUID();
+      await client.query(`UPDATE job SET state = 'active', locked_until = ${nowPlus()}, claim_token = ? WHERE id = ?`, [
         visibility,
+        claimToken,
         row.id,
       ]);
-      return row;
+      return { ...row, claim_token: claimToken };
     });
     if (!job) return false;
 
@@ -185,7 +202,7 @@ class Worker {
       error = { cause: err };
     }
     if (!error) {
-      await finish(job.id, 'completed', null);
+      await finish(job.id, job.claim_token, 'completed', null);
       return true;
     }
 
@@ -193,14 +210,14 @@ class Worker {
     const message = err instanceof Error ? err.message : String(err);
     if (err instanceof NonRetryableJobError) {
       console.error(`[jobs] ${this.name} ${job.id} failed (non-retryable):`, message);
-      await finish(job.id, 'deadletter', { message });
+      await finish(job.id, job.claim_token, 'deadletter', { message });
     } else if (job.retry_count < job.retry_limit) {
       console.error(`[jobs] ${this.name} ${job.id} failed (will retry):`, err);
       // Exponential backoff: retryDelay, 2 x retryDelay, 4 x retryDelay, ...
-      await requeue(job.id, job.retry_delay_s * 2 ** job.retry_count, job.retry_count + 1, message);
+      await requeue(job.id, job.claim_token, job.retry_delay_s * 2 ** job.retry_count, job.retry_count + 1, message);
     } else {
       console.error(`[jobs] ${this.name} ${job.id} failed (retries exhausted):`, err);
-      await finish(job.id, 'failed', { message });
+      await finish(job.id, job.claim_token, 'failed', { message });
     }
     return true;
   }

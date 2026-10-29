@@ -95,7 +95,7 @@ async function lockWorkingCopy(client: DbClient, sessionId: string): Promise<Wor
 // Callers hold the row lock (lockWorkingCopy), so the version read back is the one this update wrote.
 async function writeSections(client: DbClient, sessionId: string, sections: WorkingCopySections): Promise<number> {
   await client.query(
-    'UPDATE working_copy SET sections = ?, version = version + 1, updated_at = now() WHERE session_id = ?',
+    'UPDATE working_copy SET sections = ?, version = version + 1, updated_at = NOW(6) WHERE session_id = ?',
     [JSON.stringify(sections), sessionId],
   );
   const { rows } = await client.query<{ version: number }>('SELECT version FROM working_copy WHERE session_id = ?', [
@@ -247,7 +247,7 @@ export async function acceptSuggestion(suggestionId: string, editedContent?: str
       },
     };
     const version = await writeSections(client, suggestion.session_id, sections);
-    await client.query("UPDATE pending_suggestion SET status = 'accepted', decided_at = now() WHERE id = ?", [
+    await client.query("UPDATE pending_suggestion SET status = 'accepted', decided_at = NOW(6) WHERE id = ?", [
       suggestionId,
     ]);
     return version;
@@ -257,7 +257,7 @@ export async function acceptSuggestion(suggestionId: string, editedContent?: str
 export async function rejectSuggestion(suggestionId: string): Promise<void> {
   await withTransaction(async (client) => {
     await lockPendingSuggestion(client, suggestionId);
-    await client.query("UPDATE pending_suggestion SET status = 'rejected', decided_at = now() WHERE id = ?", [
+    await client.query("UPDATE pending_suggestion SET status = 'rejected', decided_at = NOW(6) WHERE id = ?", [
       suggestionId,
     ]);
   });

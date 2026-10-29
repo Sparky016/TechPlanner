@@ -28,8 +28,8 @@ export function readTabId(req: Request): string {
 export async function acquireOrRenewLock(sessionId: string, tabId: string): Promise<LockState> {
   await query(
     `UPDATE planning_session
-        SET lock_holder = ?, lock_expires_at = now() + interval '60 seconds'
-      WHERE id = ? AND (lock_holder IS NULL OR lock_holder = ? OR lock_expires_at < now())`,
+        SET lock_holder = ?, lock_expires_at = NOW(6) + INTERVAL 60 SECOND
+      WHERE id = ? AND (lock_holder IS NULL OR lock_holder = ? OR lock_expires_at < NOW(6))`,
     [tabId, sessionId, tabId],
   );
   const current = await query<{ lock_holder: string | null; lock_expires_at: Date | null }>(
@@ -55,7 +55,7 @@ export async function takeOverLock(
     if (!row) throw new HttpError(404, 'Session not found', 'not_found');
     await client.query(
       `UPDATE planning_session
-          SET lock_holder = ?, lock_expires_at = now() + interval '60 seconds'
+          SET lock_holder = ?, lock_expires_at = NOW(6) + INTERVAL 60 SECOND
         WHERE id = ?`,
       [tabId, sessionId],
     );
@@ -83,7 +83,7 @@ export async function takeOverLock(
 // Throws HttpError 423 'session_locked' unless this tab currently holds an unexpired lock.
 export async function requireLock(sessionId: string, tabId: string): Promise<void> {
   const rows = await query(
-    'SELECT 1 FROM planning_session WHERE id = ? AND lock_holder = ? AND lock_expires_at > now()',
+    'SELECT 1 FROM planning_session WHERE id = ? AND lock_holder = ? AND lock_expires_at > NOW(6)',
     [sessionId, tabId],
   );
   if (rows.length === 0) throw new HttpError(423, 'Session is being edited in another tab', 'session_locked');

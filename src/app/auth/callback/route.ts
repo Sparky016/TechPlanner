@@ -98,9 +98,8 @@ export async function GET(request: Request): Promise<Response> {
   const sessionValue = await withTransaction(async (client) => {
     await client.query(
       `INSERT INTO app_user (atlassian_account_id, display_name, email)
-       VALUES (?, ?, ?)
-       ON CONFLICT (atlassian_account_id) DO UPDATE
-         SET display_name = EXCLUDED.display_name, email = EXCLUDED.email`,
+       VALUES (?, ?, ?) AS new
+       ON DUPLICATE KEY UPDATE display_name = new.display_name, email = new.email`,
       [profile.accountId, profile.displayName, profile.email],
     );
     await storeTokens(client, profile.accountId, tokens);

@@ -8,7 +8,7 @@ import type { WorkingCopySections } from './workingCopyRepo';
 // Debounced edit auditing so keystroke-level autosave does not flood the audit log:
 // - user.edit at most once per section per 30 s (SR-4.4), with a unified diff from the last audited body;
 // - draft.updated at most once per session per 5 min (SR-10.3).
-// Times come from the JS clock (not SQL now()) so the windows are testable with a fake clock.
+// Times come from the JS clock (not SQL NOW(6)) so the windows are testable with a fake clock.
 
 export const USER_EDIT_WINDOW_MS = 30 * 1000;
 export const DRAFT_UPDATED_WINDOW_MS = 5 * 60 * 1000;
@@ -101,7 +101,7 @@ export async function recordSectionEdit(
   return withTransaction(async (client) => {
     await client.query(
       `INSERT INTO edit_audit_state (session_id, section, baseline_body, last_audit_at)
-       VALUES (?, ?, ?, ?) ON CONFLICT (session_id, section) DO NOTHING`,
+       VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE session_id = session_id`,
       [sessionId, section, previousBody, now],
     );
     const { rows } = await client.query<{ baseline_body: string; last_audit_at: Date }>(

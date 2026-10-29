@@ -144,7 +144,7 @@ async function applyReconciliation(
     current.push(toResultIssue(i));
   }
   for (const i of changes.resolve) {
-    await client.query("UPDATE issue SET status = 'resolved', resolved_at = now() WHERE id = ?", [i.id]);
+    await client.query("UPDATE issue SET status = 'resolved', resolved_at = NOW(6) WHERE id = ?", [i.id]);
   }
   for (const i of changes.insert) {
     const id = randomUUID();

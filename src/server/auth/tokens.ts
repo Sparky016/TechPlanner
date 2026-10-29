@@ -24,31 +24,34 @@ export class ReauthRequiredError extends Error {
 interface TokenRow {
   enc_access_token: Buffer;
   enc_refresh_token: Buffer | null;
-  fresh: boolean;
+  // A comparison is a BIGINT in MySQL, which the driver returns as the string '1' or '0'.
+  fresh: string;
 }
 
 const SELECT_TOKEN = `SELECT enc_access_token, enc_refresh_token,
-                             expires_at > now() + make_interval(secs => ?) AS fresh
+                             expires_at > NOW(6) + INTERVAL ? SECOND AS fresh
                         FROM oauth_token WHERE user_id = ?`;
+
+const isFresh = (row: TokenRow): boolean => Number(row.fresh) === 1;
 
 // Inserts or replaces the user's tokens inside the caller's transaction.
 export async function storeTokens(client: DbClient, userId: string, tokens: TokenSet): Promise<void> {
   await client.query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes, updated_at)
-     VALUES (?, ?, ?, now() + make_interval(secs => ?), ?, now())
-     ON CONFLICT (user_id) DO UPDATE
-       SET enc_access_token = EXCLUDED.enc_access_token,
-           enc_refresh_token = EXCLUDED.enc_refresh_token,
-           expires_at = EXCLUDED.expires_at,
-           -- A refresh response may omit scope; keep the granted scopes then.
-           scopes = CASE WHEN cardinality(EXCLUDED.scopes) = 0 THEN oauth_token.scopes ELSE EXCLUDED.scopes END,
-           updated_at = now()`,
+     VALUES (?, ?, ?, NOW(6) + INTERVAL ? SECOND, ?, NOW(6)) AS new
+     ON DUPLICATE KEY UPDATE
+       enc_access_token = new.enc_access_token,
+       enc_refresh_token = new.enc_refresh_token,
+       expires_at = new.expires_at,
+       -- A refresh response may omit scope; keep the granted scopes then.
+       scopes = IF(JSON_LENGTH(new.scopes) = 0, oauth_token.scopes, new.scopes),
+       updated_at = NOW(6)`,
     [
       userId,
       encryptSecret(tokens.accessToken),
       tokens.refreshToken === null ? null : encryptSecret(tokens.refreshToken),
       tokens.expiresInSeconds,
-      tokens.scopes,
+      JSON.stringify(tokens.scopes),
     ],
   );
 }
@@ -60,7 +63,7 @@ export async function getValidAccessToken(userId: string, opts: { force?: boolea
   const force = opts.force === true;
   const [row] = await query<TokenRow>(SELECT_TOKEN, [REFRESH_MARGIN_SECONDS, userId]);
   if (!row) throw new ReauthRequiredError();
-  if (row.fresh && !force) return decryptSecret(row.enc_access_token);
+  if (isFresh(row) && !force) return decryptSecret(row.enc_access_token);
 
   // The failure path must commit (row deleted, audit written) before the error is thrown.
   const outcome = await withTransaction(async (client): Promise<{ token: string } | { reauth: true }> => {
@@ -69,7 +72,7 @@ export async function getValidAccessToken(userId: string, opts: { force?: boolea
     const current = reread.rows[0];
     if (!current) return { reauth: true };
     // Another caller refreshed while we waited for the lock.
-    if (current.fresh && !force) return { token: decryptSecret(current.enc_access_token) };
+    if (isFresh(current) && !force) return { token: decryptSecret(current.enc_access_token) };
 
     let refreshed: TokenSet | null = null;
     let reason = 'no_refresh_token';

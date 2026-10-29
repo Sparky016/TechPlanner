@@ -61,7 +61,7 @@ export function mapSessionRow(row: PlanningSessionDbRow): PlanningSessionRow {
   };
 }
 
-// Returns null for an unknown id, including one that is not a UUID (which Postgres would otherwise reject).
+// Returns null for an unknown id, including one that is not a UUID (which no row can have).
 export async function getSessionById(id: string): Promise<PlanningSessionRow | null> {
   if (!isUuid(id)) return null;
   const rows = await query<PlanningSessionDbRow>('SELECT * FROM planning_session WHERE id = ?', [id]);

@@ -194,7 +194,7 @@ async function persist(ctx: PublishContext, operation: string, page: RawPage, ve
   await withTransaction(async (client) => {
     await client.query(
       `UPDATE planning_session
-          SET confluence_page_id = ?, confluence_page_version = ?, updated_at = now()
+          SET confluence_page_id = ?, confluence_page_version = ?, updated_at = NOW(6)
         WHERE id = ?`,
       [page.id, version, ctx.sessionId],
     );
