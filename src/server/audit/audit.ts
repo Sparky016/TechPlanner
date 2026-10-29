@@ -1,7 +1,7 @@
 import { withTxLock } from '@/server/db/locks';
 import { type DbClient, withTransaction } from '@/server/db/pool';
 import type { AuditAction } from './actions';
-import { type AuditHashPayload, computeHash, redactDetails } from './hash';
+import { assertStorableDetails, type AuditHashPayload, computeHash, redactDetails } from './hash';
 
 // Server-only: never import from src/lib or client components.
 // The single write path for Audit Records (SR-12). audit_record is append-only at the database level
@@ -42,6 +42,8 @@ async function append(client: DbClient, input: AuditInput): Promise<{ id: string
     details: JSON.parse(JSON.stringify(redactDetails(input.details ?? {}))) as Record<string, unknown>,
     correlationId: input.correlationId ?? null,
   };
+  // The verifier hashes details as read back from the JSON column, so refuse what would not read back unchanged.
+  assertStorableDetails(payload.details);
 
   await withTxLock(client, CHAIN_LOCK);
   const head = await client.query<{ id: string; hash: Buffer }>(
@@ -79,7 +81,8 @@ async function append(client: DbClient, input: AuditInput): Promise<{ id: string
 }
 
 // The driver encodes a lone UTF-16 surrogate as U+FFFD, so its hash would not match the stored row. Reject such text
-// rather than silently rewriting an audit fact. (details is a JSON column, which already rejects lone surrogates.)
+// rather than silently rewriting an audit fact. (details is checked by assertStorableDetails, which also rejects
+// numbers the JSON column would not store exactly.)
 function assertWellFormed(input: AuditInput): void {
   const fields: [string, string | null | undefined][] = [
     ['userId', input.userId],

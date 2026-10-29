@@ -176,6 +176,10 @@ class Worker {
   private async runNext(): Promise<boolean> {
     const visibility = VISIBILITY_TIMEOUTS[this.name] ?? DEFAULT_VISIBILITY_TIMEOUT_S;
     const job = await withTransaction(async (client) => {
+      // Range scan of job_fetch (name, state, start_after). SKIP LOCKED passes over rows another worker holds. At
+      // READ COMMITTED (the session default, db/mysql.ts) only the claimed row stays locked; at REPEATABLE READ the
+      // scan would also take next-key locks on the range and the gap after it, so some enqueue() inserts into this
+      // queue would wait for the claim to commit.
       const { rows } = await client.query<Omit<JobRow, 'claim_token'>>(
         `SELECT id, data, retry_count, retry_limit, retry_delay_s FROM job
          WHERE name = ? AND state = 'created' AND start_after <= ${NOW}

@@ -128,6 +128,10 @@ async function applyReconciliation(
   sessionId: string,
   reported: readonly ReportedIssue[],
 ): Promise<EvaluationIssue[]> {
+  // Range lock over this session's entries in issue_session_fingerprint. At READ COMMITTED (the session default,
+  // db/mysql.ts) only the matched rows are locked; at REPEATABLE READ it would also take next-key locks up to the
+  // following session's first entry and block (or deadlock with) that session's inserts. Taken under the
+  // planning_session row lock, so evaluations of one session never interleave here.
   const existing = await client.query<IssueRow>(`${SELECT_ISSUES} FOR UPDATE`, [sessionId]);
   const changes = reconcileIssues(existing.rows, reported);
   const current: EvaluationIssue[] = [];
@@ -192,6 +196,8 @@ export async function evaluateSession(sessionId: string, opts: EvaluateOptions):
   const weights = (getConfig().SECTION_WEIGHTS ?? {}) as Partial<Record<SectionName, number>>;
   const score = computeReadinessScore(plain, weights);
 
+  // Database work only (the model ran above), so a deadlock victim can re-run it: the issue range lock and the unique
+  // fingerprint checks of the inserts take gap locks.
   const result = await withTransaction(async (client) => {
     // Serialises concurrent evaluations of one session (the issue fingerprint is unique per session).
     const locked = await client.query<{ ticket_keys: string[] }>(
@@ -221,7 +227,7 @@ export async function evaluateSession(sessionId: string, opts: EvaluateOptions):
       client,
     );
     return { evaluationId, score, statuses, issues, gatePasses: passes };
-  });
+  }, { retryOnDeadlock: true });
 
   observeReadinessScore(score);
   return result;

@@ -196,6 +196,12 @@ verification. Still required:
 - Text columns in the hash use `utf8mb4_0900_bin` so stored bytes equal hashed bytes. The existing lone-surrogate
   rejection stays.
 
+Outcome (task 47): integers beyond 2^53 round-trip (JS has already rounded them before hashing). Doubles with 16–17
+significant digits do not: MySQL's JSON parser is not correctly rounded, and about one random double in eight read
+back one or two units in the last place off (e.g. `123456789.12345679` → `123456789.1234568`). `recordAudit` now
+rejects such `details` numbers (`assertStorableDetails` in `audit/hash.ts`). It accepts integer literals within
+int64/uint64, and other numbers whose shortest form is m × 10^p with m < 2^53 and |p| ≤ 22.
+
 ## 8. Concurrency review
 
 The app runs at `READ COMMITTED` (§3), where InnoDB takes only record locks for `FOR UPDATE` on searches and
@@ -211,6 +217,13 @@ next-key/gap locks over ranges and non-unique indexes. Review each of the 15 `FO
   session. Confirm with the concurrency tests; add deadlock retry (errno 1213) in `withTransaction` only if
   tests show it is needed.
 - Keep a consistent lock order: `planning_session` row first, then children (already the pattern).
+
+Outcome (task 47): 18 `FOR UPDATE` sites. 15 are point lookups on a primary key. 3 are ranges and carry a comment:
+the two above and the job claim (`jobs/queue.ts`, `SKIP LOCKED`). `tests/integration/concurrency.test.ts` passes
+20 consecutive runs at READ COMMITTED with no 1213. At REPEATABLE READ the same tests deadlock in evaluate + edit
+and fork the audit chain. `withTransaction(fn, { retryOnDeadlock: true })` re-runs the callback up to 3 times. It is
+opted in only for the database-only callbacks on range or upsert locks: `evaluateSession`'s write transaction,
+`recordSectionEdit` and `flushEditAudits`.
 
 ## 9. Tests and tooling
 

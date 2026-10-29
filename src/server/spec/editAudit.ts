@@ -98,6 +98,8 @@ export async function recordSectionEdit(
   actor: EditAuditActor,
 ): Promise<boolean> {
   const now = new Date();
+  // Database work only, so a deadlock victim can re-run it: the upsert takes a next-key lock on a duplicate even at
+  // READ COMMITTED.
   return withTransaction(async (client) => {
     await client.query(
       `INSERT INTO edit_audit_state (session_id, section, baseline_body, last_audit_at)
@@ -113,7 +115,7 @@ export async function recordSectionEdit(
     if (state.baseline_body === newBody) return false;
     await auditUserEdit(client, sessionId, section, state.baseline_body, newBody, actor, now);
     return true;
-  });
+  }, { retryOnDeadlock: true });
 }
 
 /**
@@ -122,6 +124,7 @@ export async function recordSectionEdit(
  */
 export async function flushEditAudits(sessionId: string, actor: EditAuditActor): Promise<number> {
   const now = new Date();
+  // Database work only, so a deadlock victim can re-run it (the edit_audit_state read below is a range lock).
   return withTransaction(async (client) => {
     const wc = await client.query<{ sections: WorkingCopySections }>(
       'SELECT sections FROM working_copy WHERE session_id = ? FOR UPDATE',
@@ -129,6 +132,10 @@ export async function flushEditAudits(sessionId: string, actor: EditAuditActor):
     );
     if (wc.rows.length === 0) return 0;
     const sections = wc.rows[0].sections;
+    // Range lock over this session's primary-key prefix. At READ COMMITTED (the session default, db/mysql.ts) only the
+    // matched rows are locked; at REPEATABLE READ it would also lock the gap up to the next session's first row and
+    // block that session's first upsert in recordSectionEdit. Taken under the working_copy row lock, so flushes of
+    // one session serialise before reaching it.
     const { rows } = await client.query<{ section: string; baseline_body: string }>(
       'SELECT section, baseline_body FROM edit_audit_state WHERE session_id = ? ORDER BY section FOR UPDATE',
       [sessionId],
@@ -142,7 +149,7 @@ export async function flushEditAudits(sessionId: string, actor: EditAuditActor):
       written++;
     }
     return written;
-  });
+  }, { retryOnDeadlock: true });
 }
 
 /** Records draft.updated { version } unless one was recorded for this session within 5 minutes. */
