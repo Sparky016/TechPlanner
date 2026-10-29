@@ -32,6 +32,8 @@ x-app-env: &app-env
   DOWNSTREAM_WEBHOOK_SECRET: ${DOWNSTREAM_WEBHOOK_SECRET:-}
   SECTION_WEIGHTS: ${SECTION_WEIGHTS:-}
   METRICS_TOKEN: ${METRICS_TOKEN:-}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-}
+  DB_POOL_ACQUIRE_TIMEOUT_MS: ${DB_POOL_ACQUIRE_TIMEOUT_MS:-}
   # '1' only for smoke tests without a Copilot-entitled token; never in production.
   LLM_FAKE: ${LLM_FAKE:-0}
 

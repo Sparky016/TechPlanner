@@ -56,7 +56,7 @@ Secrets. Store them in the hosting platform's secret store and inject them as en
 | `DOWNSTREAM_WEBHOOK_SECRET` | signing secret for the downstream webhook (required when `DOWNSTREAM_WEBHOOK_URL` is set) |
 | `METRICS_TOKEN`             | bearer token for `GET /metrics` (optional; `/metrics` returns 404 when unset) |
 
-Non-secret required settings: `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLOUD_ID`, `OAUTH_REDIRECT_URI`, `APP_BASE_URL`, `FACILITATOR_MODEL`, `EVALUATOR_MODEL`, `CONFLUENCE_SPACE_KEY` and `CONFLUENCE_PARENT_PAGE_ID`. `APP_DB_USER` is the `'user'@'host'` the migrations grant table privileges to; the `migrate` service needs it in production (§7.4). Optional settings: `CONTEXT_TOKEN_BUDGET`, `CONFLUENCE_PROJECT_OVERRIDES`, `DOWNSTREAM_WEBHOOK_URL`, `SECTION_WEIGHTS` and `COPILOT_CLI_PATH`, which the image already sets.
+Non-secret required settings: `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLOUD_ID`, `OAUTH_REDIRECT_URI`, `APP_BASE_URL`, `FACILITATOR_MODEL`, `EVALUATOR_MODEL`, `CONFLUENCE_SPACE_KEY` and `CONFLUENCE_PARENT_PAGE_ID`. `APP_DB_USER` is the `'user'@'host'` the migrations grant table privileges to; the `migrate` service needs it in production (§7.4). Optional settings: `DB_POOL_SIZE` (connections per process, default 20; web and worker each open a pool, so keep 2 × `DB_POOL_SIZE` plus headroom below MySQL's `max_connections`, default 151), `DB_POOL_ACQUIRE_TIMEOUT_MS` (default 5000; past it a request gets 503 `db_pool_exhausted`), `CONTEXT_TOKEN_BUDGET`, `CONFLUENCE_PROJECT_OVERRIDES`, `DOWNSTREAM_WEBHOOK_URL`, `SECTION_WEIGHTS` and `COPILOT_CLI_PATH`, which the image already sets.
 
 `LLM_FAKE=1` swaps the Copilot client for a scripted fake. Use it only for smoke tests without a Copilot-entitled token, **never in production**.
 
