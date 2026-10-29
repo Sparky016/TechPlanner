@@ -13,12 +13,18 @@ import { ApiError, apiFetch } from '@/lib/api/client';
 // successful analysis, and the sources list with Refresh sources (SR-2.6) once ingested.
 
 const ANALYZE_PARAM = 'analyze';
+const INGEST_FAILED_PARAM = 'ingest';
+
+/** Removes one query parameter from the address bar without a navigation. */
+function dropParam(name: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(name);
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
 
 /** Removes ?analyze=1 from the address bar so a reload does not start the analysis again (GI-27). */
 function dropAnalyzeParam(): void {
-  const url = new URL(window.location.href);
-  url.searchParams.delete(ANALYZE_PARAM);
-  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  dropParam(ANALYZE_PARAM);
 }
 
 function toApiError(err: unknown, fallback: string): ApiError {
@@ -35,6 +41,13 @@ export function SessionHeader() {
   const [error, setError] = useState<ApiError | null>(null);
   const [analysisError, setAnalysisError] = useState<TurnError | null>(null);
   const analyzeParamHandled = useRef(false);
+  // GI-26: Create and ingest created the session but could not ingest it (?ingest=failed).
+  const [createIngestFailed, setCreateIngestFailed] = useState(false);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get(INGEST_FAILED_PARAM) !== 'failed') return;
+    setCreateIngestFailed(true);
+    dropParam(INGEST_FAILED_PARAM);
+  }, []);
   const base = `/api/sessions/${encodeURIComponent(sessionId)}`;
 
   async function analyze(ignoreAlreadyAnalyzed = false) {
@@ -52,6 +65,7 @@ export function SessionHeader() {
   async function ingest() {
     setBusy('ingest');
     setError(null);
+    setCreateIngestFailed(false);
     setAnalysisError(null);
     try {
       await apiFetch(`${base}/ingest`, { method: 'POST' });
@@ -147,6 +161,7 @@ export function SessionHeader() {
       {error ? <ErrorBanner message={error.message} correlationId={error.correlationId} /> : null}
       {session.intakeState === 'not_ingested' ? (
         <>
+          {createIngestFailed ? <ErrorBanner message="Ingest during creation failed. Try Ingest ticket again." /> : null}
           <p className="text-sm text-slate-600">Sources not ingested yet.</p>
           <div className="flex flex-wrap items-center gap-3">
             <button

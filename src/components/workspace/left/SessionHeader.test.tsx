@@ -208,6 +208,27 @@ describe('SessionHeader intake controls', () => {
     expect(button('Analyze ticket').disabled).toBe(false);
   });
 
+  it('?ingest=failed shows the creation failure above Ingest ticket and removes the parameter', async () => {
+    window.history.replaceState(null, '', '/sessions/s1?ingest=failed&tab=x');
+    renderHeader();
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Ingest during creation failed. Try Ingest ticket again.');
+    expect(window.location.search).toBe('?tab=x');
+    expect(button('Ingest ticket')).toBeTruthy();
+    // A later attempt clears the stale banner.
+    await waitFor(() => expect(button('Ingest ticket').disabled).toBe(false));
+    fireEvent.click(screen.getByLabelText('Analyze after ingest'));
+    fireEvent.click(button('Ingest ticket'));
+    await screen.findByRole('button', { name: 'Analyze ticket' });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows no creation failure banner without the parameter', async () => {
+    renderHeader();
+    await screen.findByText('Sources not ingested yet.');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('disables Ingest/Analyze/Refresh and the checkbox when read-only', async () => {
     lockHolder = 'other';
     renderHeader();

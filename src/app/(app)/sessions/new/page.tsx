@@ -42,7 +42,9 @@ export default function NewSessionPage() {
           ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
         },
       });
-      window.location.assign(ingest && ingested ? `/sessions/${session.id}?analyze=1` : `/sessions/${session.id}`);
+      // GI-26: a failed ingest still created the session; the workspace shows Ingest ticket with the error.
+      const query = !ingest ? '' : ingested ? '?analyze=1' : '?ingest=failed';
+      window.location.assign(`/sessions/${session.id}${query}`);
     } catch (err) {
       const apiErr = err instanceof ApiError ? err : new ApiError('Could not create the session', 0, undefined, undefined, null);
       if (apiErr.status === 409) {

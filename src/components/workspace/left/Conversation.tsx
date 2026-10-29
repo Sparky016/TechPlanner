@@ -49,7 +49,8 @@ function MessageBubble({ role, content, answerTo }: { role: Message['role']; con
       {answerTo !== undefined ? (
         <p className="text-xs font-medium not-italic text-slate-600">Answer to: {answerTo}</p>
       ) : null}
-      <p className="text-xs font-medium not-italic text-slate-500">{ROLE_LABEL[role] ?? role}</p>
+      {/* slate-600: slate-500 on the system bubble's slate-100 background is below the 4.5:1 contrast of WCAG AA. */}
+      <p className="text-xs font-medium not-italic text-slate-600">{ROLE_LABEL[role] ?? role}</p>
       <p className="whitespace-pre-wrap break-words">{content}</p>
     </li>
   );

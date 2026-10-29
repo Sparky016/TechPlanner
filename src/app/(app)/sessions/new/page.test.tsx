@@ -96,7 +96,7 @@ describe('new session page', () => {
     vi.unstubAllGlobals();
   });
 
-  it('Create and ingest omits analyze=1 when ingest failed, and shows the busy label', async () => {
+  it('Create and ingest opens the workspace with ingest=failed when ingest failed, and shows the busy label', async () => {
     const assign = vi.fn();
     vi.stubGlobal('location', { ...window.location, assign });
     mockApi(() => ({ session: { id: 's-3' }, ingested: false, ingestError: { code: 'x', message: 'm', correlationId: 'c' } }));
@@ -105,7 +105,7 @@ describe('new session page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create and ingest' }));
     expect(screen.getByRole('button', { name: 'Creating and ingesting…' })).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Create session' }) as HTMLButtonElement).disabled).toBe(true);
-    await waitFor(() => expect(assign).toHaveBeenCalledWith('/sessions/s-3'));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/sessions/s-3?ingest=failed'));
     vi.unstubAllGlobals();
   });
 
