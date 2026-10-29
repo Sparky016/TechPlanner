@@ -295,3 +295,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 10:40 | 44 | worker complete @ 3ed56dc..9d3d93a (unit 349, integration 140, e2e 13/14 baseline-equal; audit read-back bounded by id > head; e2e sql() helper uses ? via translator) → eval dispatched (sonnet/medium)
 2026-10-29 11:20 | 44 | eval PASS → DONE @ 3ed56dc..9d3d93a (unit 349, integration 140 — one flaky sessions.test fetch-not-called on 1 of 3 runs, unrelated; e2e 13/14 baseline; notes: getCurrentUser now rejects the request whose 30-day cap expires it, acquireOrRenewLock holder read-back non-atomic like before)
 2026-10-29 11:20 | 45 | worker dispatched (opus/medium)
+2026-10-29 11:40 | 45 | worker complete @ 3194b54 (integration 147 incl. 11 queue cases, unit 349, e2e 13/14 baseline; +finished_at, +hasPendingJob, superseded-on-requeue-collision) → eval dispatched (sonnet/medium)
