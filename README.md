@@ -1,22 +1,61 @@
 # Tech Planner
 
-AI Tech Planning Assistant (Next.js App Router, TypeScript, PostgreSQL).
+AI Tech Planning Assistant (Next.js App Router, TypeScript, MySQL 8.4).
 
 ## Development
 
-Requirements: Node 22, npm, Docker.
+Requirements: Node 22, npm, a native MySQL 8.4 server (no Docker needed).
 
 ```bash
 npm ci
+mysql -uroot -p < scripts/mysql-bootstrap.sql     # once: databases, users and grants (see "Database" below)
 cp .env.example .env                              # then fill in values
-docker compose -f docker-compose.dev.yml up -d    # PostgreSQL 16 on :5432 (techplanner/techplanner/techplanner)
-npm run migrate                                   # applies db/migrations/*.sql (reads .env if present)
+npm run migrate                                   # applies db/migrations/*.sql as the owner (reads .env if present)
 npm run dev                                       # http://localhost:3000
+npm run worker                                    # background jobs (readiness evaluation, publish)
 ```
 
 Scripts: `lint`, `typecheck`, `test` (unit, `src/**/*.test.ts`), `test:integration`
-(`tests/integration/**`, sequential, needs the dev database), `test:e2e` (Playwright), `build`, `start`.
-`worker`, `audit:verify` and `eval:llm` print "not implemented" until their tasks land.
+(`tests/integration/**`, sequential, needs the local MySQL), `test:e2e` (Playwright, needs the local MySQL),
+`migrate`, `worker`, `audit:verify`, `eval:llm`, `perf`, `build`, `start`.
+
+### Database
+
+Install MySQL 8.4 LTS (8.4 is the minimum and target version):
+
+- macOS: `brew install mysql@8.4 && brew services start mysql@8.4` (the formula is keg-only: add
+  `$(brew --prefix mysql@8.4)/bin` to `PATH` for the `mysql` client).
+- Debian/Ubuntu: add the [MySQL APT repository](https://dev.mysql.com/downloads/repo/apt/), choose `mysql-8.4-lts`,
+  then `sudo apt-get install mysql-server` and `sudo systemctl start mysql`.
+- Windows: the [MySQL Installer](https://dev.mysql.com/downloads/installer/) (8.4 LTS, "Server only"), run as a
+  service on port 3306.
+
+Then run `scripts/mysql-bootstrap.sql` once as root. It creates the `techplanner` and `techplanner_test` databases and
+two users with **dev-only** passwords (never reuse them in a shared environment):
+
+| User | Password (dev) | Used by | Privileges |
+| --- | --- | --- | --- |
+| `techplanner_owner` | `owner-dev-password` | `npm run migrate`, test resets (`MIGRATE_DATABASE_URL`) | everything on `techplanner` and `techplanner_*` |
+| `techplanner_app` | `app-dev-password` | web, worker, scripts (`DATABASE_URL`) | per-table grants written by the migrations; `SELECT, INSERT` only on `audit_record` |
+
+It also sets `log_bin_trust_function_creators = ON` (persisted), which MySQL requires for the owner to create the
+schema's triggers while binary logging is on.
+
+```bash
+DATABASE_URL=mysql://techplanner_app:app-dev-password@localhost:3306/techplanner
+MIGRATE_DATABASE_URL=mysql://techplanner_owner:owner-dev-password@localhost:3306/techplanner
+```
+
+`npm run migrate` connects with `MIGRATE_DATABASE_URL`, falling back to `DATABASE_URL`. Migration grants go to
+`APP_DB_USER` (default `'techplanner_app'@'%'`). MySQL commits each DDL statement on its own, so a migration that fails
+part-way leaves its earlier statements applied: undo them by hand before running `npm run migrate` again.
+
+Tests use their own databases on the same server, so the dev data is never touched:
+
+- Integration tests (`npm run test:integration`) drop, re-create and migrate `techplanner_test` (or the database
+  `DATABASE_URL` names) as the owner, then run as the app user. Defaults are in `tests/integration/env.ts`.
+- E2E (`npm run test:e2e`) uses `techplanner_e2e` (`E2E_DATABASE_URL`, `E2E_MIGRATE_DATABASE_URL`); evals use
+  `techplanner_eval` and `npm run perf` uses `techplanner_perf`. The owner creates these on first use.
 
 ### Configuration
 
@@ -53,9 +92,10 @@ Startup errors such as `Invalid configuration: ATLASSIAN_CLIENT_ID` name the var
 
 Generate a value with `openssl rand -base64 32`. It must decode to exactly 32 bytes.
 
-**Database (`DATABASE_URL`)**
+**Database (`DATABASE_URL`, `MIGRATE_DATABASE_URL`)**
 
-For the dev database in `docker-compose.dev.yml`, use `postgres://techplanner:techplanner@localhost:5432/techplanner`. Change the password for any shared environment.
+Use the `mysql://` URLs from [Database](#database) above. Both must be `mysql://` URLs. Use generated passwords for any
+shared environment.
 
 **Copilot (`COPILOT_GITHUB_TOKEN`, `FACILITATOR_MODEL`, `EVALUATOR_MODEL`)**
 

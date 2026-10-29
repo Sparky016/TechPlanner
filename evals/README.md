@@ -10,7 +10,7 @@ Not part of `npm test` or CI: every run needs a Copilot-entitled token and costs
 # Schema check of every fixture. No token, no database.
 npm run eval:llm -- --validate-only
 
-# Real run. Needs Postgres (docker compose -f docker-compose.dev.yml up -d).
+# Real run. Needs the local MySQL 8.4 set up as in the README (scripts/mysql-bootstrap.sql).
 COPILOT_GITHUB_TOKEN=... FACILITATOR_MODEL=... EVALUATOR_MODEL=... npm run eval:llm
 
 # Options
@@ -19,8 +19,9 @@ npm run eval:llm -- --judge      # if keyword/section matching finds nothing, as
 ```
 
 `.env` is loaded if present. The harness always uses a dedicated database, never `DATABASE_URL`:
-`EVAL_DATABASE_URL`, default `postgres://techplanner:techplanner@localhost:5432/techplanner_eval`.
-The database is created if it is missing, then **reset** (schema `public` dropped and migrated) at the start of every run.
+`EVAL_DATABASE_URL`, default `mysql://techplanner_app:app-dev-password@localhost:3306/techplanner_eval`, and for the
+reset `EVAL_MIGRATE_DATABASE_URL`, default `mysql://techplanner_owner:owner-dev-password@localhost:3306/techplanner_eval`.
+The database is **reset** (dropped, re-created and migrated as the owner) at the start of every run.
 
 Output: a per-fixture line plus a summary on the console, and `evals/report.json`. That file holds per-check pass
 rates, held-out pass rates and the raw per-fixture results (questions asked, critical issues, section statuses).

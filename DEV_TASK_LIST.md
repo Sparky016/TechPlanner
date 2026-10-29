@@ -93,8 +93,8 @@ Phases:
   - 0002 is task 03.
   - 0003 is task 19.
   - Any further migration takes the next free number at commit time. Migrations are forward-only.
-- **Parallel integration tests** must each use their own database (e.g. `techplanner_t03`): `resetDatabase()` drops the whole public schema.
-- **Integration tests** need `docker compose -f docker-compose.dev.yml up -d` (Postgres 16). Atlassian is always mocked with undici MockAgent or the task-39 mock server.
+- **Parallel integration tests** must each use their own database (e.g. `techplanner_t03`, set through `DATABASE_URL`): `resetDatabase()` drops and re-creates the whole database as the owner user.
+- **Integration and E2E tests** need a local native MySQL 8.4 (no Docker) set up with `scripts/mysql-bootstrap.sql` (README "Database"). Integration tests use `techplanner_test` (E2E `techplanner_e2e`), run as `techplanner_app` and reset and migrate as `techplanner_owner`. Atlassian is always mocked with undici MockAgent or the task-39 mock server.
 - **LLM in tests**: all non-eval tests use `LLM_FAKE=1` / `FakeLlmClient`. Only task 40 (and optionally 41) needs a real Copilot token.
 - **Every Atlassian call uses the acting user's token** (SR-1.2). No shared Atlassian credentials anywhere.
 - **Parallel lanes**:
