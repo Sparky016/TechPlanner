@@ -66,7 +66,7 @@ Phases:
 | 45 | 7 | [Facilitator turn kinds, shared SSE turn helper and analysis turn (POST /analyze)](DEV_TASK_45.yml) | high | high | opus / high | 43 | DONE | d72d83b |
 | 46 | 7 | [Question lifecycle API: answer, resolve, reopen; full question context](DEV_TASK_46.yml) | high | high | opus / medium | 45 | EVAL | f548082 |
 | 47 | 7 | [Workspace turn runner and intake controls (Ingest, Analyze, ?analyze=1)](DEV_TASK_47.yml) | high | high | opus / medium | 44, 45 | DONE | 09d25b7 |
-| 48 | 7 | [Questions UI: grouped list, Answer, Resolve, Edit answer, Reopen](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46, 47 | EVAL | 3c3e655 |
+| 48 | 7 | [Questions UI: grouped list, Answer, Resolve, Edit answer, Reopen](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46, 47 | DONE | 3c3e655 |
 | 49 | 7 | [Discuss with AI: collapsible overview conversation](DEV_TASK_49.yml) | medium | medium | sonnet / medium | 47 | DONE | bb1b80d |
 | 50 | 7 | [New session page: Create and ingest](DEV_TASK_50.yml) | medium | low | sonnet / low | 44, 47 | DONE | 903de87 |
 | 51 | 7 | [Guided intake verification and docs (E2E, a11y, evals, SPEC_DOC, ADR 0017)](DEV_TASK_51.yml) | medium | medium | sonnet / medium | 48, 49, 50 | PENDING | |
@@ -313,3 +313,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 12:0x | 48 | worker complete @ 3c3e655 (QuestionsList 9 tests, unit 385; region name 'AI questions' kept) → eval dispatched (sonnet/low, detached worktree)
 2026-10-29 12:0x | 49 | worker complete @ bb1b80d (Conversation 9 tests, unit 385; left-panel overlap fix: aside children shrink-0, message list max-h-80; region renamed 'Discuss with AI'; collapsed panel hides Message/Send once questions exist) → eval dispatched (sonnet/low, detached worktree)
 2026-10-29 12:1x | 49 | eval PASS → DONE @ bb1b80d (Conversation+SessionHeader 23, unit 385; layout fix judged sound; follow-up: E2E must open the Discuss with AI toggle once questions exist)
+2026-10-29 12:1x | 48 | eval PASS → DONE @ 3c3e655 (QuestionsList 9, unit 381; no role=status clash with publish-panel E2E queries; follow-up: focus not moved after Resolve/Reopen regroups an item)
