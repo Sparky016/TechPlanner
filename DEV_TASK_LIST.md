@@ -63,9 +63,9 @@ Phases:
 | 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | DONE | 74e6a0b |
 | 43 | 7 | [Guided intake schema: migration 0005, intake state, question lifecycle fields, audit actions](DEV_TASK_43.yml) | high | medium | opus / medium | — | DONE | 12d1b6a |
 | 44 | 7 | [Explicit source ingestion: no ingest at creation, POST /ingest, create-and-ingest](DEV_TASK_44.yml) | high | high | opus / medium | 43 | DONE | 35fffc4..fcc19f1 |
-| 45 | 7 | [Facilitator turn kinds, shared SSE turn helper and analysis turn (POST /analyze)](DEV_TASK_45.yml) | high | high | opus / high | 43 | IN_PROGRESS | |
-| 46 | 7 | [Question lifecycle API: answer, resolve, reopen; full question context](DEV_TASK_46.yml) | high | high | opus / medium | 45 | PENDING | |
-| 47 | 7 | [Workspace turn runner and intake controls (Ingest, Analyze, ?analyze=1)](DEV_TASK_47.yml) | high | high | opus / medium | 44, 45 | PENDING | |
+| 45 | 7 | [Facilitator turn kinds, shared SSE turn helper and analysis turn (POST /analyze)](DEV_TASK_45.yml) | high | high | opus / high | 43 | EVAL | d72d83b |
+| 46 | 7 | [Question lifecycle API: answer, resolve, reopen; full question context](DEV_TASK_46.yml) | high | high | opus / medium | 45 | IN_PROGRESS | |
+| 47 | 7 | [Workspace turn runner and intake controls (Ingest, Analyze, ?analyze=1)](DEV_TASK_47.yml) | high | high | opus / medium | 44, 45 | IN_PROGRESS | |
 | 48 | 7 | [Questions UI: grouped list, Answer, Resolve, Edit answer, Reopen](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46, 47 | PENDING | |
 | 49 | 7 | [Discuss with AI: collapsible overview conversation](DEV_TASK_49.yml) | medium | medium | sonnet / medium | 47 | PENDING | |
 | 50 | 7 | [New session page: Create and ingest](DEV_TASK_50.yml) | medium | low | sonnet / low | 44, 47 | PENDING | |
@@ -300,3 +300,5 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 10:1x | 44 | worker complete @ fcc19f1 (pure rename landed in 35fffc4 via orchestrator commit; sessions 22, unit 337, integration 149; e2e session-create expected to fail until 51) → eval dispatched (sonnet/medium, detached worktree)
 2026-10-29 10:2x | 44 | eval PASS → DONE @ fcc19f1 (worktree: sessions 22, integration 148, unit 336; flaky sessions.test.ts:302 traced to a straggler comment fetch from the 422 test racing the next mock reset — pre-existing, follow-up)
 2026-10-29 10:3x | e2e | clean baseline @ 26300f5: 13 passed, 1 failed — clarification AC-13: Notes form label intercepts the conversation Send click once a question is listed (left-panel overlap, pre-existing product bug). Assigned to 49 (layout) / 51 (spec) to fix at root
+2026-10-29 10:4x | 45 | worker complete @ d72d83b (intakeApi 7, conversationApi 11, unit 351, integration 158, eval validate-only ok; turnStreamResponse re-checks intake under the turn lock + prepare hook; e2e message flows now 409 not_ingested until 47/51) → eval dispatched (sonnet/medium, detached worktree)
+2026-10-29 10:4x | 46,47 | workers dispatched in parallel (opus/medium each; server vs client files)
