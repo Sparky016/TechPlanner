@@ -1,7 +1,6 @@
-import type { PoolClient } from 'pg';
 import { recordAudit } from '@/server/audit/audit';
 import { getConfig } from '@/server/config';
-import { query, withTransaction } from '@/server/db/pool';
+import { type DbClient, query, withTransaction } from '@/server/db/pool';
 import { getLlmClient } from '@/server/llm';
 import { observeReadinessScore } from '@/server/observability/metrics';
 import { SECTION_NAMES, type SectionName } from '../../lib/spec/sections';
@@ -124,7 +123,7 @@ function bodies(sections: Record<SectionName, { body: string }>): SpecSections {
 }
 
 async function applyReconciliation(
-  client: PoolClient,
+  client: DbClient,
   sessionId: string,
   reported: readonly ReportedIssue[],
 ): Promise<EvaluationIssue[]> {

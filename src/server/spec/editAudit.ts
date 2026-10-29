@@ -1,7 +1,6 @@
-import type { PoolClient } from 'pg';
 import { recordAudit } from '@/server/audit/audit';
 import type { CurrentUser } from '@/server/auth/session';
-import { withTransaction } from '@/server/db/pool';
+import { type DbClient, withTransaction } from '@/server/db/pool';
 import { SECTION_NAMES, type SectionName } from '../../lib/spec/sections';
 import type { WorkingCopySections } from './workingCopyRepo';
 
@@ -59,7 +58,7 @@ export function unifiedDiff(name: string, before: string, after: string): string
 }
 
 async function auditUserEdit(
-  client: PoolClient,
+  client: DbClient,
   sessionId: string,
   section: string,
   baseline: string,

@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { Pool } from 'pg';
+import type { DbPool } from '@/server/db/pool';
 
 // Forward-only migration runner: applies db/migrations/*.sql in filename order.
 // Each file and its schema_migrations row commit in one transaction, so a failed
@@ -12,7 +12,7 @@ export const MIGRATIONS_DIR = join(process.cwd(), 'db', 'migrations');
 // Arbitrary constant key for pg_advisory_xact_lock; serialises concurrent runners.
 const LOCK_KEY = 727_001;
 
-export async function runMigrations(pool: Pool, dir: string = MIGRATIONS_DIR): Promise<string[]> {
+export async function runMigrations(pool: DbPool, dir: string = MIGRATIONS_DIR): Promise<string[]> {
   const files = (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort();
   await pool.query(
     'CREATE TABLE IF NOT EXISTS schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())',

@@ -1,7 +1,6 @@
-import type { PoolClient } from 'pg';
 import { recordAudit } from '@/server/audit/audit';
 import { decryptSecret, encryptSecret } from '@/server/crypto/secrets';
-import { query, withTransaction } from '@/server/db/pool';
+import { type DbClient, query, withTransaction } from '@/server/db/pool';
 import { logger } from '@/server/observability/logger';
 import { getCorrelationId } from '@/server/observability/context';
 import { type TokenSet, refreshTokens } from './atlassianOAuth';
@@ -32,7 +31,7 @@ const SELECT_TOKEN = `SELECT enc_access_token, enc_refresh_token,
                         FROM oauth_token WHERE user_id = $1`;
 
 // Inserts or replaces the user's tokens inside the caller's transaction.
-export async function storeTokens(client: PoolClient, userId: string, tokens: TokenSet): Promise<void> {
+export async function storeTokens(client: DbClient, userId: string, tokens: TokenSet): Promise<void> {
   await client.query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes, updated_at)
      VALUES ($1, $2, $3, now() + make_interval(secs => $4), $5, now())

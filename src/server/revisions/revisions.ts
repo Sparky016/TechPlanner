@@ -1,7 +1,6 @@
 import { diffLines, type ChangeObject } from 'diff';
-import type { PoolClient } from 'pg';
 import { recordAudit } from '@/server/audit/audit';
-import { query, withTransaction } from '@/server/db/pool';
+import { type DbClient, query, withTransaction } from '@/server/db/pool';
 import { SECTION_NAMES, type SectionName } from '../../lib/spec/sections';
 import type { SpecSections } from '../../lib/spec/document';
 import type { EditAuditActor } from '../spec/editAudit';
@@ -55,7 +54,7 @@ export class RevisionNotFoundError extends Error {
  * Snapshots the session's Working Copy as the next revision. Must run inside the caller's transaction: the
  * planning_session row lock serialises numbering, and the (session_id, number) primary key backs it up.
  */
-export async function createRevision(client: PoolClient, input: CreateRevisionInput): Promise<{ number: number }> {
+export async function createRevision(client: DbClient, input: CreateRevisionInput): Promise<{ number: number }> {
   await client.query('SELECT id FROM planning_session WHERE id = $1 FOR UPDATE', [input.sessionId]);
   const wc = await client.query<{ sections: WorkingCopySections }>(
     'SELECT sections FROM working_copy WHERE session_id = $1',

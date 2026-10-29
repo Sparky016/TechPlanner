@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { PoolClient } from 'pg';
-import { query } from '@/server/db/pool';
+import { type DbClient, query } from '@/server/db/pool';
 import { HttpError } from '@/server/http/errors';
 
 // Server-only: never import from src/lib or client components.
@@ -60,7 +59,7 @@ export function clearOauthStateCookie(): string {
 }
 
 // Creates an app_session row inside the caller's transaction; returns the cookie value (never stored).
-export async function createSession(client: PoolClient, userId: string): Promise<string> {
+export async function createSession(client: DbClient, userId: string): Promise<string> {
   const value = randomBytes(32).toString('base64url');
   await client.query(
     `INSERT INTO app_session (id_hash, user_id, expires_at)

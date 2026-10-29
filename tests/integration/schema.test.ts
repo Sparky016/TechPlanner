@@ -99,8 +99,7 @@ describe('withTransaction', () => {
 
     expect(await query("SELECT 1 FROM planning_session WHERE primary_ticket_key = 'TX-FAIL'")).toHaveLength(0);
     // Released: the pool has no checked-out clients.
-    expect(db.totalCount - db.idleCount).toBe(0);
-    expect(db.waitingCount).toBe(0);
+    expect(db.stats()).toEqual({ checkedOut: 0, waiting: 0 });
   });
 });
 

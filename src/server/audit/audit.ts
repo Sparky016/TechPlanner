@@ -1,5 +1,4 @@
-import type { PoolClient } from 'pg';
-import { withTransaction } from '@/server/db/pool';
+import { type DbClient, withTransaction } from '@/server/db/pool';
 import type { AuditAction } from './actions';
 import { type AuditHashPayload, computeHash, redactDetails } from './hash';
 
@@ -23,11 +22,11 @@ const CHAIN_LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtext('audit_chain'))";
 
 // Appends one Audit Record. When `client` is given it must already be inside a transaction (the caller's);
 // the record then commits or rolls back with it. Otherwise a transaction of its own is used.
-export async function recordAudit(input: AuditInput, client?: PoolClient): Promise<{ id: string; hash: string }> {
+export async function recordAudit(input: AuditInput, client?: DbClient): Promise<{ id: string; hash: string }> {
   return client ? append(client, input) : withTransaction((tx) => append(tx, input));
 }
 
-async function append(client: PoolClient, input: AuditInput): Promise<{ id: string; hash: string }> {
+async function append(client: DbClient, input: AuditInput): Promise<{ id: string; hash: string }> {
   assertWellFormed(input);
   const payload: AuditHashPayload = {
     ts: new Date().toISOString(),

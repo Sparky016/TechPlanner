@@ -1,5 +1,4 @@
-import type { PoolClient } from 'pg';
-import { query, withTransaction } from '@/server/db/pool';
+import { type DbClient, query, withTransaction } from '@/server/db/pool';
 import { SECTION_NAMES, type SectionName } from '../../lib/spec/sections';
 import { emptySections, validateSections, type SpecSections } from '../../lib/spec/document';
 import { applyPatchToBody, type SectionPatch } from './patch';
@@ -83,7 +82,7 @@ function isSectionName(name: string): name is SectionName {
   return (SECTION_NAMES as readonly string[]).includes(name);
 }
 
-async function lockWorkingCopy(client: PoolClient, sessionId: string): Promise<WorkingCopy> {
+async function lockWorkingCopy(client: DbClient, sessionId: string): Promise<WorkingCopy> {
   const { rows } = await client.query<WorkingCopyRow>(
     'SELECT session_id, sections, version, updated_at FROM working_copy WHERE session_id = $1 FOR UPDATE',
     [sessionId],
@@ -92,7 +91,7 @@ async function lockWorkingCopy(client: PoolClient, sessionId: string): Promise<W
   return toWorkingCopy(rows[0]);
 }
 
-async function writeSections(client: PoolClient, sessionId: string, sections: WorkingCopySections): Promise<number> {
+async function writeSections(client: DbClient, sessionId: string, sections: WorkingCopySections): Promise<number> {
   const { rows } = await client.query<{ version: number }>(
     'UPDATE working_copy SET sections = $2, version = version + 1, updated_at = now() WHERE session_id = $1 RETURNING version',
     [sessionId, JSON.stringify(sections)],
@@ -107,7 +106,7 @@ async function writeSections(client: PoolClient, sessionId: string, sections: Wo
 export async function initWorkingCopy(
   sessionId: string,
   initial?: SpecSections,
-  client?: PoolClient,
+  client?: DbClient,
 ): Promise<WorkingCopy> {
   const bodies = initial ?? emptySections();
   const sections = {} as WorkingCopySections;
@@ -207,7 +206,7 @@ type SuggestionRow = {
   status: string;
 };
 
-async function lockPendingSuggestion(client: PoolClient, suggestionId: string): Promise<SuggestionRow> {
+async function lockPendingSuggestion(client: DbClient, suggestionId: string): Promise<SuggestionRow> {
   const { rows } = await client.query<SuggestionRow>(
     'SELECT id, session_id, patch, status FROM pending_suggestion WHERE id = $1 FOR UPDATE',
     [suggestionId],

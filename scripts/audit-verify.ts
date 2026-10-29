@@ -1,6 +1,6 @@
 import { pathToFileURL } from 'node:url';
-import type { Pool } from 'pg';
 import { computeHash } from '@/server/audit/hash';
+import type { DbPool } from '@/server/db/pool';
 
 // Audit chain verifier (SR-12.6): walks audit_record in id order with a server-side cursor,
 // recomputes every hash and checks every prev_hash link. Reports the first broken record.
@@ -24,7 +24,7 @@ interface AuditRow {
 
 export type VerifyResult = { ok: true; count: number } | { ok: false; brokenId: string };
 
-export async function verifyAuditChain(pool: Pool): Promise<VerifyResult> {
+export async function verifyAuditChain(pool: DbPool): Promise<VerifyResult> {
   const client = await pool.connect();
   let discard = false;
   try {

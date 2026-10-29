@@ -2,12 +2,11 @@ import { recordAudit } from '@/server/audit/audit';
 import type { CurrentUser } from '@/server/auth/session';
 import { isAzureDevOpsEnabled } from '@/server/azureDevOps/client';
 import { getConfig } from '@/server/config';
-import { withTransaction } from '@/server/db/pool';
+import { type DbClient, withTransaction } from '@/server/db/pool';
 import { getLlmClient } from '@/server/llm';
 import type { LlmMessage } from '@/server/llm/types';
 import { scheduleEvaluation } from '@/server/readiness/schedule';
 import { markAiRead } from '@/server/spec/workingCopyRepo';
-import type { PoolClient } from 'pg';
 import { loadSessionContext } from './context';
 import { buildFacilitatorMessages, buildFacilitatorSystemPrompt, CORRECTIVE_MESSAGE } from './prompt';
 import { createFacilitatorTools, createTurnState, type FacilitatorEvent, type FacilitatorTurnState } from './tools';
@@ -27,7 +26,7 @@ export interface FacilitatorTurnInput {
 
 type Role = 'facilitator' | 'ai';
 
-async function insertMessage(client: PoolClient, sessionId: string, role: Role, content: string): Promise<number> {
+async function insertMessage(client: DbClient, sessionId: string, role: Role, content: string): Promise<number> {
   // Serialises concurrent writers for this session while seq is computed (same pattern as refreshSources).
   await client.query('SELECT 1 FROM planning_session WHERE id = $1 FOR UPDATE', [sessionId]);
   const { rows } = await client.query<{ seq: number }>(

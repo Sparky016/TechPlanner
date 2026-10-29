@@ -1,9 +1,8 @@
-import type { PoolClient } from 'pg';
 import { AtlassianApiError } from '@/server/atlassian/client';
 import { discoverConfluencePageRefs, getPageMarkdown } from '@/server/atlassian/confluence';
 import { getIssueSnapshot, type JiraIssueSnapshot } from '@/server/atlassian/jira';
 import { getConfig } from '@/server/config';
-import { query } from '@/server/db/pool';
+import { type DbClient, query } from '@/server/db/pool';
 import { ingestAttachments, type AttachmentMeta } from '@/server/ingest/attachments';
 import { applyContextBudget, type BudgetItem } from '@/server/ingest/budget';
 import { getLlmClient } from '@/server/llm';
@@ -256,7 +255,7 @@ export async function collectSources(userId: string, issues: JiraIssueSnapshot[]
 }
 
 export async function insertSnapshots(
-  client: PoolClient,
+  client: DbClient,
   sessionId: string,
   snapshots: SourceSnapshotInput[],
   retrievedAt: Date,
