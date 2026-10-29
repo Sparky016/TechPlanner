@@ -65,10 +65,10 @@ Phases:
 | 44 | 7 | [Explicit source ingestion: no ingest at creation, POST /ingest, create-and-ingest](DEV_TASK_44.yml) | high | high | opus / medium | 43 | DONE | 35fffc4..fcc19f1 |
 | 45 | 7 | [Facilitator turn kinds, shared SSE turn helper and analysis turn (POST /analyze)](DEV_TASK_45.yml) | high | high | opus / high | 43 | DONE | d72d83b |
 | 46 | 7 | [Question lifecycle API: answer, resolve, reopen; full question context](DEV_TASK_46.yml) | high | high | opus / medium | 45 | IN_PROGRESS | |
-| 47 | 7 | [Workspace turn runner and intake controls (Ingest, Analyze, ?analyze=1)](DEV_TASK_47.yml) | high | high | opus / medium | 44, 45 | IN_PROGRESS | |
+| 47 | 7 | [Workspace turn runner and intake controls (Ingest, Analyze, ?analyze=1)](DEV_TASK_47.yml) | high | high | opus / medium | 44, 45 | EVAL | 09d25b7 |
 | 48 | 7 | [Questions UI: grouped list, Answer, Resolve, Edit answer, Reopen](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46, 47 | PENDING | |
-| 49 | 7 | [Discuss with AI: collapsible overview conversation](DEV_TASK_49.yml) | medium | medium | sonnet / medium | 47 | PENDING | |
-| 50 | 7 | [New session page: Create and ingest](DEV_TASK_50.yml) | medium | low | sonnet / low | 44, 47 | PENDING | |
+| 49 | 7 | [Discuss with AI: collapsible overview conversation](DEV_TASK_49.yml) | medium | medium | sonnet / medium | 47 | IN_PROGRESS | |
+| 50 | 7 | [New session page: Create and ingest](DEV_TASK_50.yml) | medium | low | sonnet / low | 44, 47 | IN_PROGRESS | |
 | 51 | 7 | [Guided intake verification and docs (E2E, a11y, evals, SPEC_DOC, ADR 0017)](DEV_TASK_51.yml) | medium | medium | sonnet / medium | 48, 49, 50 | PENDING | |
 
 ## Execution notes
@@ -303,3 +303,5 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 10:4x | 45 | worker complete @ d72d83b (intakeApi 7, conversationApi 11, unit 351, integration 158, eval validate-only ok; turnStreamResponse re-checks intake under the turn lock + prepare hook; e2e message flows now 409 not_ingested until 47/51) → eval dispatched (sonnet/medium, detached worktree)
 2026-10-29 10:4x | 46,47 | workers dispatched in parallel (opus/medium each; server vs client files)
 2026-10-29 11:0x | 45 | eval PASS → DONE @ d72d83b (worktree: intakeApi 7, conversationApi 11, unit 351, integration 158, eval validate-only ok; follow-ups: runbook lacks ANALYSIS_MAX_QUESTIONS (→ 51), retry after failed analysis adds a second notice message)
+2026-10-29 11:1x | 47 | worker complete @ 09d25b7 (SessionHeader 14 new tests, unit 372 incl. 46 WIP; runTurn/useActiveTurn API; Conversation.test.tsx updated for streamTurn) → eval dispatched (sonnet/medium, detached worktree)
+2026-10-29 11:1x | 49,50 | workers dispatched (sonnet/medium, sonnet/low) alongside 46
