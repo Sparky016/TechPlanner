@@ -303,3 +303,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 14:50 | 46 | rework 1 complete @ 6ea3f6b..eb2d287 (settleAll for Atlassian fan-outs; sessions.test 10/10, integration 3x151, unit 343, e2e 13/14 baseline; READ COMMITTED documented; resets revoke table grants) → re-eval dispatched (opus/medium)
 2026-10-29 15:20 | 46 | re-eval PASS (rework cycle 1) → DONE @ 30b290d..eb2d287 (sessions.test 10/10, integration 3x151, unit 343; new tests fail against Promise.all)
 2026-10-29 15:20 | 47,48 | workers dispatched in parallel (47 opus/medium, 48 sonnet/medium; disjoint files)
+2026-10-29 16:00 | 48 | worker complete @ becd1f6 (compose up healthy on host MySQL, backup→restore→audit:verify OK 5, owner creds only in migrate; +.dockerignore no longer excludes tests/ — next build typechecks files importing tests/e2e/support/env; image build needs npm_ca secret in sandbox) → eval dispatched (sonnet/low)
