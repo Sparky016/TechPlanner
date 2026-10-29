@@ -44,15 +44,16 @@ async function append(client: DbClient, input: AuditInput): Promise<{ id: string
   };
 
   await withTxLock(client, CHAIN_LOCK);
-  const head = await client.query<{ hash: Buffer }>('SELECT hash FROM audit_record ORDER BY id DESC LIMIT 1');
+  const head = await client.query<{ id: string; hash: Buffer }>(
+    'SELECT id, hash FROM audit_record ORDER BY id DESC LIMIT 1',
+  );
   const prevHash = head.rows[0]?.hash ?? null;
   const hash = computeHash(prevHash ? prevHash.toString('hex') : '', payload);
 
-  const inserted = await client.query<{ id: string }>(
+  await client.query(
     `INSERT INTO audit_record
        (ts, user_id, user_display_name, session_id, ticket_ids, action, result, details, correlation_id, prev_hash, hash)
-     VALUES (?::timestamptz, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     RETURNING id`,
+     VALUES (?::timestamptz, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       payload.ts,
       payload.userId,
@@ -67,6 +68,12 @@ async function append(client: DbClient, input: AuditInput): Promise<{ id: string
       Buffer.from(hash, 'hex'),
     ],
   );
+  // Still under the chain lock, so the only record past the head is this one; the id bound keeps the lookup on the
+  // primary key (hash has no index).
+  const inserted = await client.query<{ id: string }>('SELECT id FROM audit_record WHERE id > ? AND hash = ?', [
+    head.rows[0]?.id ?? '0',
+    Buffer.from(hash, 'hex'),
+  ]);
   return { id: inserted.rows[0].id, hash };
 }
 

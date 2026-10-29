@@ -24,23 +24,20 @@ export function readTabId(req: Request): string {
 }
 
 // Acquires the lock if it is free, expired or already held by this tab (renewing it); otherwise reports 'other'.
-// A single conditional UPDATE, so concurrent tabs cannot both win.
+// A single conditional UPDATE, so concurrent tabs cannot both win. The read-back reports whoever holds it now.
 export async function acquireOrRenewLock(sessionId: string, tabId: string): Promise<LockState> {
-  const acquired = await query<{ lock_expires_at: Date }>(
+  await query(
     `UPDATE planning_session
         SET lock_holder = ?, lock_expires_at = now() + interval '60 seconds'
-      WHERE id = ? AND (lock_holder IS NULL OR lock_holder = ? OR lock_expires_at < now())
-     RETURNING lock_expires_at`,
+      WHERE id = ? AND (lock_holder IS NULL OR lock_holder = ? OR lock_expires_at < now())`,
     [tabId, sessionId, tabId],
   );
-  if (acquired[0]) return { holder: 'you', expiresAt: acquired[0].lock_expires_at };
-
-  const current = await query<{ lock_expires_at: Date | null }>(
-    'SELECT lock_expires_at FROM planning_session WHERE id = ?',
+  const current = await query<{ lock_holder: string | null; lock_expires_at: Date | null }>(
+    'SELECT lock_holder, lock_expires_at FROM planning_session WHERE id = ?',
     [sessionId],
   );
   if (!current[0]) throw new HttpError(404, 'Session not found', 'not_found');
-  return { holder: 'other', expiresAt: current[0].lock_expires_at };
+  return { holder: current[0].lock_holder === tabId ? 'you' : 'other', expiresAt: current[0].lock_expires_at };
 }
 
 // Unconditionally moves the lock to this tab and audits session.lock_taken_over with the previous holder.
@@ -56,12 +53,15 @@ export async function takeOverLock(
     );
     const row = previous.rows[0];
     if (!row) throw new HttpError(404, 'Session not found', 'not_found');
-    const updated = await client.query<{ lock_expires_at: Date }>(
+    await client.query(
       `UPDATE planning_session
           SET lock_holder = ?, lock_expires_at = now() + interval '60 seconds'
-        WHERE id = ?
-       RETURNING lock_expires_at`,
+        WHERE id = ?`,
       [tabId, sessionId],
+    );
+    const updated = await client.query<{ lock_expires_at: Date }>(
+      'SELECT lock_expires_at FROM planning_session WHERE id = ?',
+      [sessionId],
     );
     await recordAudit(
       {

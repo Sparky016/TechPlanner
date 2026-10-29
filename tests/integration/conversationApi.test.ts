@@ -63,11 +63,11 @@ interface TestSession {
 async function createLockedSession(): Promise<TestSession> {
   keySeq++;
   const key = `CNV-${keySeq}`;
-  const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id) VALUES (?, ARRAY[?], ?) RETURNING id',
-    [key, key, ALICE.accountId],
+  const id = randomUUID();
+  await query(
+    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys, facilitator_id) VALUES (?, ?, ARRAY[?], ?)',
+    [id, key, key, ALICE.accountId],
   );
-  const id = rows[0].id;
   await initWorkingCopy(id);
   const tabId = randomUUID();
   await acquireOrRenewLock(id, tabId);
@@ -361,11 +361,12 @@ describe('POST /notes', () => {
 
 describe('questions', () => {
   async function insertQuestion(s: TestSession, text: string): Promise<string> {
-    const [row] = await query<{ id: string }>(
-      "INSERT INTO ai_question (session_id, section, text, status) VALUES (?, 'Security', ?, 'open') RETURNING id",
-      [s.id, text],
+    const id = randomUUID();
+    await query(
+      "INSERT INTO ai_question (id, session_id, section, text, status) VALUES (?, ?, 'Security', ?, 'open')",
+      [id, s.id, text],
     );
-    return row.id;
+    return id;
   }
 
   function dismiss(s: TestSession, qid: string, body?: unknown): Promise<Response> {

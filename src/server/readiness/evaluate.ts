@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { recordAudit } from '@/server/audit/audit';
 import { getConfig } from '@/server/config';
 import { type DbClient, query, withTransaction } from '@/server/db/pool';
@@ -146,12 +147,13 @@ async function applyReconciliation(
     await client.query("UPDATE issue SET status = 'resolved', resolved_at = now() WHERE id = ?", [i.id]);
   }
   for (const i of changes.insert) {
-    const { rows } = await client.query<{ id: string }>(
-      `INSERT INTO issue (session_id, severity, section, description, fingerprint, status)
-       VALUES (?, ?, ?, ?, ?, 'open') RETURNING id`,
-      [sessionId, i.severity, i.section, i.description, i.fingerprint],
+    const id = randomUUID();
+    await client.query(
+      `INSERT INTO issue (id, session_id, severity, section, description, fingerprint, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'open')`,
+      [id, sessionId, i.severity, i.section, i.description, i.fingerprint],
     );
-    current.push({ id: rows[0].id, ...i, status: 'open' });
+    current.push({ id, ...i, status: 'open' });
   }
   // Accepted-risk issues that were not reported again are left untouched but remain current.
   const touched = new Set(current.map((i) => i.id));
@@ -197,11 +199,13 @@ export async function evaluateSession(sessionId: string, opts: EvaluateOptions):
       [sessionId],
     );
     const issues = await applyReconciliation(client, sessionId, reported);
-    const { rows } = await client.query<{ id: string }>(
-      'INSERT INTO evaluation (session_id, section_statuses, score) VALUES (?, ?, ?) RETURNING id',
-      [sessionId, JSON.stringify(statuses), score],
-    );
-    const evaluationId = rows[0].id;
+    const evaluationId = randomUUID();
+    await client.query('INSERT INTO evaluation (id, session_id, section_statuses, score) VALUES (?, ?, ?, ?)', [
+      evaluationId,
+      sessionId,
+      JSON.stringify(statuses),
+      score,
+    ]);
     const passes = gatePasses(issues);
     await recordAudit(
       {

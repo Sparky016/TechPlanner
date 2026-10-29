@@ -56,11 +56,12 @@ async function seedUser(user: { accountId: string; displayName: string }): Promi
 }
 
 async function createPlanningSession(primaryKey: string): Promise<string> {
-  const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES (?, ARRAY[?, ?]) RETURNING id',
-    [primaryKey, primaryKey, `${primaryKey}-LINKED`],
+  const id = randomUUID();
+  await query(
+    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, ARRAY[?, ?])',
+    [id, primaryKey, primaryKey, `${primaryKey}-LINKED`],
   );
-  return rows[0].id;
+  return id;
 }
 
 async function sessionCookieFor(userId: string): Promise<string> {

@@ -1,4 +1,5 @@
 import { resetDatabase } from './setup';
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { db, query, withTransaction } from '@/server/db/pool';
 import { runMigrations } from '../../scripts/migrate';
@@ -21,10 +22,12 @@ const TABLES = [
 ];
 
 async function createSession(): Promise<string> {
-  const [row] = await query<{ id: string }>(
-    "INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ('ABC-1', ARRAY['ABC-1']) RETURNING id",
+  const id = randomUUID();
+  await query(
+    "INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, 'ABC-1', ARRAY['ABC-1'])",
+    [id],
   );
-  return row.id;
+  return id;
 }
 
 beforeAll(async () => {
@@ -80,11 +83,12 @@ describe('check constraints', () => {
 
 describe('withTransaction', () => {
   it('commits on success', async () => {
-    const id = await withTransaction(async (client) => {
-      const res = await client.query<{ id: string }>(
-        "INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ('TX-OK', '{}') RETURNING id",
+    const id = randomUUID();
+    await withTransaction(async (client) => {
+      await client.query(
+        "INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, 'TX-OK', '{}')",
+        [id],
       );
-      return res.rows[0].id;
     });
     expect(await query('SELECT 1 FROM planning_session WHERE id = ?', [id])).toHaveLength(1);
   });

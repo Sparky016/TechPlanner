@@ -150,13 +150,12 @@ export async function recordDraftUpdated(sessionId: string, version: number, act
   const now = new Date();
   const cutoff = new Date(now.getTime() - DRAFT_UPDATED_WINDOW_MS);
   return withTransaction(async (client) => {
-    const { rows } = await client.query(
+    const { rowCount } = await client.query(
       `UPDATE working_copy SET last_draft_updated_audit_at = ?
-        WHERE session_id = ? AND (last_draft_updated_audit_at IS NULL OR last_draft_updated_audit_at <= ?)
-       RETURNING 1`,
+        WHERE session_id = ? AND (last_draft_updated_audit_at IS NULL OR last_draft_updated_audit_at <= ?)`,
       [now, sessionId, cutoff],
     );
-    if (rows.length === 0) return false;
+    if (rowCount === 0) return false;
     await recordAudit(
       {
         action: 'draft.updated',

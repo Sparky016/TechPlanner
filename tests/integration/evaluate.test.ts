@@ -6,6 +6,7 @@ vi.hoisted(() => {
 });
 
 import { resetDatabase } from './setup';
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { resetConfigForTests } from '@/server/config';
 import { db, query } from '@/server/db/pool';
@@ -22,12 +23,13 @@ let keySeq = 0;
 async function createSession(): Promise<string> {
   keySeq++;
   const key = `EVAL-${keySeq}`;
-  const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES (?, ARRAY[?]) RETURNING id',
-    [key, key],
+  const id = randomUUID();
+  await query(
+    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, ARRAY[?])',
+    [id, key, key],
   );
-  await initWorkingCopy(rows[0].id);
-  return rows[0].id;
+  await initWorkingCopy(id);
+  return id;
 }
 
 function script(statuses: SectionStatuses, extra: FakeStep[] = []): FakeStep[] {

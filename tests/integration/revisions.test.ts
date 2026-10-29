@@ -48,11 +48,11 @@ async function seedUser(user: { accountId: string; displayName: string }): Promi
 async function createLockedSession(): Promise<{ id: string; tabId: string }> {
   keySeq++;
   const key = `REV-${keySeq}`;
-  const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES (?, ARRAY[?]) RETURNING id',
-    [key, key],
+  const id = randomUUID();
+  await query(
+    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, ARRAY[?])',
+    [id, key, key],
   );
-  const id = rows[0].id;
   await initWorkingCopy(id);
   const tabId = randomUUID();
   await acquireOrRenewLock(id, tabId);

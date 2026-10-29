@@ -30,12 +30,17 @@ async function insertMessage(client: DbClient, sessionId: string, role: Role, co
   // Serialises concurrent writers for this session while seq is computed (same pattern as refreshSources).
   await client.query('SELECT 1 FROM planning_session WHERE id = ? FOR UPDATE', [sessionId]);
   const { rows } = await client.query<{ seq: number }>(
-    `INSERT INTO conversation_message (session_id, seq, role, content)
-     VALUES (?, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = ?), ?, ?)
-     RETURNING seq`,
-    [sessionId, sessionId, role, content],
+    'SELECT coalesce(max(seq), 0) + 1 AS seq FROM conversation_message WHERE session_id = ?',
+    [sessionId],
   );
-  return rows[0].seq;
+  const seq = rows[0].seq;
+  await client.query('INSERT INTO conversation_message (session_id, seq, role, content) VALUES (?, ?, ?, ?)', [
+    sessionId,
+    seq,
+    role,
+    content,
+  ]);
+  return seq;
 }
 
 interface RunOutcome {

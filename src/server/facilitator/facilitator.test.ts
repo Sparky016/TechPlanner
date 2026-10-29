@@ -84,10 +84,7 @@ beforeEach(() => {
   questionInserts = [];
   vi.mocked(loadSessionContext).mockResolvedValue(context());
   vi.mocked(query).mockImplementation(async (text: string, params?: unknown[]) => {
-    if (/INSERT INTO ai_question/.test(text)) {
-      questionInserts.push(params ?? []);
-      return [{ id: `q-${questionInserts.length}` }] as never;
-    }
+    if (/INSERT INTO ai_question/.test(text)) questionInserts.push(params ?? []);
     return [] as never;
   });
   const client = { query: vi.fn(async () => ({ rows: [{ seq: 7 }] })) };
@@ -104,7 +101,9 @@ describe('facilitator tools', () => {
     expect(results[3]).toBe(QUESTION_LIMIT_MESSAGE);
     expect(results.slice(0, 3).every((r) => r.startsWith('Question recorded'))).toBe(true);
     expect(questionInserts).toHaveLength(3);
-    expect(state.questionIds).toEqual(['q-1', 'q-2', 'q-3']);
+    // Ids are generated client-side and inserted as the first parameter.
+    expect(state.questionIds).toEqual(questionInserts.map((p) => p[0]));
+    expect(new Set(state.questionIds).size).toBe(3);
   });
 
   it('enforces the limit across a whole turn run', async () => {

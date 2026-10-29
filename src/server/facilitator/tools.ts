@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import type { CurrentUser } from '@/server/auth/session';
 import { isAzureDevOpsEnabled } from '@/server/azureDevOps/client';
-import { query } from '@/server/db/pool';
+import { db, query } from '@/server/db/pool';
 import type { LlmToolDefinition } from '@/server/llm';
 import { applyAiPatch } from '@/server/spec/workingCopyRepo';
 import { SECTION_NAMES, type SectionName } from '../../lib/spec/sections';
@@ -146,13 +147,14 @@ function askQuestionTool(state: FacilitatorTurnState): LlmToolDefinition {
         if (!issue) return `Unknown issue id: ${issueId}`;
         target ??= issue.section;
       }
-      const [row] = await query<{ id: string }>(
-        "INSERT INTO ai_question (session_id, issue_id, section, text, status) VALUES (?, ?, ?, ?, 'open') RETURNING id",
-        [state.sessionId, issueId ?? null, target, text],
+      const id = randomUUID();
+      await query(
+        "INSERT INTO ai_question (id, session_id, issue_id, section, text, status) VALUES (?, ?, ?, ?, ?, 'open')",
+        [id, state.sessionId, issueId ?? null, target, text],
       );
-      state.questionIds.push(row.id);
-      state.pending.push({ type: 'question', questionId: row.id, text, section: target });
-      return `Question recorded (id ${row.id})`;
+      state.questionIds.push(id);
+      state.pending.push({ type: 'question', questionId: id, text, section: target });
+      return `Question recorded (id ${id})`;
     },
   };
 }
@@ -169,11 +171,11 @@ function markQuestionAnsweredTool(state: FacilitatorTurnState): LlmToolDefinitio
     },
     handler: async (args) => {
       const { questionId } = args as MarkQuestionAnsweredArgs;
-      const rows = await query(
-        "UPDATE ai_question SET status = 'answered' WHERE id = ? AND session_id = ? AND status = 'open' RETURNING id",
+      const { rowCount } = await db.query(
+        "UPDATE ai_question SET status = 'answered' WHERE id = ? AND session_id = ? AND status = 'open'",
         [questionId, state.sessionId],
       );
-      return rows.length > 0 ? `Question ${questionId} marked answered` : `No open question with id ${questionId}`;
+      return rowCount > 0 ? `Question ${questionId} marked answered` : `No open question with id ${questionId}`;
     },
   };
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { recordAudit } from '@/server/audit/audit';
 import { getSiteUrl } from '@/server/atlassian/jira';
 import type { CurrentUser } from '@/server/auth/session';
@@ -183,12 +184,12 @@ export async function startPublish(input: StartPublishInput): Promise<StartPubli
         client,
       );
     }
-    const { rows } = await client.query<{ id: string }>(
-      `INSERT INTO publish_run (session_id, revision_number, override_justification, steps, status, created_by)
-       VALUES (?, ?, ?, ?, 'running', ?) RETURNING id`,
-      [sessionId, rev.number, overrideJustification, JSON.stringify(initialSteps()), user.accountId],
+    const id = randomUUID();
+    await client.query(
+      `INSERT INTO publish_run (id, session_id, revision_number, override_justification, steps, status, created_by)
+       VALUES (?, ?, ?, ?, ?, 'running', ?)`,
+      [id, sessionId, rev.number, overrideJustification, JSON.stringify(initialSteps()), user.accountId],
     );
-    const id = rows[0].id;
     await recordAudit(
       {
         ...audit,
@@ -402,10 +403,13 @@ async function finalize(run: RunRow, base: BaseContext | null, steps: StepState[
   const completed = steps.every((s) => s.status === 'success');
   const failedSteps = steps.filter((s) => s.status !== 'success').map((s) => s.name);
   const row = await withTransaction(async (client) => {
-    const { rows } = await client.query<RunRow>(
-      'UPDATE publish_run SET status = ?, steps = ?, updated_at = now() WHERE id = ? RETURNING *',
-      [completed ? 'completed' : 'failed', JSON.stringify(steps), run.id],
-    );
+    await client.query('UPDATE publish_run SET status = ?, steps = ?, updated_at = now() WHERE id = ?', [
+      completed ? 'completed' : 'failed',
+      JSON.stringify(steps),
+      run.id,
+    ]);
+    // The update holds the row lock until commit, so this reads exactly what it wrote.
+    const { rows } = await client.query<RunRow>('SELECT * FROM publish_run WHERE id = ?', [run.id]);
     await client.query('UPDATE planning_session SET status = ?, updated_at = now() WHERE id = ?', [
       completed ? 'published' : 'partially_published',
       run.session_id,

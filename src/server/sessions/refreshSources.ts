@@ -150,13 +150,17 @@ export async function refreshSources(user: CurrentUser, sessionId: string): Prom
     await client.query('SELECT 1 FROM planning_session WHERE id = ? FOR UPDATE', [session.id]);
     await insertSnapshots(client, session.id, next, retrievedAt);
     if (added.length === 0 && removed.length === 0 && changed.length === 0) return null;
-    const seq = await client.query<{ seq: number }>(
-      `INSERT INTO conversation_message (session_id, seq, role, content)
-       VALUES (?, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = ?), 'system', ?)
-       RETURNING seq`,
-      [session.id, session.id, buildMessage(retrievedAt, added, removed, changed)],
+    const nextSeq = await client.query<{ seq: number }>(
+      'SELECT coalesce(max(seq), 0) + 1 AS seq FROM conversation_message WHERE session_id = ?',
+      [session.id],
     );
-    return seq.rows[0].seq;
+    const seq = nextSeq.rows[0].seq;
+    await client.query("INSERT INTO conversation_message (session_id, seq, role, content) VALUES (?, ?, 'system', ?)", [
+      session.id,
+      seq,
+      buildMessage(retrievedAt, added, removed, changed),
+    ]);
+    return seq;
   });
 
   return {

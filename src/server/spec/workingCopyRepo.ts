@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { type DbClient, query, withTransaction } from '@/server/db/pool';
 import { SECTION_NAMES, type SectionName } from '../../lib/spec/sections';
 import { emptySections, validateSections, type SpecSections } from '../../lib/spec/document';
@@ -91,11 +92,15 @@ async function lockWorkingCopy(client: DbClient, sessionId: string): Promise<Wor
   return toWorkingCopy(rows[0]);
 }
 
+// Callers hold the row lock (lockWorkingCopy), so the version read back is the one this update wrote.
 async function writeSections(client: DbClient, sessionId: string, sections: WorkingCopySections): Promise<number> {
-  const { rows } = await client.query<{ version: number }>(
-    'UPDATE working_copy SET sections = ?, version = version + 1, updated_at = now() WHERE session_id = ? RETURNING version',
+  await client.query(
+    'UPDATE working_copy SET sections = ?, version = version + 1, updated_at = now() WHERE session_id = ?',
     [JSON.stringify(sections), sessionId],
   );
+  const { rows } = await client.query<{ version: number }>('SELECT version FROM working_copy WHERE session_id = ?', [
+    sessionId,
+  ]);
   return rows[0].version;
 }
 
@@ -116,13 +121,18 @@ export async function initWorkingCopy(
       lastAiReadAt: null,
       lastUserEditAt: null,
     };
-  const sql =
-    'INSERT INTO working_copy (session_id, sections) VALUES (?, ?) RETURNING session_id, sections, version, updated_at';
-  const params = [sessionId, JSON.stringify(sections)];
-  const [row] = client
-    ? (await client.query<WorkingCopyRow>(sql, params)).rows
-    : await query<WorkingCopyRow>(sql, params);
-  return toWorkingCopy(row);
+  const insert = async (tx: DbClient): Promise<WorkingCopy> => {
+    await tx.query('INSERT INTO working_copy (session_id, sections) VALUES (?, ?)', [
+      sessionId,
+      JSON.stringify(sections),
+    ]);
+    const { rows } = await tx.query<WorkingCopyRow>(
+      'SELECT session_id, sections, version, updated_at FROM working_copy WHERE session_id = ?',
+      [sessionId],
+    );
+    return toWorkingCopy(rows[0]);
+  };
+  return client ? insert(client) : withTransaction(insert);
 }
 
 export async function getWorkingCopy(sessionId: string): Promise<WorkingCopy | null> {
@@ -179,11 +189,12 @@ export async function applyAiPatch(sessionId: string, patch: SectionPatch, aiRea
     const wc = await lockWorkingCopy(client, sessionId);
     const current = wc.sections[patch.section];
     if (current.lastUserEditAt !== null && new Date(current.lastUserEditAt).getTime() > aiReadAt.getTime()) {
-      const { rows } = await client.query<{ id: string }>(
-        "INSERT INTO pending_suggestion (session_id, section, patch, status) VALUES (?, ?, ?, 'pending') RETURNING id",
-        [sessionId, patch.section, JSON.stringify(patch)],
+      const suggestionId = randomUUID();
+      await client.query(
+        "INSERT INTO pending_suggestion (id, session_id, section, patch, status) VALUES (?, ?, ?, ?, 'pending')",
+        [suggestionId, sessionId, patch.section, JSON.stringify(patch)],
       );
-      return { disposition: 'suggested', suggestionId: rows[0].id };
+      return { disposition: 'suggested', suggestionId };
     }
     const sections = {
       ...wc.sections,

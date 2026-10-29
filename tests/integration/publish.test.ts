@@ -179,11 +179,11 @@ type S = { id: string; tabId: string; keys: string[] };
 async function createLockedSession(): Promise<S> {
   keySeq++;
   const keys = [`PUB-${keySeq * 10 + 1}`, `PUB-${keySeq * 10 + 2}`];
-  const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id) VALUES (?, ?, ?) RETURNING id',
-    [keys[0], keys, ALICE.accountId],
+  const id = randomUUID();
+  await query(
+    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys, facilitator_id) VALUES (?, ?, ?, ?)',
+    [id, keys[0], keys, ALICE.accountId],
   );
-  const id = rows[0].id;
   await initWorkingCopy(id);
   for (const key of keys) {
     await query(

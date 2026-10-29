@@ -65,11 +65,11 @@ let fake: FakeLlmClient;
 async function createLockedSession(): Promise<{ id: string; tabId: string }> {
   keySeq++;
   const key = `RDY-${keySeq}`;
-  const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id) VALUES (?, ARRAY[?], ?) RETURNING id',
-    [key, key, ALICE.accountId],
+  const id = randomUUID();
+  await query(
+    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys, facilitator_id) VALUES (?, ?, ARRAY[?], ?)',
+    [id, key, key, ALICE.accountId],
   );
-  const id = rows[0].id;
   await initWorkingCopy(id);
   const tabId = randomUUID();
   await acquireOrRenewLock(id, tabId);

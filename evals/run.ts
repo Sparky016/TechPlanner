@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -269,11 +270,12 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
 
   async function createSession(f: Fixture, run: number, purpose: string): Promise<string> {
     return withTransaction(async (client) => {
-      const { rows } = await client.query<{ id: string }>(
-        'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES (?, ARRAY[?]) RETURNING id',
-        [f.ticket.key, f.ticket.key],
-      );
-      const sessionId = rows[0].id;
+      const sessionId = randomUUID();
+      await client.query('INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, ARRAY[?])', [
+        sessionId,
+        f.ticket.key,
+        f.ticket.key,
+      ]);
       const initial = { ...emptySections(), ...f.draft };
       await initWorkingCopy(sessionId, initial, client);
       await insertSnapshots(

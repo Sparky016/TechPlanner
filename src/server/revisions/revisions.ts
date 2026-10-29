@@ -68,22 +68,26 @@ export async function createRevision(client: DbClient, input: CreateRevisionInpu
     'SELECT score FROM evaluation WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT 1',
     [input.sessionId],
   );
-  const { rows } = await client.query<{ number: number }>(
+  const next = await client.query<{ number: number }>(
+    'SELECT coalesce(max(number), 0) + 1 AS number FROM revision WHERE session_id = ?',
+    [input.sessionId],
+  );
+  const number = next.rows[0].number;
+  await client.query(
     `INSERT INTO revision (session_id, number, sections, trigger, readiness_score, published, author_id, restored_from)
-     SELECT ?, coalesce(max(number), 0) + 1, ?, ?, ?, ?, ?, ? FROM revision WHERE session_id = ?
-     RETURNING number`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.sessionId,
+      number,
       JSON.stringify(bodies),
       input.trigger,
       score.rows[0]?.score ?? null,
       input.published,
       input.authorId,
       input.restoredFrom ?? null,
-      input.sessionId,
     ],
   );
-  return { number: rows[0].number };
+  return { number };
 }
 
 type RevisionRow = {

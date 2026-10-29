@@ -56,7 +56,6 @@ beforeEach(() => {
   fake = getLlmClient() as FakeLlmClient;
   existingIssues = [];
   sql = [];
-  let seq = 0;
   vi.mocked(getWorkingCopy).mockResolvedValue({
     sessionId: SESSION,
     version: 1,
@@ -70,7 +69,6 @@ beforeEach(() => {
     query: vi.fn(async (text: string, params?: unknown[]) => {
       sql.push({ text, params });
       if (/FROM issue/.test(text)) return { rows: existingIssues };
-      if (/INSERT INTO (issue|evaluation)/.test(text)) return { rows: [{ id: `id-${++seq}` }] };
       return { rows: [] };
     }),
   };
