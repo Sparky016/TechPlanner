@@ -26,6 +26,12 @@ const encryptionKey = z.string().refine((s) => {
   return Buffer.from(s, 'base64').length === 32;
 }, 'must be base64 decoding to exactly 32 bytes');
 
+// mysql://user:password@host:port/database (docs/specs/mysql-migration.md §3).
+const mysqlUrl = z.string().url().refine((s) => s.startsWith('mysql://'), 'must be a mysql:// URL');
+
+// A MySQL account as GRANT takes it: 'user'@'host'. Substituted verbatim into migrations, hence the strict pattern.
+const mysqlAccount = z.string().regex(/^'[A-Za-z0-9_.-]{1,32}'@'[A-Za-z0-9_.%:/-]{1,255}'$/, "must be 'user'@'host'");
+
 const projectOverrides = z.record(
   z.string(),
   z.object({ spaceKey: z.string().min(1), parentPageId: z.string().min(1) }),
@@ -42,7 +48,11 @@ const envSchema = z
     ATLASSIAN_API_BASE_URL: baseUrl('https://api.atlassian.com'),
     OAUTH_REDIRECT_URI: z.string().url(),
     TOKEN_ENCRYPTION_KEY: encryptionKey,
-    DATABASE_URL: z.string().url(),
+    // The app user (DML only). Migrations connect as the owner when MIGRATE_DATABASE_URL is set (§11a).
+    DATABASE_URL: mysqlUrl,
+    MIGRATE_DATABASE_URL: optional(mysqlUrl),
+    // Grantee of the per-table grants in db/migrations; production narrows the host to the bridge subnet.
+    APP_DB_USER: z.preprocess(emptyToUndefined, mysqlAccount.default("'techplanner_app'@'%'")),
     COPILOT_GITHUB_TOKEN: required,
     COPILOT_CLI_PATH: optional(z.string().min(1)),
     FACILITATOR_MODEL: required,

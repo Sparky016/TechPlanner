@@ -7,7 +7,7 @@ const validEnv: Record<string, string> = {
   ATLASSIAN_CLOUD_ID: 'cloud-id',
   OAUTH_REDIRECT_URI: 'http://localhost:3000/api/auth/callback',
   TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
-  DATABASE_URL: 'postgres://techplanner:techplanner@localhost:5432/techplanner',
+  DATABASE_URL: 'mysql://techplanner:techplanner@localhost:3306/techplanner',
   COPILOT_GITHUB_TOKEN: 'ghp_secrettoken',
   FACILITATOR_MODEL: 'model-a',
   EVALUATOR_MODEL: 'model-b',
@@ -105,6 +105,31 @@ describe('getConfig', () => {
     expect(() => getConfig()).toThrow(/SECTION_WEIGHTS/);
     process.env.SECTION_WEIGHTS = 'not json';
     expect(() => getConfig()).toThrow(/SECTION_WEIGHTS/);
+  });
+
+  it('requires mysql:// database URLs and defaults the migration grantee', () => {
+    const cfg = getConfig();
+    expect(cfg.MIGRATE_DATABASE_URL).toBeUndefined();
+    expect(cfg.APP_DB_USER).toBe("'techplanner_app'@'%'");
+
+    resetConfigForTests();
+    process.env.MIGRATE_DATABASE_URL = 'mysql://techplanner_owner:pw@localhost:3306/techplanner';
+    process.env.APP_DB_USER = "'techplanner_app'@'172.17.0.%'";
+    expect(getConfig()).toMatchObject({
+      MIGRATE_DATABASE_URL: 'mysql://techplanner_owner:pw@localhost:3306/techplanner',
+      APP_DB_USER: "'techplanner_app'@'172.17.0.%'",
+    });
+
+    for (const [name, value] of [
+      ['DATABASE_URL', 'postgresql://techplanner:techplanner@localhost:5432/techplanner'],
+      ['MIGRATE_DATABASE_URL', 'https://localhost:3306/techplanner'],
+      ['APP_DB_USER', 'techplanner_app'],
+      ['APP_DB_USER', "'app'@'%'; DROP DATABASE techplanner; --"],
+    ]) {
+      resetConfigForTests();
+      process.env = { ...validEnv, [name]: value } as unknown as NodeJS.ProcessEnv;
+      expect(() => getConfig()).toThrow(new RegExp(name));
+    }
   });
 
   it('lists every invalid variable name but never any value', () => {

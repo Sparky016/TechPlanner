@@ -10,7 +10,7 @@ vi.hoisted(() => {
     ATLASSIAN_CLOUD_ID: 'cloud-id',
     OAUTH_REDIRECT_URI: 'http://localhost:3000/auth/callback',
     TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
-    DATABASE_URL: 'postgres://techplanner:techplanner@localhost:5432/techplanner_t13',
+    DATABASE_URL: 'mysql://techplanner:techplanner@localhost:3306/techplanner_t13',
     COPILOT_GITHUB_TOKEN: 'ghp_x',
     FACILITATOR_MODEL: 'model-a',
     EVALUATOR_MODEL: 'model-b',
