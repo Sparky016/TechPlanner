@@ -143,6 +143,8 @@ describe('metric registration', () => {
         'publish_total',
         'readiness_score_at_publish',
         'confluence_external_edit_total',
+        'db_pool_wait_seconds',
+        'db_deadlock_retries_total',
       ]),
     );
   });

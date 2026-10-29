@@ -101,6 +101,11 @@ Generate a value with `openssl rand -base64 32`. It must decode to exactly 32 by
 Use the `mysql://` URLs from [Database](#database) above. Both must be `mysql://` URLs. Use generated passwords for any
 shared environment.
 
+Optional: `DB_POOL_SIZE` (connections per process, default 20) and `DB_POOL_ACQUIRE_TIMEOUT_MS` (how long a request
+waits for a free connection before it fails with 503 `db_pool_exhausted`, default 5000). Each streamed facilitator
+turn holds one connection. Keep the web and worker pools together below the server's `max_connections`.
+`db_pool_wait_seconds` on `/metrics` shows the waits.
+
 **Copilot (`COPILOT_GITHUB_TOKEN`, `FACILITATOR_MODEL`, `EVALUATOR_MODEL`)**
 
 - `COPILOT_GITHUB_TOKEN` is a GitHub token with a Copilot entitlement. The app does not use the logged-in user, so this token must be set. Production guidance is in `SPEC_DOC.md` (LLM-3).

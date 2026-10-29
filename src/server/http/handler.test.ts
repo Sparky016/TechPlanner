@@ -28,6 +28,7 @@ import { recordAudit } from '@/server/audit/audit';
 import { getCurrentUser } from '@/server/auth/session';
 import { ReauthRequiredError } from '@/server/auth/tokens';
 import { resetConfigForTests } from '@/server/config';
+import { PoolAcquireTimeoutError } from '@/server/db/mysql';
 import { HttpError } from '@/server/http/errors';
 import { getCorrelationId } from '@/server/observability/context';
 import { logger } from '@/server/observability/logger';
@@ -333,6 +334,20 @@ describe('unhandled errors (AC3)', () => {
     })(request('GET'), noParams);
     expect(res.status).toBe(500);
     expect((await res.json()).error.correlationId).toBe(res.headers.get('x-correlation-id'));
+  });
+
+  it('maps a pool acquire timeout to 503 db_pool_exhausted with Retry-After, without an audit write', async () => {
+    vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    getCurrentUserMock.mockRejectedValue(new PoolAcquireTimeoutError(5000));
+    const res = await ok(request('GET'), noParams);
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('1');
+    expect((await res.json()).error).toEqual({
+      message: 'The service is busy; retry shortly',
+      code: 'db_pool_exhausted',
+      correlationId: res.headers.get('x-correlation-id'),
+    });
+    expect(recordAuditMock).not.toHaveBeenCalled();
   });
 
   it('returns 500 when the session lookup fails', async () => {

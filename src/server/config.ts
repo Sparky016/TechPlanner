@@ -51,6 +51,10 @@ const envSchema = z
     // The app user (DML only). Migrations connect as the owner when MIGRATE_DATABASE_URL is set (§11a).
     DATABASE_URL: mysqlUrl,
     MIGRATE_DATABASE_URL: optional(mysqlUrl),
+    // Pooled connections per process (web and worker each have one pool), and how long a request waits for a free
+    // one before failing with 503. A streamed facilitator turn holds a connection for its whole duration.
+    DB_POOL_SIZE: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(20)),
+    DB_POOL_ACQUIRE_TIMEOUT_MS: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().default(5000)),
     // Grantee of the per-table grants in db/migrations; production narrows the host to the bridge subnet.
     APP_DB_USER: z.preprocess(emptyToUndefined, mysqlAccount.default("'techplanner_app'@'%'")),
     COPILOT_GITHUB_TOKEN: required,

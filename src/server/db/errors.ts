@@ -45,3 +45,8 @@ export function isLockWaitTimeout(err: unknown): boolean {
 export function isTriggerRejection(err: unknown): boolean {
   return hasErrno(err, ER_SIGNAL_EXCEPTION) && field(err, 'sqlState') === '45000';
 }
+
+/** connect() gave up waiting for a free pooled connection (PoolAcquireTimeoutError in ./mysql). */
+export function isPoolAcquireTimeout(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'DB_POOL_ACQUIRE_TIMEOUT';
+}

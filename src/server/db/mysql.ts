@@ -31,10 +31,30 @@ export interface PooledDbClient extends DbClient {
 }
 
 export interface DbPool extends DbClient {
+  /** Checks out a connection; rejects with PoolAcquireTimeoutError when none frees up within acquireTimeoutMs. */
   connect(): Promise<PooledDbClient>;
   end(): Promise<void>;
   /** Connections currently checked out, and callers waiting for one. */
   stats(): { checkedOut: number; waiting: number };
+}
+
+export interface DbPoolOptions {
+  /** Most connections open at once (the driver's default is 10). Callers beyond it queue, without a queue limit. */
+  connectionLimit?: number;
+  /** How long connect() waits for a free connection before failing; unset waits indefinitely. */
+  acquireTimeoutMs?: number;
+  /** Called once per connect() with the time spent waiting for the pool, and how the wait ended. */
+  onAcquire?: (waitSeconds: number, outcome: 'acquired' | 'timeout' | 'error') => void;
+}
+
+/** No pooled connection became free within the acquire timeout. The HTTP handler maps it to 503. */
+export class PoolAcquireTimeoutError extends Error {
+  readonly code = 'DB_POOL_ACQUIRE_TIMEOUT';
+
+  constructor(readonly timeoutMs: number) {
+    super(`No database connection became free within ${timeoutMs} ms`);
+    this.name = 'PoolAcquireTimeoutError';
+  }
 }
 
 // Run once on every new connection. UTC to match the driver's timezone 'Z'; strict modes reject silent truncation.
@@ -137,9 +157,15 @@ class MysqlPool implements DbPool {
   private checkedOut = 0;
   private waiting = 0;
 
-  constructor(url: string) {
+  constructor(
+    url: string,
+    private readonly options: DbPoolOptions,
+  ) {
     this.pool = mysql.createPool({
       uri: url,
+      ...(options.connectionLimit === undefined ? {} : { connectionLimit: options.connectionLimit }),
+      // Waiters are bounded by acquireTimeoutMs instead (mysql2 has no acquire timeout of its own).
+      queueLimit: 0,
       timezone: 'Z',
       dateStrings: false,
       supportBigNumbers: true,
@@ -163,13 +189,7 @@ class MysqlPool implements DbPool {
   }
 
   async connect(): Promise<PooledDbClient> {
-    this.waiting += 1;
-    let conn: PoolConnection;
-    try {
-      conn = await this.pool.getConnection();
-    } finally {
-      this.waiting -= 1;
-    }
+    const conn = await this.acquire();
     this.checkedOut += 1;
     const client = new MysqlClient(conn, () => {
       this.checkedOut -= 1;
@@ -186,6 +206,43 @@ class MysqlPool implements DbPool {
     return client;
   }
 
+  // Waits for a free connection, at most acquireTimeoutMs, so an exhausted pool fails fast instead of hanging.
+  private async acquire(): Promise<PoolConnection> {
+    const started = performance.now();
+    const timeoutMs = this.options.acquireTimeoutMs;
+    let outcome: 'acquired' | 'timeout' | 'error' = 'error';
+    let timer: NodeJS.Timeout | undefined;
+    this.waiting += 1;
+    const pending = this.pool.getConnection();
+    try {
+      const conn =
+        timeoutMs === undefined
+          ? await pending
+          : await Promise.race([
+              pending,
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new PoolAcquireTimeoutError(timeoutMs)), timeoutMs);
+              }),
+            ]);
+      outcome = 'acquired';
+      return conn;
+    } catch (err) {
+      if (err instanceof PoolAcquireTimeoutError) {
+        outcome = 'timeout';
+        // The driver keeps the request queued: give the connection straight back when it arrives.
+        pending.then(
+          (late) => late.release(),
+          () => undefined,
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+      this.waiting -= 1;
+      this.options.onAcquire?.((performance.now() - started) / 1000, outcome);
+    }
+  }
+
   end(): Promise<void> {
     return this.pool.end();
   }
@@ -196,6 +253,6 @@ class MysqlPool implements DbPool {
 }
 
 /** A pool for `url` (mysql://user:password@host:port/database). The app uses `db`; scripts and tests may need others. */
-export function createDbPool(url: string): DbPool {
-  return new MysqlPool(url);
+export function createDbPool(url: string, options: DbPoolOptions = {}): DbPool {
+  return new MysqlPool(url, options);
 }
