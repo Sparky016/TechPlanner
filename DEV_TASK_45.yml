@@ -1,0 +1,71 @@
+id: "45"
+title: "Replace pg-boss with an in-house SQL job queue (on PostgreSQL first)"
+phase: 7
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["44"]
+status: PENDING
+source: "docs/specs/mysql-migration.md §7"
+
+objective: |
+  pg-boss only supports PostgreSQL. Replace it with a small queue on a `job` table, keeping the public API of
+  src/server/jobs/queue.ts, while the database is still PostgreSQL. Task 46 then only ports its DDL.
+
+scope:
+  in:
+    - "db/migrations/0005_job_queue.sql (Postgres): job table per spec §7.2; singleton enforced by a partial unique index on (name, singleton_key) WHERE state = 'created'"
+    - "src/server/jobs/queue.ts: same exports (getQueue, stopQueue, enqueue, subscribeHandlers, EnqueueOptions); enqueue returns null on singleton conflict (isUniqueViolation)"
+    - "Fetch with SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1, mark active with locked_until, commit, run handler outside the transaction"
+    - "Retries: retryLimit 3, exponential backoff from retryDelay (default 1 s); NonRetryableJobError → deadletter with output.message"
+    - "Expired active jobs (crashed worker) return to created; completed jobs older than 7 days deleted on start and hourly"
+    - "Graceful stop waits for in-flight handlers (SIGTERM path in src/worker/index.ts unchanged)"
+    - "Integration tests: replace 'DROP SCHEMA IF EXISTS pgboss CASCADE' with 'DELETE FROM job' (jobs, readinessApi, conversationApi, publish tests)"
+    - "Remove pg-boss from package.json"
+  out:
+    - "MySQL DDL for job (task 46)"
+
+files:
+  "db/migrations/0005_job_queue.sql": "create"
+  "src/server/jobs/queue.ts": "rewrite"
+  "src/server/jobs/registry.ts": "update comment (pg-boss → queue)"
+  "tests/integration/jobs.test.ts": "update; add retry/backoff, deadletter, singleton, crash-recovery cases"
+  "tests/integration/readinessApi.test.ts, conversationApi.test.ts, publish.test.ts": "update cleanup"
+  "package.json, package-lock.json": "remove pg-boss"
+
+implementation_notes: |
+  All queue SQL must be portable to MySQL 8.4 except the DDL: ? placeholders, no RETURNING, SKIP LOCKED,
+  timestamps computed as now() + interval passed in seconds from JS (keep interval arithmetic in one helper so
+  task 46 swaps one function). Poll every 1 s; re-poll immediately after a job completes. Visibility timeout:
+  15 min (longest publish step budget), configurable per queue.
+  'short' policy (readiness debounce, task 26): at most one job in state 'created' per (name, singletonKey);
+  an active job does not block a new one.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Two enqueues with the same singletonKey while the first is queued yield one job and a null id"
+    verify: "npm run test:integration -- jobs"
+  - id: AC2
+    behavior: "Failing handler retries 3 times with growing delay, then state failed; NonRetryableJobError → deadletter without retry"
+    verify: "npm run test:integration -- jobs"
+  - id: AC3
+    behavior: "A job left active past locked_until is picked up again"
+    verify: "npm run test:integration -- jobs"
+  - id: AC4
+    behavior: "Readiness debounce and publish retry behave as before"
+    verify: "npm run test:integration && npm run test:e2e"
+  - id: AC5
+    behavior: "pg-boss is gone"
+    verify: "! grep -rn 'pg-boss\\|pgboss' src tests scripts package.json"
+
+risks_vulnerabilities:
+  - risk: "Duplicate execution after a visibility timeout on a slow but live handler"
+    mitigation: "Publish steps are idempotent (task 27); timeout set above the longest step"
+
+knowledge_gaps: []
+
+commit_message: |
+  feat(task-45): replace pg-boss with a SQL job queue

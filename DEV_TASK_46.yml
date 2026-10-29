@@ -1,0 +1,95 @@
+id: "46"
+title: "MySQL 8.4 cutover: mysql2 driver, MySQL migrations, dialect SQL, per-table grants, test harness and dev setup"
+phase: 7
+severity: critical
+complexity: critical
+model: opus
+effort: high
+eval_model: opus
+eval_effort: medium
+depends_on: ["44", "45"]
+status: PENDING
+source: "docs/specs/mysql-migration.md §3, §4, §5.2, §5.3 (remaining rows), §5.4, §6, §9, §11a (users and grants)"
+
+objective: |
+  Switch the application, scripts and tests from PostgreSQL to MySQL 8.4 in one task, so the branch is never
+  half on each database. After this task `npm run migrate && npm run dev` and every suite run against a native
+  MySQL with no Docker.
+
+scope:
+  in:
+    - "Driver: replace pg with mysql2/promise behind DbClient (task 44); pool options per spec §5.2 (timezone 'Z', bigNumberStrings, typeCast TINYINT(1) → boolean, multipleStatements false); session init SET time_zone='+00:00', strict sql_mode"
+    - "Config: DATABASE_URL must use mysql://; new optional MIGRATE_DATABASE_URL (owner user) read by scripts/migrate.ts, falling back to DATABASE_URL"
+    - "Migrations: rewrite 0001-0005 for MySQL (types per spec §4.1, CHECKs, FKs, UUID() defaults, utf8mb4 / utf8mb4_0900_bin on hashed and key columns); triggers for revision immutability and audit UPDATE/DELETE with SIGNAL SQLSTATE '45000'; app_lock table seeded with 'audit_chain'; job table with STORED generated singleton column; delete the Postgres versions"
+    - "Per-table grants in each migration: GRANT SELECT, INSERT, UPDATE, DELETE to techplanner_app; audit_record and schema_migrations get SELECT, INSERT only (audit) / none (schema_migrations); grantee written as ${APP_DB_USER} and substituted by the runner from env APP_DB_USER (default 'techplanner_app'@'%'; production sets the bridge-subnet host, task 48)"
+    - "Runner (scripts/migrate.ts): GET_LOCK('techplanner_migrate', 60) / RELEASE_LOCK; split files on '-- statement-break'; record schema_migrations after the file; error message says DDL may be partially applied"
+    - "Remaining dialect SQL: ON CONFLICT → INSERT ... AS new ON DUPLICATE KEY UPDATE (auth/tokens.ts, auth/callback/route.ts, spec/editAudit.ts); cardinality → JSON_LENGTH; make_interval / interval '60 seconds' → INTERVAL ? SECOND|HOUR|DAY; ::casts removed; now() → NOW(6)"
+    - "Arrays → JSON: ticket_keys, scopes, ticket_ids written with JSON.stringify, read as string[]"
+    - "locks.ts MySQL impls: withTxLock → INSERT IGNORE INTO app_lock(name) + SELECT ... FOR UPDATE; connection lock → GET_LOCK(name, 0) / RELEASE_LOCK(name)"
+    - "errors.ts MySQL errno: 1062, 1452, 1213, 1205, 1644 (SIGNAL)"
+    - "scripts/mysql-bootstrap.sql: create techplanner and techplanner_test databases, techplanner_owner (ALL + GRANT OPTION) and techplanner_app (no database-wide grants); dev passwords documented as dev-only"
+    - "Tests: tests/integration/setup.ts drops and recreates the test database (owner connection) then migrates; env defaults to mysql://techplanner_app@localhost:3306/techplanner_test with MIGRATE_DATABASE_URL for the owner; tests/e2e/support/prepareDb.ts uses CREATE DATABASE IF NOT EXISTS; e2e env and helpers; unit-test config fixtures postgres:// → mysql://"
+    - "schema.test.ts: trigger rejections asserted by isTriggerRejection; new privilege case: as techplanner_app, UPDATE, DELETE and TRUNCATE on audit_record all fail"
+    - "Remove pg and @types/pg; add mysql2; delete docker-compose.dev.yml"
+    - "README development section: install MySQL 8.4 (Homebrew / apt / Windows installer), run scripts/mysql-bootstrap.sql, set DATABASE_URL and MIGRATE_DATABASE_URL; .env.example; DEV_TASK_LIST execution notes (integration tests need local MySQL, per-test databases)"
+  out:
+    - "Production compose, runbook, backups (task 48)"
+    - "Hash round-trip property tests and concurrency hardening (task 47)"
+
+files:
+  "src/server/db/pool.ts, locks.ts, errors.ts": "update"
+  "src/server/db/placeholders.ts, placeholders.test.ts": "delete (mysql2 uses ? natively)"
+  "src/server/config.ts, src/server/config.test.ts": "update"
+  "db/migrations/0001_init.sql .. 0005_job_queue.sql": "rewrite for MySQL"
+  "scripts/migrate.ts": "update"
+  "scripts/mysql-bootstrap.sql": "create"
+  "src/server/auth/tokens.ts, src/server/auth/session.ts, src/app/auth/callback/route.ts, src/server/spec/editAudit.ts, src/server/sessions/lock.ts, src/server/audit/*.ts, src/server/jobs/queue.ts": "update dialect SQL"
+  "src/**/*.ts": "update array columns and casts where used"
+  "tests/integration/setup.ts, env.ts, schema.test.ts": "update"
+  "tests/e2e/support/env.ts, prepareDb.ts, helpers.ts": "update"
+  "src/**/*.test.ts": "update DATABASE_URL fixtures"
+  "docker-compose.dev.yml": "delete"
+  "README.md, .env.example, DEV_TASK_LIST.md": "update"
+  "package.json, package-lock.json": "remove pg, @types/pg; add mysql2"
+
+implementation_notes: |
+  Install MySQL 8.4 locally to run the suites (no Docker). The worker and eval may need: apt-get install
+  mysql-server-8.4 or the MySQL APT repo; then `mysql -uroot < scripts/mysql-bootstrap.sql`.
+  revision_immutable trigger: compare every column with <=> except published; allow only published 0 → 1.
+  Use mysql2 query() (text protocol) for DDL and execute() (prepared) for parameterised DML.
+  JSON columns: mysql2 returns parsed objects; jsonb-era code that JSON.parse()d a string must not double-parse.
+  Section ordering: run log 2026-10-05 19:35 notes code relied on JSONB key order being unordered; MySQL JSON
+  also reorders keys, so sort in code as today.
+  CHAR(36) UUIDs: compare lowercase; canonicalUuid in audit stays.
+  Integration databases per parallel test file stay as today (techplanner_tNN), created by setup.ts with the owner user.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Fresh MySQL 8.4 with only the bootstrap script: migrate applies 0001-0005 and a second run applies nothing"
+    verify: "npm run migrate && npm run migrate | grep 'No pending migrations'"
+  - id: AC2
+    behavior: "All suites pass on MySQL with no Docker running"
+    verify: "npm run lint && npm run typecheck && npm test && npm run test:integration && npm run test:e2e"
+  - id: AC3
+    behavior: "Audit UPDATE/DELETE rejected by trigger for any user; TRUNCATE rejected for techplanner_app"
+    verify: "npm run test:integration -- schema"
+  - id: AC4
+    behavior: "Concurrent migrate runs serialise"
+    verify: "npm run test:integration -- schema"
+  - id: AC5
+    behavior: "No Postgres left in code or deps"
+    verify: "! grep -rnE \"from 'pg'|postgres://|pg_|hashtext|ON CONFLICT|make_interval|::(text|bigint|timestamptz|uuid)\" src scripts tests evals --include=*.ts && ! grep -n '\"pg\"' package.json"
+
+risks_vulnerabilities:
+  - risk: "Partially applied DDL after a failed migration"
+    mitigation: "One logical change per file; IF NOT EXISTS where cheap; runner error says manual cleanup may be needed; documented in runbook (task 48)"
+  - risk: "TINYINT/BIGINT/JSON type differences surface as subtle bugs (0/1 vs boolean, number vs string ids)"
+    mitigation: "typeCast in one place; integration suites cover every repository"
+  - risk: "Audit hash mismatch from collation or timestamp formatting"
+    mitigation: "utf8mb4_0900_bin on hashed columns; audit.test.ts verifies the chain; deeper property test in task 47"
+
+knowledge_gaps:
+  - "Whether mysql2 typeCast for TINYINT(1) interferes with JSON columns. Fallback: map booleans per repository instead of globally."
+
+commit_message: |
+  feat(task-46): switch database from PostgreSQL to MySQL 8.4

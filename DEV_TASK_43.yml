@@ -1,0 +1,47 @@
+id: "43"
+title: "ADRs for the MySQL migration (new ADR-0017, amend ADR-0001 and ADR-0013)"
+phase: 7
+severity: medium
+complexity: trivial
+model: haiku
+effort: low
+eval_model: haiku
+eval_effort: low
+depends_on: []
+status: PENDING
+source: "docs/specs/mysql-migration.md §13 decisions 1-4, §4.2, §11a"
+
+objective: |
+  Record the database decision before any code changes: MySQL 8.4 LTS, native on the hosting server, with the
+  audit TRUNCATE guarantee enforced by privileges instead of a trigger.
+
+scope:
+  in:
+    - "docs/adr/0017-mysql.md: decision, rationale (MySQL required), consequences (non-transactional DDL, no TRUNCATE trigger, in-house queue replaces pg-boss), revisit-if"
+    - "docs/adr/0001-tech-stack.md: database line → MySQL 8.4; Status 'Amended by ADR-0017'"
+    - "docs/adr/0013-immutable-audit.md: UPDATE/DELETE still rejected by triggers; TRUNCATE rejected by privileges for techplanner_app only; owner user can truncate (accepted risk)"
+    - "docs/adr/README.md index row for 0017"
+  out:
+    - "Any code, schema or runbook change (tasks 44-48)"
+
+files:
+  "docs/adr/0017-mysql.md": "create"
+  "docs/adr/0001-tech-stack.md": "update"
+  "docs/adr/0013-immutable-audit.md": "update"
+  "docs/adr/README.md": "update"
+
+implementation_notes: |
+  Follow the existing ADR template (Status, Date, Source, Context, Decision, Rationale, Revisit if).
+  Source line: docs/specs/mysql-migration.md.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "ADR-0017 exists, is listed in the ADR index, and ADR-0001 and ADR-0013 reference it"
+    verify: "grep -l 'ADR-0017' docs/adr/0001-tech-stack.md docs/adr/0013-immutable-audit.md docs/adr/README.md"
+
+risks_vulnerabilities: []
+
+knowledge_gaps: []
+
+commit_message: |
+  docs(task-43): record MySQL 8.4 decision in ADRs

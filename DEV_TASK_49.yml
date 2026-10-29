@@ -1,0 +1,52 @@
+id: "49"
+title: "MySQL migration verification gate: full suites, perf targets, audit verify, residue checks"
+phase: 7
+severity: high
+complexity: low
+model: haiku
+effort: low
+eval_model: haiku
+eval_effort: low
+depends_on: ["47", "48"]
+status: PENDING
+source: "docs/specs/mysql-migration.md §12"
+
+objective: |
+  Confirm every acceptance criterion of the migration spec on a clean machine with MySQL 8.4 and no Docker
+  database.
+
+scope:
+  in:
+    - "Clean clone, npm ci, bootstrap MySQL, migrate, then lint, typecheck, build (rm -rf .next first), unit, integration, e2e"
+    - "npm run audit:verify after e2e"
+    - "npm run perf against ADR-0007 targets; record results in docs/perf-report.md (MySQL section)"
+    - "Residue grep (task 46 AC5) and dependency check"
+    - "Mark spec Status: Implemented; update DEV_TASK_LIST run log"
+  out:
+    - "Fixes; failures go back to the owning task as REWORK"
+
+files:
+  "docs/perf-report.md": "update"
+  "docs/specs/mysql-migration.md": "update status"
+  "DEV_TASK_LIST.md": "update"
+
+implementation_notes: |
+  Real-LLM perf (NFR-1/2) still needs COPILOT_GITHUB_TOKEN; run with LLM_FAKE=1 and say so in the report.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "All suites and build pass on MySQL"
+    verify: "npm run lint && npm run typecheck && rm -rf .next && npm run build && npm test && npm run test:integration && npm run test:e2e"
+  - id: AC2
+    behavior: "Audit chain intact"
+    verify: "npm run audit:verify"
+  - id: AC3
+    behavior: "Perf targets met or deviations recorded with cause"
+    verify: "npm run perf"
+
+risks_vulnerabilities: []
+
+knowledge_gaps: []
+
+commit_message: |
+  chore(task-49): verify MySQL migration

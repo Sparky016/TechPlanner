@@ -1,0 +1,58 @@
+id: "47"
+title: "MySQL integrity and concurrency hardening: audit hash round-trip, gap-lock review, deadlock retry, pool sizing"
+phase: 7
+severity: high
+complexity: high
+model: opus
+effort: medium
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["46"]
+status: PENDING
+source: "docs/specs/mysql-migration.md §7.3, §8; run log 2026-10-06 15:00 (NFR-5)"
+
+objective: |
+  Prove the audit hash chain and the locking behaviour hold on MySQL, and fix what does not.
+
+scope:
+  in:
+    - "Property test: recordAudit with varied details (nested objects, unicode incl. astral plane, large and fractional numbers, empty arrays, null) then scripts/audit-verify reports intact"
+    - "Reject or normalise details values that do not round-trip through MySQL JSON (e.g. integers beyond 2^53), mirroring the existing lone-surrogate rejection"
+    - "Review all 15 SELECT ... FOR UPDATE sites under REPEATABLE READ; document each in a comment only where the lock is a range"
+    - "Concurrency tests: parallel suggestion accept + section edit, parallel evaluate + edit, parallel publish retry; no deadlock or, if InnoDB reports 1213, withTransaction retries the whole callback up to 3 times (only for callbacks marked idempotent)"
+    - "Pool: connectionLimit from DB_POOL_SIZE (default 20), queueLimit 0, acquire timeout so NFR-5 pool exhaustion fails fast instead of hanging; metric for pool wait time"
+  out:
+    - "Rewriting the messages-route turn lock design (follow-up if NFR-5 still fails)"
+
+files:
+  "tests/integration/audit.test.ts": "update; property cases"
+  "tests/integration/concurrency.test.ts": "create"
+  "src/server/audit/audit.ts, src/server/audit/hash.ts": "update if round-trip fixes needed"
+  "src/server/db/pool.ts": "update; deadlock retry, pool options"
+  "src/server/config.ts, .env.example": "add DB_POOL_SIZE"
+  "src/server/observability/metrics.ts": "add db pool wait histogram"
+
+implementation_notes: |
+  Use fast-check only if already acceptable as a devDependency; otherwise a seeded table of cases is enough.
+  Deadlock retry must not wrap callbacks with external side effects (Atlassian calls, LLM calls, audit already
+  inside the tx is fine because it rolls back).
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Audit chain verifies after the property cases"
+    verify: "npm run test:integration -- audit && npm run audit:verify"
+  - id: AC2
+    behavior: "Concurrency tests pass 20 consecutive runs"
+    verify: "for i in $(seq 20); do npm run test:integration -- concurrency || exit 1; done"
+  - id: AC3
+    behavior: "Pool exhaustion returns 503 within the acquire timeout instead of hanging"
+    verify: "npm run test:integration -- concurrency"
+
+risks_vulnerabilities:
+  - risk: "Deadlock retry re-runs non-idempotent work"
+    mitigation: "Opt-in per call site; external calls stay outside transactions (existing pattern)"
+
+knowledge_gaps: []
+
+commit_message: |
+  test(task-47): harden audit integrity and locking on MySQL

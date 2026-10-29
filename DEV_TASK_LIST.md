@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-06 16:00
+updated: 2026-10-29 12:00
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -13,6 +13,7 @@ Phases:
 4. **Publish**: step contract and converters, Confluence/Jira/webhook steps, orchestration with override and retry
 5. **UI**: shell and pages, three-panel workspace, history and audit views
 6. **Hardening & verification**: Docker/runbook, E2E, LLM evals, performance, accessibility
+7. **MySQL migration** ([spec](docs/specs/mysql-migration.md)): ADRs, dialect-neutral data layer, SQL queue, MySQL cutover, hardening, hosting-server ops, verification
 
 ## Tasks
 
@@ -60,6 +61,13 @@ Phases:
 | 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | DONE | c8195de |
 | 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | DONE | a3b00e2 |
 | 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | DONE | 74e6a0b |
+| 43 | 7 | [ADRs for the MySQL migration (new ADR-0017, amend ADR-0001 and ADR-0013)](DEV_TASK_43.yml) | medium | trivial | haiku / low | — | PENDING | |
+| 44 | 7 | [Dialect-neutral data-access layer on PostgreSQL (DbClient, ? placeholders, no RETURNING, lock and error helpers)](DEV_TASK_44.yml) | critical | high | opus / high | 43 | PENDING | |
+| 45 | 7 | [Replace pg-boss with an in-house SQL job queue (on PostgreSQL first)](DEV_TASK_45.yml) | high | high | opus / medium | 44 | PENDING | |
+| 46 | 7 | [MySQL 8.4 cutover: mysql2 driver, MySQL migrations, dialect SQL, per-table grants, test harness and dev setup](DEV_TASK_46.yml) | critical | critical | opus / high | 44, 45 | PENDING | |
+| 47 | 7 | [MySQL integrity and concurrency hardening: audit hash round-trip, gap-lock review, deadlock retry, pool sizing](DEV_TASK_47.yml) | high | high | opus / medium | 46 | PENDING | |
+| 48 | 7 | [Production on the hosting server: native MySQL setup, compose wiring, server config, backups and runbook](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46 | PENDING | |
+| 49 | 7 | [MySQL migration verification gate: full suites, perf targets, audit verify, residue checks](DEV_TASK_49.yml) | high | low | haiku / low | 47, 48 | PENDING | |
 
 ## Execution notes
 
@@ -93,6 +101,7 @@ Phases:
   - Phase 1: start 01 and 10 together. Once 01 is done, 02, 04 and 05 can run in parallel.
   - Phase 2: 12 can run alongside the 11 → 13/14 chain.
   - Phase 4: 28 → (29, 30, 31) in parallel → 27.
+  - Phase 7: 43 → 44 → 45 → 46 → (47, 48) in parallel → 49. 44 and 45 land on PostgreSQL with every suite green; 46 is the only task that switches databases, so the branch is never half-migrated.
 - **Stakeholder ratification:** SPEC_DOC §12 asks for D-1, D-2, D-8 and D-9 to be ratified. Tasks 01, 12, 30 and 31 assume the spec's resolved positions. If the decisions change, rework those tasks and the tasks that depend on them.
 
 ## Open knowledge gaps
@@ -279,3 +288,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-06 15:30 | phase 6 | all 5 tasks DONE → final verification gate dispatched (haiku/low)
 2026-10-06 16:00 | phase 6 | gate: lint, typecheck, unit 308, integration 135, e2e 14, eval --validate-only PASS; build FAIL (ENOENT .next/server/pages-manifest.json) traced to stale .next from next dev/perf runs — orchestrator clean rebuild (rm -rf .next) PASS → gate PASS
 2026-10-06 16:00 | run | ALL 42 TASKS DONE. Open: NFR-5 pool-exhaustion deadlock (follow-up task needed); token-gated 40 AC2/AC4, 41 real-LLM, 38 real-model health check; user's uncommitted ADR 0001/0002/0008/0009 status edits
+2026-10-29 12:00 | phase 7 | planned: tasks 43-49 for MySQL 8.4 migration (docs/specs/mysql-migration.md)

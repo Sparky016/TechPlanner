@@ -1,0 +1,69 @@
+id: "44"
+title: "Dialect-neutral data-access layer on PostgreSQL (DbClient, ? placeholders, no RETURNING, lock and error helpers)"
+phase: 7
+severity: critical
+complexity: high
+model: opus
+effort: high
+eval_model: sonnet
+eval_effort: medium
+depends_on: ["43"]
+status: PENDING
+source: "docs/specs/mysql-migration.md §5.1, §5.3, §5.4"
+
+objective: |
+  Remove every Postgres-specific construct that has a portable equivalent while still running on PostgreSQL, so
+  the MySQL cutover (task 46) is mostly a driver swap. Behaviour does not change; all existing suites stay green.
+
+scope:
+  in:
+    - "src/server/db/pool.ts: export a DbClient interface { query<T>(sql, params?): Promise<{ rows: T[]; rowCount: number }> } and wrap pg's Pool/PoolClient in it; query(), withTransaction() keep their signatures but hand callers a DbClient; db.connect() callers get a DbClient with release(discard?)"
+    - "pg adapter translates ? placeholders to $1..$n (skip ? inside single-quoted literals and comments); reject a statement that still contains $n"
+    - "Replace every $n with ? across src/, scripts/, evals/, tests/ (≈65 files); a reused $1 becomes a repeated parameter"
+    - "Remove RETURNING (≈20 uses in 13 files): UUID ids generated with crypto.randomUUID() before INSERT; bigint ids (source_snapshot, audit_record) read via a follow-up SELECT in the same transaction; UPDATE ... RETURNING becomes UPDATE then SELECT (row already locked by FOR UPDATE where concurrency matters)"
+    - "src/server/db/locks.ts: withTxLock(client, name) (today pg_advisory_xact_lock(hashtext(name))) and tryConnectionLock(client, name) / releaseConnectionLock(client, name) (today pg_try_advisory_lock / pg_advisory_unlock); use them in audit/audit.ts, auth/tokens.ts, api/sessions/[id]/messages/route.ts"
+    - "src/server/db/errors.ts: isUniqueViolation(err), isForeignKeyViolation(err), isDeadlock(err), isTriggerRejection(err) (pg SQLSTATE now; MySQL errno added in task 46)"
+    - "Replace PoolClient type imports from 'pg' with DbClient everywhere outside src/server/db"
+    - "Update unit tests that assert SQL text ($1 → ?): readiness/evaluate, publish/steps/*, facilitator/*"
+  out:
+    - "Upserts, intervals, casts, arrays and DDL (dialect-specific; task 46)"
+    - "Job queue (task 45)"
+
+files:
+  "src/server/db/pool.ts": "update"
+  "src/server/db/locks.ts": "create"
+  "src/server/db/errors.ts": "create"
+  "src/server/db/placeholders.ts": "create; ? → $n translator"
+  "src/server/db/placeholders.test.ts": "create"
+  "src/**/*.ts, scripts/**/*.ts, evals/**/*.ts, tests/**/*.ts": "update placeholders, RETURNING, PoolClient types"
+
+implementation_notes: |
+  Keep the change mechanical and reviewable: one commit for the DbClient/adapter/helpers, one for placeholders,
+  one for RETURNING. Grep afterwards: `grep -rnE "\$[0-9]+" src scripts evals tests --include=*.ts` must only hit
+  the translator and its tests; `grep -rn RETURNING` must be empty outside db/migrations.
+  audit/audit.ts: id comes from the follow-up SELECT (`SELECT id FROM audit_record WHERE hash = ?`, hash is
+  unique per record) inside the chain lock.
+  NFR-5 note (run log 2026-10-06 15:00): the messages route holds a pooled connection for the turn lock. Keep
+  that behaviour; pool sizing is task 47.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "No $n placeholder or RETURNING remains outside the translator, its tests and SQL migrations"
+    verify: "grep -rnE '\\$[0-9]+|RETURNING' src scripts evals tests --include=*.ts | grep -v 'src/server/db/placeholders'"
+  - id: AC2
+    behavior: "Translator handles literals, comments, repeated and zero parameters"
+    verify: "npm test -- placeholders"
+  - id: AC3
+    behavior: "Behaviour unchanged on PostgreSQL"
+    verify: "npm run lint && npm run typecheck && npm test && npm run test:integration && npm run test:e2e"
+
+risks_vulnerabilities:
+  - risk: "Mis-ordered parameters after replacing a reused $1"
+    mitigation: "Review every query that referenced the same $n twice; integration suites cover each repository"
+  - risk: "Dropping RETURNING opens a race between write and read-back"
+    mitigation: "Read-back runs in the same transaction; ids generated client-side where possible"
+
+knowledge_gaps: []
+
+commit_message: |
+  refactor(task-44): dialect-neutral data-access layer

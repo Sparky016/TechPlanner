@@ -1,0 +1,62 @@
+id: "48"
+title: "Production on the hosting server: native MySQL setup, compose wiring, server config, backups and runbook"
+phase: 7
+severity: high
+complexity: medium
+model: sonnet
+effort: medium
+eval_model: sonnet
+eval_effort: low
+depends_on: ["46"]
+status: PENDING
+source: "docs/specs/mysql-migration.md §11a; decision 3"
+
+objective: |
+  Run the TechPlanner containers against MySQL 8.4 installed natively on the hosting server, with least-privilege
+  users, backups and a tested restore.
+
+scope:
+  in:
+    - "docker-compose.prod.example.yml: remove the postgres service and its volume; extra_hosts host.docker.internal:host-gateway on migrate, worker, web; migrate gets DATABASE_URL from MIGRATE_DATABASE_URL (owner); web/worker use the app user; depends_on migrate only"
+    - "Dockerfile: build-time placeholder DATABASE_URL → mysql://"
+    - "docs/ops/mysql/techplanner.cnf: settings from spec §11a (bind-address 127.0.0.1 + docker bridge gateway, UTC, strict sql_mode, utf8mb4, binlog with 7-day expiry, buffer pool guidance)"
+    - "scripts/ops/mysql-backup.sh: nightly mysqldump --single-transaction --routines --triggers | gzip, 14-day retention, exit non-zero on failure; backup user grants documented"
+    - "docs/runbook.md: install MySQL 8.4 (MySQL APT repo), apply techplanner.cnf, firewall 3306, run bootstrap with production passwords and the bridge-subnet host instead of '%' (and set APP_DB_USER to match on the migrate service), deploy order, backup cron, restore procedure, restore drill with npm run audit:verify, upgrade policy (8.4 LTS, dump first), failed-migration cleanup, TRUNCATE note (owner user can truncate audit_record; keep owner credentials out of the app containers)"
+    - "MANUAL_TEST.md: database steps updated"
+  out:
+    - "Provisioning automation (Ansible etc.)"
+
+files:
+  "docker-compose.prod.example.yml": "update"
+  "Dockerfile": "update"
+  "docs/ops/mysql/techplanner.cnf": "create"
+  "scripts/ops/mysql-backup.sh": "create"
+  "docs/runbook.md": "update"
+  "MANUAL_TEST.md": "update"
+
+implementation_notes: |
+  On Linux, host-gateway resolves to the bridge gateway; MySQL must listen there, not on 0.0.0.0.
+  Owner credentials exist only in the migrate service's environment.
+
+acceptance_criteria:
+  - id: AC1
+    behavior: "Compose starts migrate → worker → web against a host MySQL with no database container; /healthz ok"
+    verify: "docker compose --env-file prod.env -f docker-compose.prod.example.yml up -d && curl -fsS localhost:3000/healthz"
+  - id: AC2
+    behavior: "Backup script produces a dump that restores into a scratch database and passes audit:verify"
+    verify: "scripts/ops/mysql-backup.sh && runbook restore drill steps"
+  - id: AC3
+    behavior: "web and worker containers do not hold owner credentials"
+    verify: "docker compose config | grep -A30 'web:' | grep -v techplanner_owner"
+
+risks_vulnerabilities:
+  - risk: "MySQL reachable from outside the host"
+    mitigation: "bind-address limited to loopback and bridge gateway; firewall rule; user hosts restricted to the bridge subnet"
+  - risk: "Backups silently failing"
+    mitigation: "Script exits non-zero; cron mails or logs failures; restore drill before go-live"
+
+knowledge_gaps:
+  - "Hosting server OS and firewall tooling are not in the repo. Fallback: document Ubuntu 24.04 + ufw; note equivalents."
+
+commit_message: |
+  ops(task-48): run production on native MySQL 8.4 with backups

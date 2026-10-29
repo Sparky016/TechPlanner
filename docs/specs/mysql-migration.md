@@ -234,7 +234,9 @@ Rejected because MySQL is required (§13). Kept for the ADR record.
 
 ## 11. Work breakdown
 
-Each step lands green (lint, typecheck, unit, integration).
+Each step lands green (lint, typecheck, unit, integration). Implementation tasks: DEV_TASK_43–49
+([DEV_TASK_LIST.md](../../DEV_TASK_LIST.md), phase 7). The tasks reorder the steps below so the dialect-neutral
+refactor and the queue replacement land on PostgreSQL first, and one task (46) switches databases.
 
 1. **ADR**: write ADR-0017 "Database: MySQL 8.4 on the hosting server", amend ADR-0001 (database) and ADR-0013
    (TRUNCATE enforced by privileges, accepted).
