@@ -103,3 +103,94 @@ npm run perf -- --real-llm   # needs COPILOT_GITHUB_TOKEN, FACILITATOR_MODEL, EV
 ```
 
 Useful flags: `--iterations`, `--sessions`, `--duration-s`, `--think-ms`, `--autosave-ms`, `--fake-latency-ms`, `--attach --base-url <url>` (drive an already running stack), `--skip-build`, `--dev`, `--json <file>`. The script starts its own stack and database, so it does not collide with the E2E ports (3100, 4010) or database.
+
+## MySQL 8.4 (2026-10-29)
+
+Task 49 verification gate. Same harness (`npm run perf`, task 41), run after the Postgres to MySQL migration. The app, worker and database all ran on one host with the app's default perf database (`techplanner_perf`) on MySQL 8.4 at 127.0.0.1:3306, no Docker.
+
+**Real-LLM NFR-1 (first token) and NFR-2 (evaluation) were not measured.** No `COPILOT_GITHUB_TOKEN` is available, so `npm run perf -- --real-llm` was not run. Every MySQL figure below uses `LLM_FAKE=1` (scripted fake LLM), so it measures app overhead only.
+
+### Environment
+
+| | |
+|---|---|
+| OS | Linux 6.18.44-fc-v185 (VM) |
+| CPU | Intel Xeon (x4 vCPU reported by the harness) |
+| Memory | 16 GB |
+| Node | v22.22.0 |
+| App | production build (`next build`), `next start`, worker via tsx, all on one host |
+| Database | MySQL 8.4 at 127.0.0.1:3306, database `techplanner_perf`, app user `techplanner_app` |
+| Upstream | Atlassian mock (zero upstream latency) |
+| LLM | `FakeLlmClient`, E2E scenario file |
+| Date | 2026-10-29 |
+
+This is a different machine from the Postgres run (Windows 11, Ryzen 7 7800X3D, 31 GB), so the comparison shows the migration did not regress app overhead on comparable local hardware. It does not isolate the database change from the hardware change.
+
+### Latency scenario (`npm run perf`, 20 iterations, 0 failed)
+
+The Postgres run used 30 iterations. p95 values are compared below.
+
+| Metric | Postgres p95 (2026-10-06) | MySQL p95 (2026-10-29) | MySQL p50 / max | ADR-0007 target | Result |
+|---|---|---|---|---|---|
+| Session creation (NFR-3) | 68 ms | 44 ms | 23 / 166 ms | <= 30 s | Pass |
+| Session open (NFR-3) | 38 ms | 50 ms | 36 / 141 ms | <= 2 s | Pass (12 ms slower than Postgres, within target) |
+| First streamed token, app overhead (NFR-1) | 23 ms | 22 ms | 15 / 24 ms | <= 3 s, real model not measured | App overhead pass; target unverified |
+| Patch visible after patch event (NFR-1) | 12 ms | 11 ms | 10 / 18 ms | <= 1 s | Pass (HTTP level) |
+| Facilitator turn, total (scripted ~1.2 s delay steps) | 1286 ms | 1268 ms | 1232 / 1268 ms | n/a | Matches script |
+| Evaluation duration, app overhead (NFR-2) | 27 ms | 20 ms | 16 / 21 ms | <= 20 s, real model not measured | App overhead pass; target unverified |
+
+### Concurrency scenario (NFR-5, `npm run perf -- --scenario concurrency`)
+
+50 sessions on one user, 300 s, each with its own tab and session lock, an autosave every 3 s and a lock renewal every 20 s.
+
+| Run | Postgres (2026-10-06) | MySQL 8.4 (2026-10-29) |
+|---|---|---|
+| A: `--think-ms 10000` | 79.5% errors, deadlock, 0 turns completed | **0 errors** (9819 requests, 0.000%), 1338 turns completed, 1331 autosave 409s retried |
+| B: `--think-ms 40000` (`--fake-latency-ms 1000` requested) | 0 errors (6896 requests), first token p95 1030 ms | **0 errors** (6901 requests, 0.000%), 364 turns completed, 362 autosave 409s retried |
+
+Run A (MySQL) detail, p50 / p95 / max:
+
+| Metric | n | p50 | p95 | max |
+|---|---|---|---|---|
+| Session creation (setup) | 50 | 126 ms | 182 ms | 187 ms |
+| First streamed token | 1338 | 14 ms | 46 ms | 164 ms |
+| Facilitator turn, total | 1338 | 1228 ms | 1282 ms | 1377 ms |
+| Autosave (PATCH section) | 4919 | 21 ms | 110 ms | 194 ms |
+| Lock renew | 750 | 15 ms | 88 ms | 151 ms |
+
+Run B (MySQL) detail, p50 / p95 / max:
+
+| Metric | n | p50 | p95 | max |
+|---|---|---|---|---|
+| Session creation (setup) | 50 | 138 ms | 175 ms | 182 ms |
+| First streamed token | 364 | 15 ms | 53 ms | 210 ms |
+| Facilitator turn, total | 364 | 1230 ms | 1279 ms | 1422 ms |
+| Autosave (PATCH section) | 4913 | 48 ms | 106 ms | 264 ms |
+| Lock renew | 750 | 28 ms | 76 ms | 201 ms |
+
+**Measurement caveat for Run B.** The harness reports "added latency 1000 ms" and writes the scenario file with the delay step (verified in the perf stack's `llm-script.json`). The measured turn times do not show it: the facilitator turn is about 1.23 s, where the Postgres Run B showed about 2.25 s. So Run B here is not equivalent to the Postgres Run B and gives less overlap than intended. Run A (no added latency, the default) is the stricter overlap test and is the one that deadlocked on Postgres. The added-latency discrepancy was not investigated, since the gate records results and does not fix product code or the harness.
+
+### NFR-4 (edit loss)
+
+`AUTOSAVE_MAX_WAIT_MS` is 5000 ms, so the cadence target is met. Autosave PATCH p95 under load was 106 ms (Run B) and 110 ms (Run A), against 38 ms on Postgres.
+
+### Verdict (MySQL 8.4)
+
+| NFR | Result on MySQL 8.4 |
+|---|---|
+| NFR-1 | App overhead pass (first token 22 ms p95, patch visible 11 ms p95). Real first-token target not measured (no `COPILOT_GITHUB_TOKEN`). |
+| NFR-2 | App overhead pass (20 ms p95). Real evaluation target not measured. |
+| NFR-3 | Pass (session open 50 ms p95, creation 44 ms p95). |
+| NFR-4 | Pass by cadence (5000 ms max wait). |
+| NFR-5 | **Pass in this run**: 50 sessions with 0 errors at both think times, including the 10 s case that deadlocked on Postgres. The cause of the difference from Postgres was not analysed in this gate. |
+
+ADR-0007 targets are met for everything the fake LLM can exercise. The real-model NFR-1 and NFR-2 numbers remain unmeasured and need a run with `COPILOT_GITHUB_TOKEN`, `FACILITATOR_MODEL` and `EVALUATOR_MODEL` (`npm run perf -- --real-llm`).
+
+### Reproduce
+
+```
+npm run perf                                                                       # latency
+npm run perf -- --scenario concurrency --fake-latency-ms 1000 --think-ms 40000     # NFR-5 run B
+npm run perf -- --scenario concurrency --think-ms 10000                            # NFR-5 run A
+npm run perf -- --real-llm                                                         # needs COPILOT_GITHUB_TOKEN, FACILITATOR_MODEL, EVALUATOR_MODEL
+```

@@ -1,6 +1,6 @@
 # Spec: Migrate from PostgreSQL to MySQL
 
-Status: Accepted (decisions in §13)
+Status: Implemented (2026-10-29)
 Date: 2026-10-29
 Supersedes (on acceptance): ADR-0001 database choice (PostgreSQL 16)
 
