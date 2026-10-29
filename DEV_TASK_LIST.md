@@ -61,7 +61,7 @@ Phases:
 | 40 | 6 | [LLM behaviour eval harness (≥20 seeded-gap tickets) against the real Copilot SDK](DEV_TASK_40.yml) | high | high | opus / medium | 23, 24 | DONE | c8195de |
 | 41 | 6 | [Performance verification against NFR-1 to NFR-5](DEV_TASK_41.yml) | medium | medium | sonnet / medium | 39 | DONE | a3b00e2 |
 | 42 | 6 | [Accessibility verification and fixes (keyboard, WCAG 2.1 AA contrast)](DEV_TASK_42.yml) | medium | medium | sonnet / medium | 39 | DONE | 74e6a0b |
-| 43 | 7 | [Guided intake schema: migration 0005, intake state, question lifecycle fields, audit actions](DEV_TASK_43.yml) | high | medium | opus / medium | — | EVAL | 12d1b6a |
+| 43 | 7 | [Guided intake schema: migration 0005, intake state, question lifecycle fields, audit actions](DEV_TASK_43.yml) | high | medium | opus / medium | — | DONE | 12d1b6a |
 | 44 | 7 | [Explicit source ingestion: no ingest at creation, POST /ingest, create-and-ingest](DEV_TASK_44.yml) | high | high | opus / medium | 43 | IN_PROGRESS | |
 | 45 | 7 | [Facilitator turn kinds, shared SSE turn helper and analysis turn (POST /analyze)](DEV_TASK_45.yml) | high | high | opus / high | 43 | IN_PROGRESS | |
 | 46 | 7 | [Question lifecycle API: answer, resolve, reopen; full question context](DEV_TASK_46.yml) | high | high | opus / medium | 45 | PENDING | |
@@ -295,3 +295,5 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 09:4x | 43 | worker dispatched (opus/medium)
 2026-10-29 09:5x | 43 | worker complete @ 12d1b6a (unit 336, integration 144; one flaky pre-existing sessions.test.ts case seen 1/5) → eval dispatched (sonnet/medium, detached worktree)
 2026-10-29 09:5x | 44,45 | workers dispatched in parallel (opus/medium, opus/high; disjoint files, DBs techplanner_t44/t45)
+2026-10-29 10:0x | 43 | eval PASS → DONE @ 12d1b6a (worktree: schema 9, sessions+conversationApi 28, unit 336, integration 144; follow-ups: intakeState() precedence when analyzed_at set without ingested_at; harden flaky fetch-not-called assertion in sessions.test.ts)
+2026-10-29 10:0x | e2e | first baseline (2 failed: a11y AC1, clarification AC-13) invalid — ran against a tree being edited; clean re-run at 26300f5 in worktree started
