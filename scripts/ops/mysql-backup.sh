@@ -11,11 +11,11 @@
 #   [client]
 #   user = techplanner_backup
 #   password = <generated>
-#   host = 127.0.0.1
+#   host = localhost   (Unix socket: matches 'techplanner_backup'@'localhost' even with skip_name_resolve)
 #
 # Backup user grants (create once as root; see runbook §8.1):
 #   CREATE USER 'techplanner_backup'@'localhost' IDENTIFIED BY '<generated>';
-#   GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES, PROCESS ON techplanner.* TO 'techplanner_backup'@'localhost';
+#   GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES ON techplanner.* TO 'techplanner_backup'@'localhost';
 #   GRANT PROCESS ON *.* TO 'techplanner_backup'@'localhost';
 #
 # Environment: BACKUP_DIR (default /var/backups/techplanner), BACKUP_KEEP_DAYS (14), BACKUP_DB (techplanner),

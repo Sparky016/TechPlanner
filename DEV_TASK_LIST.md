@@ -66,7 +66,7 @@ Phases:
 | 45 | 7 | [Replace pg-boss with an in-house SQL job queue (on PostgreSQL first)](DEV_TASK_45.yml) | high | high | opus / medium | 44 | DONE | 3194b54 |
 | 46 | 7 | [MySQL 8.4 cutover: mysql2 driver, MySQL migrations, dialect SQL, per-table grants, test harness and dev setup](DEV_TASK_46.yml) | critical | critical | opus / high | 44, 45 | DONE | 30b290d..eb2d287 |
 | 47 | 7 | [MySQL integrity and concurrency hardening: audit hash round-trip, gap-lock review, deadlock retry, pool sizing](DEV_TASK_47.yml) | high | high | opus / medium | 46 | PENDING | |
-| 48 | 7 | [Production on the hosting server: native MySQL setup, compose wiring, server config, backups and runbook](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46 | PENDING | |
+| 48 | 7 | [Production on the hosting server: native MySQL setup, compose wiring, server config, backups and runbook](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46 | DONE | becd1f6, see log |
 | 49 | 7 | [MySQL migration verification gate: full suites, perf targets, audit verify, residue checks](DEV_TASK_49.yml) | high | low | haiku / low | 47, 48 | PENDING | |
 
 ## Execution notes
@@ -304,3 +304,4 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 15:20 | 46 | re-eval PASS (rework cycle 1) → DONE @ 30b290d..eb2d287 (sessions.test 10/10, integration 3x151, unit 343; new tests fail against Promise.all)
 2026-10-29 15:20 | 47,48 | workers dispatched in parallel (47 opus/medium, 48 sonnet/medium; disjoint files)
 2026-10-29 16:00 | 48 | worker complete @ becd1f6 (compose up healthy on host MySQL, backup→restore→audit:verify OK 5, owner creds only in migrate; +.dockerignore no longer excludes tests/ — next build typechecks files importing tests/e2e/support/env; image build needs npm_ca secret in sandbox) → eval dispatched (sonnet/low)
+2026-10-29 16:30 | 48 | eval PASS (compose healthy, backup/restore/audit:verify, owner creds migrate-only, tests/ not in runtime image) → orchestrator fix: pin compose network 172.30.0.0/24 on br-techplanner (verified MySQL sees 172.30.0.x; users/APP_DB_USER/ufw updated), backup user over socket (skip_name_resolve) → DONE

@@ -5,6 +5,8 @@
 #
 # MySQL 8.4 runs natively on the hosting server, not in a container (docs/runbook.md §7). The containers reach it
 # through host.docker.internal, which host-gateway maps to the Docker bridge gateway; MySQL must listen there.
+# The project network is pinned (subnet 172.30.0.0/24, bridge br-techplanner) because MySQL sees connections
+# from that subnet: the database users' host part and the firewall rule depend on it (docs/runbook.md §7.3, §7.4).
 # Order is enforced by depends_on: migrate (one-shot) completes -> worker and web start.
 # Credentials: web and worker get the restricted app user (DATABASE_URL). Only migrate gets the owner user
 # (MIGRATE_DATABASE_URL, passed to it as DATABASE_URL) and APP_DB_USER, the grantee of the per-table grants.
@@ -41,7 +43,7 @@ services:
       ROLE: migrate
       # Owner user (DDL). Present in this service only; web and worker never see it.
       DATABASE_URL: ${MIGRATE_DATABASE_URL:?}
-      # Must equal the 'user'@'host' the app user was created with (e.g. 'techplanner_app'@'172.17.%').
+      # Must equal the 'user'@'host' the app user was created with (e.g. 'techplanner_app'@'172.30.0.%').
       APP_DB_USER: ${APP_DB_USER:?}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
@@ -76,3 +78,11 @@ services:
       worker:
         condition: service_started
     restart: unless-stopped
+
+networks:
+  default:
+    driver_opts:
+      com.docker.network.bridge.name: br-techplanner
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

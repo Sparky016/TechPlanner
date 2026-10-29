@@ -94,7 +94,7 @@ curl -fsS localhost:3000/healthz   # {"status":"ok","checks":{"database":{"ok":t
 # prod.env (excerpt)
 DATABASE_URL=mysql://techplanner_app:<app password>@host.docker.internal:3306/techplanner
 MIGRATE_DATABASE_URL=mysql://techplanner_owner:<owner password>@host.docker.internal:3306/techplanner
-APP_DB_USER="'techplanner_app'@'172.17.%'"   # must match the host used in CREATE USER (§7.4)
+APP_DB_USER="'techplanner_app'@'172.30.0.%'"   # must match the host used in CREATE USER (§7.4)
 ```
 
 Passwords containing `@ : / # ?` or `%` must be percent-encoded in the URLs (or generate hex passwords, §7.4). Compose refuses to start when a `${VAR:?}` variable is missing. Keep `prod.env` out of version control, mode 600. `.env*` files are git-ignored and excluded from the Docker build context.
@@ -172,19 +172,19 @@ mysql -uroot -p -e "SELECT @@bind_address, @@binlog_format, @@log_bin, @@log_bin
 Close 3306 to everything except the Docker bridge subnet. Docker publishes only the web port, so MySQL is not reachable from outside as long as it listens only on the two addresses above. The firewall rule is the second layer.
 
 ```sh
-ufw allow in on docker0 to any port 3306 proto tcp   # containers on the default bridge
+ufw allow in on br-techplanner to any port 3306 proto tcp   # the compose project network
 ufw deny 3306/tcp                                    # everyone else (rules match in order: keep the allow first)
 ufw status numbered
 ```
 
-Containers reach the host from the bridge subnet (default `172.17.0.0/16`). Docker edits `iptables` itself, which bypasses some `ufw` rules for container traffic, so the `bind-address` limit is the primary control. From another machine, `nc -vz <server> 3306` must fail.
+The containers connect from the compose project network, which `docker-compose.prod.example.yml` pins to subnet `172.30.0.0/24` on bridge `br-techplanner`; MySQL listens on the `docker0` gateway (`172.17.0.1`), which exists as soon as Docker starts, and the host routes between the two bridges without NAT, so MySQL sees `172.30.0.x` source addresses. Docker edits `iptables` itself, which bypasses some `ufw` rules for container traffic, so the `bind-address` limit is the primary control. From another machine, `nc -vz <server> 3306` must fail.
 
 ### 7.4 Create the database and users (production bootstrap)
 
 Do **not** run `scripts/mysql-bootstrap.sql` as it is. It has dev passwords, host `%`, and it grants the owner `ALL` on `techplanner\_%`.\* so that test suites can create databases. The production variant:
 
 - uses generated passwords (`openssl rand -hex 24`; hex needs no URL encoding);
-- restricts both users to the bridge subnet instead of `%`;
+- restricts both users to the compose network subnet (`172.30.0.%`) instead of `%`;
 - has **no** `techplanner\_%` wildcard grant and no `techplanner_test` database;
 - gives the app user no grant at all (migrations grant per table, and `audit_record` gets `SELECT, INSERT` only).
 
@@ -192,14 +192,14 @@ Do **not** run `scripts/mysql-bootstrap.sql` as it is. It has dev passwords, hos
 OWNER_PW=$(openssl rand -hex 24); APP_PW=$(openssl rand -hex 24)   # put both in the secret store now
 mysql -uroot -p <<SQL
 CREATE DATABASE IF NOT EXISTS techplanner CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE USER 'techplanner_owner'@'172.17.%' IDENTIFIED BY '${OWNER_PW}';
-CREATE USER 'techplanner_app'@'172.17.%'   IDENTIFIED BY '${APP_PW}';
-GRANT ALL PRIVILEGES ON techplanner.* TO 'techplanner_owner'@'172.17.%' WITH GRANT OPTION;
+CREATE USER 'techplanner_owner'@'172.30.0.%' IDENTIFIED BY '${OWNER_PW}';
+CREATE USER 'techplanner_app'@'172.30.0.%'   IDENTIFIED BY '${APP_PW}';
+GRANT ALL PRIVILEGES ON techplanner.* TO 'techplanner_owner'@'172.30.0.%' WITH GRANT OPTION;
 SQL
 unset OWNER_PW APP_PW
 ```
 
-Use the subnet the containers actually connect from (`docker network inspect bridge`). A compose project network is usually another `172.x.0.0/16`; then use its gateway in `bind-address` and its subnet here. Then **set `APP_DB_USER` on the `migrate` service to exactly the app user created above**, `'techplanner_app'@'172.17.%'`. The migrations grant table privileges to that account. With the default `'techplanner_app'@'%'` the grants would target an account that does not exist and the migration fails. The value must match the user and host in `mysql.user` character for character.
+If you change the pinned subnet in the compose file, change the user hosts here, the firewall rule (§7.3) and `APP_DB_USER` with it; check the source address MySQL sees with `SELECT host FROM information_schema.processlist WHERE user LIKE 'techplanner%'` while the stack runs. Then **set `APP_DB_USER` on the `migrate` service to exactly the app user created above**, `'techplanner_app'@'172.30.0.%'`. The migrations grant table privileges to that account. With the default `'techplanner_app'@'%'` the grants would target an account that does not exist and the migration fails. The value must match the user and host in `mysql.user` character for character.
 
 Verify:
 
@@ -214,7 +214,7 @@ The owner user is for migrations only. Its credentials belong to the `migrate` s
 Run §3 in order. When `migrate` has finished, confirm the app user's grants are per table and that `audit_record` is `SELECT, INSERT` only:
 
 ```sh
-mysql -uroot -p -e "SHOW GRANTS FOR 'techplanner_app'@'172.17.%'"
+mysql -uroot -p -e "SHOW GRANTS FOR 'techplanner_app'@'172.30.0.%'"
 ```
 
 ## 8. Backups, restore and restore drill
@@ -229,7 +229,7 @@ GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES ON techplanner.* TO 'techplanner_b
 GRANT PROCESS ON *.* TO 'techplanner_backup'@'localhost';
 SQL
 install -d -m 700 /etc/techplanner
-printf '[client]\nuser = techplanner_backup\npassword = %s\nhost = 127.0.0.1\n' "$BACKUP_PW" > /etc/techplanner/backup.cnf
+printf '[client]\nuser = techplanner_backup\npassword = %s\nhost = localhost\n' "$BACKUP_PW" > /etc/techplanner/backup.cnf
 chmod 600 /etc/techplanner/backup.cnf; unset BACKUP_PW
 ```
 
@@ -283,7 +283,7 @@ Stay on the **8.4 LTS** line and do not move to an innovation release. Before an
 MySQL commits every DDL statement implicitly. A migration file that fails part-way therefore leaves the statements before the failing one **applied**, while its `schema_migrations` row is **not** written. Re-running then fails with "already exists" or similar. The `migrate` container exits non-zero and its log names the file; nothing else rolls out (§3).
 
 1. Read the error with `docker compose --env-file prod.env -f docker-compose.prod.example.yml logs migrate` and note the file, for example `0005_x.sql`.
-2. As root, compare the file with the database: `SHOW TABLES`, `SHOW CREATE TABLE …`, `SHOW TRIGGERS`, `SHOW GRANTS FOR 'techplanner_app'@'172.17.%'`.
+2. As root, compare the file with the database: `SHOW TABLES`, `SHOW CREATE TABLE …`, `SHOW TRIGGERS`, `SHOW GRANTS FOR 'techplanner_app'@'172.30.0.%'`.
 3. Undo by hand what the file's earlier statements did (`DROP TABLE`, `DROP TRIGGER`, `ALTER TABLE … DROP COLUMN`, `REVOKE …`), in reverse order. Never touch audit rows. If the damage is unclear, restore the last dump into a scratch database to compare, or restore it over production (§8.3).
 4. Fix the cause. A file that has been applied in any environment is never edited (§5). A file that failed and was never recorded anywhere may be corrected in place; otherwise add a new migration.
 5. Re-run the `migrate` service. Confirm exit 0 and a `schema_migrations` row for the file.
