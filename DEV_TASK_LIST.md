@@ -64,7 +64,7 @@ Phases:
 | 43 | 7 | [ADRs for the MySQL migration (new ADR-0017, amend ADR-0001 and ADR-0013)](DEV_TASK_43.yml) | medium | trivial | haiku / low | — | DONE | c5be59e |
 | 44 | 7 | [Dialect-neutral data-access layer on PostgreSQL (DbClient, ? placeholders, no RETURNING, lock and error helpers)](DEV_TASK_44.yml) | critical | high | opus / high | 43 | DONE | 3ed56dc..9d3d93a |
 | 45 | 7 | [Replace pg-boss with an in-house SQL job queue (on PostgreSQL first)](DEV_TASK_45.yml) | high | high | opus / medium | 44 | DONE | 3194b54 |
-| 46 | 7 | [MySQL 8.4 cutover: mysql2 driver, MySQL migrations, dialect SQL, per-table grants, test harness and dev setup](DEV_TASK_46.yml) | critical | critical | opus / high | 44, 45 | PENDING | |
+| 46 | 7 | [MySQL 8.4 cutover: mysql2 driver, MySQL migrations, dialect SQL, per-table grants, test harness and dev setup](DEV_TASK_46.yml) | critical | critical | opus / high | 44, 45 | DONE | 30b290d..eb2d287 |
 | 47 | 7 | [MySQL integrity and concurrency hardening: audit hash round-trip, gap-lock review, deadlock retry, pool sizing](DEV_TASK_47.yml) | high | high | opus / medium | 46 | PENDING | |
 | 48 | 7 | [Production on the hosting server: native MySQL setup, compose wiring, server config, backups and runbook](DEV_TASK_48.yml) | high | medium | sonnet / medium | 46 | PENDING | |
 | 49 | 7 | [MySQL migration verification gate: full suites, perf targets, audit verify, residue checks](DEV_TASK_49.yml) | high | low | haiku / low | 47, 48 | PENDING | |
@@ -301,3 +301,5 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 13:40 | 46 | worker complete @ 30b290d..3749d8c (unit 340, integration 151 x3, e2e 13/14 baseline; deviations: READ COMMITTED isolation (REPEATABLE READ snapshot would fork audit chain), withTxLock via upsert (avoids S→X deadlock), uuid CHAR(36) ascii_general_ci, app_lock.name 255; log_bin_trust_function_creators needed for triggers; Dockerfile build broken until 48) → eval dispatched (opus/medium); Postgres stopped
 2026-10-29 14:20 | 46 | eval FAIL (AC2 flaky: sessions.test stray /remotelink fetch from Promise.all in getIssueSnapshot, exposed by MySQL timing; all else PASS incl. 60-way concurrent audit chain probe, audit:verify OK) → rework cycle 1 dispatched (opus/medium; +spec/ADR READ COMMITTED note, orphan tables_priv cleanup)
 2026-10-29 14:50 | 46 | rework 1 complete @ 6ea3f6b..eb2d287 (settleAll for Atlassian fan-outs; sessions.test 10/10, integration 3x151, unit 343, e2e 13/14 baseline; READ COMMITTED documented; resets revoke table grants) → re-eval dispatched (opus/medium)
+2026-10-29 15:20 | 46 | re-eval PASS (rework cycle 1) → DONE @ 30b290d..eb2d287 (sessions.test 10/10, integration 3x151, unit 343; new tests fail against Promise.all)
+2026-10-29 15:20 | 47,48 | workers dispatched in parallel (47 opus/medium, 48 sonnet/medium; disjoint files)
