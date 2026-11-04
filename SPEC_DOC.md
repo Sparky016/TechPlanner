@@ -6,6 +6,7 @@
 | Date | 2026-10-05 |
 | Source | `PRD.md` (repo root) |
 | Owner | Engineering Lead (primary user, PRD §7) |
+| Revised | 2026-11-04: database changed from PostgreSQL 16 to MySQL 8.4 LTS (ADR-0018; see the Revision history at the end) |
 
 ---
 
@@ -371,3 +372,13 @@ None blocking. All PRD gaps are resolved in §9; stakeholders should ratify D-1,
 - resuming a session (LLM-4)
 
 Confirm these against the SDK reference and record them in an ADR before building §7.6.
+
+---
+
+## Revision history
+
+| Date | Change | Record |
+|---|---|---|
+| 2026-10-05 | Initial specification (PostgreSQL 16 database). | — |
+| 2026-10-29 | Guided intake and question lifecycle (intake state, explicit ingest, question answer/resolve). | ADR-0017 |
+| 2026-11-04 | Database changed from PostgreSQL 16 to MySQL 8.4 LTS, installed natively on the hosting server. Updated: §7.2 database line and data model types, §7 testing (append-only audit), §8 deployment, D-1 (amended) and D-13. Migrations 0001–0004 rewritten for MySQL; guided intake migration ported (0005); job queue is 0006. | ADR-0018, `docs/specs/mysql-migration.md` |
