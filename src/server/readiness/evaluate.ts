@@ -1,7 +1,7 @@
-import type { PoolClient } from 'pg';
+import { randomUUID } from 'node:crypto';
 import { recordAudit } from '@/server/audit/audit';
 import { getConfig } from '@/server/config';
-import { query, withTransaction } from '@/server/db/pool';
+import { type DbClient, query, withTransaction } from '@/server/db/pool';
 import { getLlmClient } from '@/server/llm';
 import { observeReadinessScore } from '@/server/observability/metrics';
 import { SECTION_NAMES, type SectionName } from '../../lib/spec/sections';
@@ -65,7 +65,7 @@ export class EvaluatorRunError extends Error {
 type IssueRow = ExistingIssue;
 
 const SELECT_ISSUES =
-  'SELECT id, severity, section, description, fingerprint, status FROM issue WHERE session_id = $1 ORDER BY created_at, id';
+  'SELECT id, severity, section, description, fingerprint, status FROM issue WHERE session_id = ? ORDER BY created_at, id';
 
 async function runOnce(content: string, collector: EvaluatorCollector, signal?: AbortSignal): Promise<void> {
   const events = getLlmClient().run({
@@ -124,35 +124,40 @@ function bodies(sections: Record<SectionName, { body: string }>): SpecSections {
 }
 
 async function applyReconciliation(
-  client: PoolClient,
+  client: DbClient,
   sessionId: string,
   reported: readonly ReportedIssue[],
 ): Promise<EvaluationIssue[]> {
+  // Range lock over this session's entries in issue_session_fingerprint. At READ COMMITTED (the session default,
+  // db/mysql.ts) only the matched rows are locked; at REPEATABLE READ it would also take next-key locks up to the
+  // following session's first entry and block (or deadlock with) that session's inserts. Taken under the
+  // planning_session row lock, so evaluations of one session never interleave here.
   const existing = await client.query<IssueRow>(`${SELECT_ISSUES} FOR UPDATE`, [sessionId]);
   const changes = reconcileIssues(existing.rows, reported);
   const current: EvaluationIssue[] = [];
 
   for (const i of changes.keep) {
-    await client.query('UPDATE issue SET severity = $2, status = $3 WHERE id = $1', [i.id, i.severity, i.status]);
+    await client.query('UPDATE issue SET severity = ?, status = ? WHERE id = ?', [i.severity, i.status, i.id]);
     current.push(toResultIssue(i));
   }
   for (const i of changes.reopen) {
-    await client.query("UPDATE issue SET severity = $2, status = 'open', resolved_at = NULL WHERE id = $1", [
-      i.id,
+    await client.query("UPDATE issue SET severity = ?, status = 'open', resolved_at = NULL WHERE id = ?", [
       i.severity,
+      i.id,
     ]);
     current.push(toResultIssue(i));
   }
   for (const i of changes.resolve) {
-    await client.query("UPDATE issue SET status = 'resolved', resolved_at = now() WHERE id = $1", [i.id]);
+    await client.query("UPDATE issue SET status = 'resolved', resolved_at = NOW(6) WHERE id = ?", [i.id]);
   }
   for (const i of changes.insert) {
-    const { rows } = await client.query<{ id: string }>(
-      `INSERT INTO issue (session_id, severity, section, description, fingerprint, status)
-       VALUES ($1, $2, $3, $4, $5, 'open') RETURNING id`,
-      [sessionId, i.severity, i.section, i.description, i.fingerprint],
+    const id = randomUUID();
+    await client.query(
+      `INSERT INTO issue (id, session_id, severity, section, description, fingerprint, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'open')`,
+      [id, sessionId, i.severity, i.section, i.description, i.fingerprint],
     );
-    current.push({ id: rows[0].id, ...i, status: 'open' });
+    current.push({ id, ...i, status: 'open' });
   }
   // Accepted-risk issues that were not reported again are left untouched but remain current.
   const touched = new Set(current.map((i) => i.id));
@@ -191,18 +196,22 @@ export async function evaluateSession(sessionId: string, opts: EvaluateOptions):
   const weights = (getConfig().SECTION_WEIGHTS ?? {}) as Partial<Record<SectionName, number>>;
   const score = computeReadinessScore(plain, weights);
 
+  // Database work only (the model ran above), so a deadlock victim can re-run it: the issue range lock and the unique
+  // fingerprint checks of the inserts take gap locks.
   const result = await withTransaction(async (client) => {
     // Serialises concurrent evaluations of one session (the issue fingerprint is unique per session).
     const locked = await client.query<{ ticket_keys: string[] }>(
-      'SELECT ticket_keys FROM planning_session WHERE id = $1 FOR UPDATE',
+      'SELECT ticket_keys FROM planning_session WHERE id = ? FOR UPDATE',
       [sessionId],
     );
     const issues = await applyReconciliation(client, sessionId, reported);
-    const { rows } = await client.query<{ id: string }>(
-      'INSERT INTO evaluation (session_id, section_statuses, score) VALUES ($1, $2, $3) RETURNING id',
-      [sessionId, JSON.stringify(statuses), score],
-    );
-    const evaluationId = rows[0].id;
+    const evaluationId = randomUUID();
+    await client.query('INSERT INTO evaluation (id, session_id, section_statuses, score) VALUES (?, ?, ?, ?)', [
+      evaluationId,
+      sessionId,
+      JSON.stringify(statuses),
+      score,
+    ]);
     const passes = gatePasses(issues);
     await recordAudit(
       {
@@ -218,7 +227,7 @@ export async function evaluateSession(sessionId: string, opts: EvaluateOptions):
       client,
     );
     return { evaluationId, score, statuses, issues, gatePasses: passes };
-  });
+  }, { retryOnDeadlock: true });
 
   observeReadinessScore(score);
   return result;

@@ -38,7 +38,7 @@ export const POST = withApiHandler<{ id: string; sid: string }>({}, async (ctx) 
   // The repository does not scope suggestions to a session; only this session's suggestions may be decided here.
   const sid = ctx.params.sid;
   const rows = isUuid(sid)
-    ? await query<{ section: string }>('SELECT section FROM pending_suggestion WHERE id = $1 AND session_id = $2', [
+    ? await query<{ section: string }>('SELECT section FROM pending_suggestion WHERE id = ? AND session_id = ?', [
         sid,
         session.id,
       ])

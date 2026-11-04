@@ -6,6 +6,7 @@
 | Date | 2026-10-05 |
 | Source | `PRD.md` (repo root) |
 | Owner | Engineering Lead (primary user, PRD §7) |
+| Revised | 2026-11-04: database changed from PostgreSQL 16 to MySQL 8.4 LTS (ADR-0018; see the Revision history at the end) |
 
 ---
 
@@ -217,7 +218,7 @@ Session lock [D-3]: a session is editable by one browser tab at a time. Opening 
 ### 7.1 Architecture [D-1]
 - **Frontend**: TypeScript, React (Next.js App Router), server-rendered shell; markdown editor component; SSE for streaming AI output and live patches.
 - **Backend**: Next.js server (Node.js 22 LTS) route handlers + a background job worker in the same codebase for evaluation and publish steps.
-- **Database**: PostgreSQL 16 — sessions, working copies, revisions, issues, questions, publish runs, encrypted tokens, audit log.
+- **Database**: MySQL 8.4 LTS (InnoDB), installed natively on the hosting server — sessions, working copies, revisions, issues, questions, publish runs, encrypted tokens, audit log.
 - **LLM** [D-2]: **GitHub Copilot SDK + GitHub Copilot CLI** are the only LLM integration path (user requirement). See §7.6.
 - **Integrations**: Atlassian Cloud REST — Jira Platform REST v3, Confluence REST v2 (v1 for attachment/storage-format operations where v2 lacks them).
 
@@ -227,14 +228,14 @@ Session lock [D-3]: a session is editable by one browser tab at a time. Opening 
 - `planning_session` (id UUID, primary_ticket_key, ticket_keys[], facilitator_id, status {draft, published, partially_published}, clarification_ended bool, ingested_at, analyzed_at (intake state: `not_ingested` / `ingested` / `analyzed`), code_repository, confluence_page_id, confluence_page_version, created_at, updated_at, lock_holder, lock_expires_at)
 - `source_snapshot` (session_id, kind {jira_issue, confluence_page, attachment}, ref, content_text, truncated bool, retrieved_at)
 - `conversation_message` (session_id, seq, role {facilitator, ai, note, system}, content, question_id?, created_at)
-- `working_copy` (session_id PK, sections JSONB {name → {body, last_ai_read_at, last_user_edit_at}}, updated_at)
+- `working_copy` (session_id PK, sections JSON {name → {body, last_ai_read_at, last_user_edit_at}}, updated_at)
 - `pending_suggestion` (id, session_id, section, patch, status, created_at)
-- `revision` (session_id, number, sections JSONB, trigger {save, restore, publish}, readiness_score, author_id, created_at; immutable)
-- `evaluation` (id, session_id, section_statuses JSONB, score, created_at)
+- `revision` (session_id, number, sections JSON, trigger {save, restore, publish}, readiness_score, author_id, created_at; immutable)
+- `evaluation` (id, session_id, section_statuses JSON, score, created_at)
 - `issue` (id, session_id, severity, section, description, fingerprint, status, created_at, resolved_at)
 - `ai_question` (id, session_id, issue_id?, section, text, status {open, answered, resolved; legacy dismissed}, answer_text?, answered_at?, answered_via? {facilitator, ai}, resolution? {answered, not_relevant}, resolved_at?, dismiss_reason? (the resolve reason), created_at)
-- `publish_run` (id, session_id, revision_number, override_justification?, steps JSONB, status, created_at)
-- `audit_record` (id bigserial, ts, user_id, session_id, ticket_ids[], action, result, details JSONB, prev_hash, hash) — append-only
+- `publish_run` (id, session_id, revision_number, override_justification?, steps JSON, status, created_at)
+- `audit_record` (id BIGINT UNSIGNED AUTO_INCREMENT, ts, user_id, session_id, ticket_ids (JSON array), action, result, details JSON, prev_hash, hash) — append-only
 
 ### 7.3 APIs (internal, JSON over HTTPS)
 - `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`
@@ -302,12 +303,12 @@ Configurable per deployment, one of:
 
 ### Testing strategy
 - Unit: score formula, Issue fingerprinting, patch application & edit-precedence, hash chain, Jira description block insert/replace idempotency.
-- Integration: Atlassian API client against recorded fixtures; Postgres append-only enforcement (UPDATE/DELETE on `audit_record` must fail).
+- Integration: Atlassian API client against recorded fixtures; MySQL append-only enforcement (UPDATE/DELETE on `audit_record` must fail via trigger; the app user is denied TRUNCATE by privilege).
 - LLM behaviour evals: a fixture set of ≥ 20 tickets with known gaps; pass criteria — facilitator asks about each seeded Critical gap within 3 turns (conversation mode) and in the initial analysis turn (`--mode analysis`); evaluator flags each seeded Critical gap; evaluator never marks a vague statement Complete (SR-3.3).
 - E2E (Playwright): login (mocked OAuth), create session, ingest, analyze, answer and resolve questions, converse, save, compare, restore, override, publish with injected step failure + retry.
 
 ### Deployment & rollback
-- Single Docker image (web + worker processes + pinned GitHub Copilot CLI) plus managed PostgreSQL, deployed to the organisation's hosting server; DB migrations run forward-only on deploy. [D-1]
+- Single Docker image (web + worker processes + pinned GitHub Copilot CLI) plus MySQL 8.4 LTS installed natively on the hosting server (not a container), deployed to the organisation's hosting server; DB migrations run forward-only on deploy. [D-1] Runbook: `docs/runbook.md` §7–§11; decision record: ADR-0018.
 - Rollback: redeploy previous image; migrations must be backward compatible for one release (expand/contract).
 - Migration strategy: greenfield — no existing data to migrate.
 
@@ -319,7 +320,7 @@ Gaps not settled by the PRD, resolved by the spec author per user instruction. E
 
 | ID | Gap | Decision | Rationale (tie to PRD outcome) | Revisit if |
 |---|---|---|---|---|
-| D-1 | Tech stack & hosting unspecified. | TypeScript / Next.js / Node 22 / PostgreSQL 16, single Docker image on the hosting server. | One language end-to-end, strong streaming support, Postgres gives relational history + enforceable append-only audit; FR-12 allows hosting-server storage. | Org mandates another stack or cloud. |
+| D-1 | Tech stack & hosting unspecified. | TypeScript / Next.js / Node 22 / MySQL 8.4 LTS, single Docker image on the hosting server. | One language end-to-end, strong streaming support, MySQL gives relational history and enforceable append-only audit (triggers + privileges); FR-12 allows hosting-server storage. Amended from PostgreSQL 16 by ADR-0018. | Org mandates another stack or cloud. |
 | D-2 | LLM integration unspecified in PRD. | **User directive (2026-10-05):** GitHub Copilot SDK + GitHub Copilot CLI (§7.6). Author-resolved sub-decisions: deployment-level Copilot token (no per-user GitHub login); custom-tool-only allow-list; strongest model for facilitation, faster model for evaluation, both configurable. | Directive from user. Single Atlassian login stays the only user auth (FR-1); locking down built-in tools keeps the agent a planner, not a code generator (§4). | Per-user Copilot attribution/billing is required → add GitHub OAuth per user. |
 | D-3 | Multi-user participation (PRD §7 secondary users vs §15 future multi-user). | MVP: single Facilitator drives; Participants speak in the meeting; single-editor session lock. | §15 explicitly defers multi-user auth and collaborative editing. | §15 items get scheduled. |
 | D-4 | Generated output naming collides with this PRD. | Term "Generated Specification". | Avoid ambiguity in docs and code. | — |
@@ -331,7 +332,7 @@ Gaps not settled by the PRD, resolved by the spec author per user instruction. E
 | D-10 | Which attachments / Confluence links to ingest. | SR-2.3–SR-2.5 limits (one-level links; text/PDF/DOCX/images with size caps; token budget with visible truncation). | Maximise useful context while keeping model input bounded and transparent. | Context limits or needs change. |
 | D-11 | OAuth scopes, token storage, tenancy. | Scopes per SR-1.3; server-side AES-256-GCM token storage; one Atlassian site per deployment. | Least privilege for the operations in §13; FR-1 forbids shared credentials. | Multi-site requirement. |
 | D-12 | Authorization model. | Delegated to Atlassian: can read primary ticket ⇒ can open its sessions; writes succeed only if Atlassian permits. | No separate permission system to maintain; aligns with "authenticated user identity used for all external operations" (§13). | Need for app-level roles (future users). |
-| D-13 | How "immutable" audit is enforced. | Append-only Postgres table (trigger rejects UPDATE/DELETE, app role has INSERT/SELECT only) + SHA-256 hash chain + verify command. Indefinite retention. | §14 requires immutable records for compliance; hash chain makes tampering detectable. | Move to centralized logging (FR-12 future). |
+| D-13 | How "immutable" audit is enforced. | Append-only MySQL table (trigger rejects UPDATE/DELETE; app role has SELECT/INSERT only, no DROP, so TRUNCATE is refused; the owner role can still truncate, an accepted risk per ADR-0018) + SHA-256 hash chain + verify command. Indefinite retention. | §14 requires immutable records for compliance; hash chain makes tampering detectable. | Move to centralized logging (FR-12 future). |
 | D-14 | Monitoring/accessibility unspecified for the tool itself. | NFR-9, NFR-10. | The tool demands Monitoring/Logging sections of others (§11); it should meet the same bar. | — |
 
 ---
@@ -371,3 +372,13 @@ None blocking. All PRD gaps are resolved in §9; stakeholders should ratify D-1,
 - resuming a session (LLM-4)
 
 Confirm these against the SDK reference and record them in an ADR before building §7.6.
+
+---
+
+## Revision history
+
+| Date | Change | Record |
+|---|---|---|
+| 2026-10-05 | Initial specification (PostgreSQL 16 database). | — |
+| 2026-10-29 | Guided intake and question lifecycle (intake state, explicit ingest, question answer/resolve). | ADR-0017 |
+| 2026-11-04 | Database changed from PostgreSQL 16 to MySQL 8.4 LTS, installed natively on the hosting server. Updated: §7.2 database line and data model types, §7 testing (append-only audit), §8 deployment, D-1 (amended) and D-13. Migrations 0001–0004 rewritten for MySQL; guided intake migration ported (0005); job queue is 0006. | ADR-0018, `docs/specs/mysql-migration.md` |

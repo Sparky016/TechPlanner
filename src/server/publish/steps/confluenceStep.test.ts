@@ -132,7 +132,7 @@ afterEach(() => {
 
 function expectPersisted(pageId: string, version: number): void {
   const update = sql.find((q) => /UPDATE planning_session/.test(q.text));
-  expect(update?.params).toEqual([SESSION, pageId, version]);
+  expect(update?.params).toEqual([pageId, version, SESSION]);
 }
 
 describe('confluenceStep', () => {

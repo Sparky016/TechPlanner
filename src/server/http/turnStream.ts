@@ -1,4 +1,5 @@
 import type { CurrentUser } from '@/server/auth/session';
+import { releaseConnectionLock, tryConnectionLock } from '@/server/db/locks';
 import { db } from '@/server/db/pool';
 import type { FacilitatorEvent } from '@/server/facilitator/runTurn';
 import { HttpError } from '@/server/http/errors';
@@ -31,7 +32,7 @@ export interface TurnStreamOptions {
 }
 
 /**
- * Takes the session-level advisory turn lock on a dedicated pool connection (409 turn_in_progress when another
+ * Takes the session-level turn lock (a connection-scoped named lock) on a dedicated pool connection (409 turn_in_progress when another
  * turn holds it), checks the session is ingested (409 not_ingested, GI-23), runs `prepare`, then streams `run` as SSE.
  * Facilitator events map one-to-one to SSE events; `error` events and unexpected failures carry the correlationId.
  * The lock is released when the turn ends, including after a client abort; it is held for the life of the stream.
@@ -43,13 +44,14 @@ export async function turnStreamResponse<P>(
   opts: TurnStreamOptions = {},
 ): Promise<Response> {
   const client = await db.connect();
+  const turnLock = `turn:${session.id}`;
   let released = false;
   // Idempotent. If unlocking fails the connection is destroyed, which drops its session-level lock.
   const release = async (): Promise<void> => {
     if (released) return;
     released = true;
     try {
-      await client.query("SELECT pg_advisory_unlock(hashtext('turn:' || $1::text))", [session.id]);
+      await releaseConnectionLock(client, turnLock);
       client.release();
     } catch (err) {
       logger.error({ err }, 'Failed to release turn lock; discarding connection');
@@ -59,18 +61,14 @@ export async function turnStreamResponse<P>(
 
   let current: PlanningSessionRow;
   try {
-    const { rows } = await client.query<{ locked: boolean }>(
-      "SELECT pg_try_advisory_lock(hashtext('turn:' || $1::text)) AS locked",
-      [session.id],
-    );
-    if (!rows[0]?.locked) {
+    if (!(await tryConnectionLock(client, turnLock))) {
       released = true;
       client.release();
       throw new HttpError(409, 'A facilitator turn is already in progress for this session', 'turn_in_progress');
     }
     // Re-read under the lock (on the lock connection, so no second pool connection is held): analyzed_at only
     // changes inside a turn, so preconditions on it are race-free here.
-    const fresh = await client.query<PlanningSessionDbRow>('SELECT * FROM planning_session WHERE id = $1', [session.id]);
+    const fresh = await client.query<PlanningSessionDbRow>('SELECT * FROM planning_session WHERE id = ?', [session.id]);
     current = fresh.rows[0] ? mapSessionRow(fresh.rows[0]) : session;
     if (intakeState(current) === 'not_ingested') {
       throw new HttpError(409, 'Ingest the session sources before running an AI turn', 'not_ingested');

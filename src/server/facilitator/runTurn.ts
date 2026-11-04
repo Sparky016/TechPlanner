@@ -2,12 +2,11 @@ import { recordAudit } from '@/server/audit/audit';
 import type { CurrentUser } from '@/server/auth/session';
 import { isAzureDevOpsEnabled } from '@/server/azureDevOps/client';
 import { getConfig } from '@/server/config';
-import { query, withTransaction } from '@/server/db/pool';
+import { type DbClient, query, withTransaction } from '@/server/db/pool';
 import { getLlmClient } from '@/server/llm';
 import type { LlmMessage } from '@/server/llm/types';
 import { scheduleEvaluation } from '@/server/readiness/schedule';
 import { markAiRead } from '@/server/spec/workingCopyRepo';
-import type { PoolClient } from 'pg';
 import { loadSessionContext } from './context';
 import { buildFacilitatorMessages, buildFacilitatorSystemPrompt, correctiveMessage, type PromptTurn } from './prompt';
 import { createFacilitatorTools, createTurnState, type FacilitatorEvent, type FacilitatorTurnState } from './tools';
@@ -39,16 +38,22 @@ export interface FacilitatorTurnInput {
 
 type Role = 'facilitator' | 'ai' | 'system';
 
-async function insertMessage(client: PoolClient, sessionId: string, role: Role, content: string): Promise<number> {
+async function insertMessage(client: DbClient, sessionId: string, role: Role, content: string): Promise<number> {
   // Serialises concurrent writers for this session while seq is computed (same pattern as refreshSources).
-  await client.query('SELECT 1 FROM planning_session WHERE id = $1 FOR UPDATE', [sessionId]);
-  const { rows } = await client.query<{ seq: number }>(
-    `INSERT INTO conversation_message (session_id, seq, role, content)
-     VALUES ($1, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = $1), $2, $3)
-     RETURNING seq`,
-    [sessionId, role, content],
+  await client.query('SELECT 1 FROM planning_session WHERE id = ? FOR UPDATE', [sessionId]);
+  const { rows } = await client.query<{ seq: string }>(
+    'SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM conversation_message WHERE session_id = ?',
+    [sessionId],
   );
-  return rows[0].seq;
+  // INT + 1 is a BIGINT in MySQL, which the driver returns as a string.
+  const seq = Number(rows[0].seq);
+  await client.query('INSERT INTO conversation_message (session_id, seq, role, content) VALUES (?, ?, ?, ?)', [
+    sessionId,
+    seq,
+    role,
+    content,
+  ]);
+  return seq;
 }
 
 interface RunOutcome {
@@ -106,7 +111,7 @@ async function startTurn(sessionId: string, user: CurrentUser, turn: TurnKind): 
     return { kind: 'analysis', maxQuestions: getConfig().ANALYSIS_MAX_QUESTIONS };
   }
   const [question] = await query<{ id: string; text: string }>(
-    'SELECT id, text FROM ai_question WHERE id = $1 AND session_id = $2',
+    'SELECT id, text FROM ai_question WHERE id = ? AND session_id = ?',
     [turn.questionId, sessionId],
   );
   if (!question) throw new QuestionNotFoundError(turn.questionId);
@@ -160,7 +165,7 @@ export async function* runFacilitatorTurn(input: FacilitatorTurnInput): AsyncGen
     const seq = outcome.error ? null : await insertMessage(client, sessionId, 'ai', fullText);
     if (!outcome.error && turn.kind === 'analysis') {
       await client.query(
-        'UPDATE planning_session SET analyzed_at = now(), updated_at = now() WHERE id = $1 AND analyzed_at IS NULL',
+        'UPDATE planning_session SET analyzed_at = NOW(6), updated_at = NOW(6) WHERE id = ? AND analyzed_at IS NULL',
         [sessionId],
       );
     }

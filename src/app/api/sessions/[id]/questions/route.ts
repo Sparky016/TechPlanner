@@ -28,7 +28,7 @@ export const GET = withApiHandler<{ id: string }>({}, async (ctx) => {
     `SELECT id, issue_id, section, text, status, dismiss_reason, answer_text, answered_at, answered_via, resolution,
             resolved_at, created_at
        FROM ai_question
-     WHERE session_id = $1 ORDER BY created_at, id`,
+     WHERE session_id = ? ORDER BY created_at, id`,
     [session.id],
   );
   const questions = rows.map((q) => ({

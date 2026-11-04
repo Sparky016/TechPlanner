@@ -8,7 +8,7 @@ vi.hoisted(() => {
     ATLASSIAN_CLOUD_ID: 'cloud-id',
     OAUTH_REDIRECT_URI: 'http://localhost:3000/auth/callback',
     TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
-    DATABASE_URL: 'postgres://techplanner:techplanner@localhost:5432/techplanner_t24',
+    DATABASE_URL: 'mysql://techplanner:techplanner@localhost:3306/techplanner_t24',
     COPILOT_GITHUB_TOKEN: 'ghp_x',
     FACILITATOR_MODEL: 'model-a',
     EVALUATOR_MODEL: 'model-b',
@@ -56,7 +56,6 @@ beforeEach(() => {
   fake = getLlmClient() as FakeLlmClient;
   existingIssues = [];
   sql = [];
-  let seq = 0;
   vi.mocked(getWorkingCopy).mockResolvedValue({
     sessionId: SESSION,
     version: 1,
@@ -70,7 +69,6 @@ beforeEach(() => {
     query: vi.fn(async (text: string, params?: unknown[]) => {
       sql.push({ text, params });
       if (/FROM issue/.test(text)) return { rows: existingIssues };
-      if (/INSERT INTO (issue|evaluation)/.test(text)) return { rows: [{ id: `id-${++seq}` }] };
       return { rows: [] };
     }),
   };

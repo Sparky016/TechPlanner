@@ -1,7 +1,15 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { AUDIT_ACTIONS } from './actions';
-import { type AuditHashPayload, canonicalJson, computeHash, REDACTED, redactDetails } from './hash';
+import {
+  assertStorableDetails,
+  type AuditHashPayload,
+  canonicalJson,
+  computeHash,
+  jsonNumberRoundTrips,
+  REDACTED,
+  redactDetails,
+} from './hash';
 
 const PAYLOAD: AuditHashPayload = {
   ts: '2026-10-05T12:00:00.123Z',
@@ -88,6 +96,40 @@ describe('computeHash', () => {
     expect(computeHash('00', PAYLOAD)).not.toBe(base);
     expect(computeHash('', { ...PAYLOAD, details: { b: 2, a: [2, 1] } })).not.toBe(base);
     expect(computeHash('', { ...PAYLOAD, details: { a: [2, 1], b: 1 } })).toBe(base);
+  });
+});
+
+describe('jsonNumberRoundTrips', () => {
+  it('accepts integer literals within (u)int64 and short decimals', () => {
+    for (const n of [0, -0, 1, -1, 100, 2 ** 53 - 1, 2 ** 53, 2 ** 53 + 2, 2 ** 63, 2 ** 64 - 2048, -(2 ** 62)]) {
+      expect(jsonNumberRoundTrips(n), String(n)).toBe(true);
+    }
+    for (const n of [1.5, 0.1, 4.35, 1e-7, 1e-22, 1e21, 1e22, 123456.789, 123456789012.345]) {
+      expect(jsonNumberRoundTrips(n), String(n)).toBe(true);
+    }
+  });
+
+  it('rejects numbers the MySQL JSON parser may round: 16-17 significant digits, or a far exponent', () => {
+    // 123456789.12345679 and 226.31531953811646 read back as 123456789.1234568 and 226.31531953811648 on MySQL 8.4.
+    for (const n of [123456789.12345679, 226.31531953811646, 0.40480745641475435, 1e23, 1e-23, 2 ** 64, -(2 ** 63)]) {
+      expect(jsonNumberRoundTrips(n), String(n)).toBe(false);
+    }
+    for (const n of [Number.MAX_VALUE, Number.MIN_VALUE, NaN, Infinity]) expect(jsonNumberRoundTrips(n)).toBe(false);
+  });
+});
+
+describe('assertStorableDetails', () => {
+  it('accepts nested JSON of storable strings and numbers', () => {
+    expect(() => assertStorableDetails({ a: [1, 'Zoë 😀', null, true, { b: 2.5, '': [] }], c: {} })).not.toThrow();
+  });
+
+  it('names the path of a value that would not read back unchanged', () => {
+    expect(() => assertStorableDetails({ a: [{ b: 0.1 + 0.7 * 3.3 }] })).toThrow(
+      /^details\.a\[0\]\.b must be a number/,
+    );
+    expect(() => assertStorableDetails({ 'a b': 2 ** 64 })).toThrow(/^details\["a b"\] must be a number/);
+    expect(() => assertStorableDetails({ a: { b: 'x\uD800' } })).toThrow('details.a.b must be well-formed Unicode');
+    expect(() => assertStorableDetails({ ['k\uDC00']: 1 })).toThrow('details keys must be well-formed Unicode');
   });
 });
 

@@ -1,8 +1,7 @@
-import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { recordAudit } from '@/server/audit/audit';
 import type { CurrentUser } from '@/server/auth/session';
-import { withTransaction } from '@/server/db/pool';
+import { type DbClient, withTransaction } from '@/server/db/pool';
 import { HttpError } from '@/server/http/errors';
 
 // Server-only: never import from src/lib or client components.
@@ -39,9 +38,9 @@ export function questionNotFound(): HttpError {
 /** Legacy 'dismissed' rows (expand/contract, spec §7) count as resolved. */
 const isResolved = (status: string): boolean => status === 'resolved' || status === 'dismissed';
 
-async function lockQuestion(client: PoolClient, sessionId: string, questionId: string): Promise<LockedQuestion> {
+async function lockQuestion(client: DbClient, sessionId: string, questionId: string): Promise<LockedQuestion> {
   const { rows } = await client.query<LockedQuestion>(
-    'SELECT status, section, answer_text FROM ai_question WHERE id = $1 AND session_id = $2 FOR UPDATE',
+    'SELECT status, section, answer_text FROM ai_question WHERE id = ? AND session_id = ? FOR UPDATE',
     [questionId, sessionId],
   );
   if (!rows[0]) throw questionNotFound();
@@ -49,7 +48,7 @@ async function lockQuestion(client: PoolClient, sessionId: string, questionId: s
 }
 
 async function audit(
-  client: PoolClient,
+  client: DbClient,
   input: QuestionActionInput,
   action: 'question.answered' | 'question.resolved' | 'question.reopened',
   details: Record<string, unknown>,
@@ -78,30 +77,36 @@ export async function answerQuestion(
   input: QuestionActionInput & { text: string },
 ): Promise<{ id: string; status: 'answered'; messageSeq: number }> {
   return withTransaction(async (client) => {
+    // Serialises concurrent writers for this session while seq is computed (same pattern as runTurn). Taken before
+    // the question row: every transaction that locks both locks the planning_session row first.
+    await client.query('SELECT 1 FROM planning_session WHERE id = ? FOR UPDATE', [input.sessionId]);
     const question = await lockQuestion(client, input.sessionId, input.questionId);
     if (isResolved(question.status)) {
       throw new HttpError(409, 'Question is resolved; reopen it before answering', 'question_resolved');
     }
     await client.query(
       `UPDATE ai_question
-          SET answer_text = $2, answered_at = now(), answered_via = 'facilitator', status = 'answered'
-        WHERE id = $1`,
-      [input.questionId, input.text],
+          SET answer_text = ?, answered_at = NOW(6), answered_via = 'facilitator', status = 'answered'
+        WHERE id = ?`,
+      [input.text, input.questionId],
     );
-    // Serialises concurrent writers for this session while seq is computed (same pattern as runTurn).
-    await client.query('SELECT 1 FROM planning_session WHERE id = $1 FOR UPDATE', [input.sessionId]);
-    const { rows } = await client.query<{ seq: number }>(
+    const nextSeq = await client.query<{ seq: string }>(
+      'SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM conversation_message WHERE session_id = ?',
+      [input.sessionId],
+    );
+    // INT + 1 is a BIGINT in MySQL, which the driver returns as a string.
+    const seq = Number(nextSeq.rows[0].seq);
+    await client.query(
       `INSERT INTO conversation_message (session_id, seq, role, content, question_id)
-       VALUES ($1, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = $1), 'facilitator', $2, $3)
-       RETURNING seq`,
-      [input.sessionId, input.text, input.questionId],
+       VALUES (?, ?, 'facilitator', ?, ?)`,
+      [input.sessionId, seq, input.text, input.questionId],
     );
     await audit(client, input, 'question.answered', {
       section: question.section,
       answerLength: input.text.length,
       previousStatus: question.status,
     });
-    return { id: input.questionId, status: 'answered', messageSeq: rows[0].seq };
+    return { id: input.questionId, status: 'answered', messageSeq: seq };
   });
 }
 
@@ -121,9 +126,9 @@ export async function resolveQuestion(
     }
     const resolution: QuestionResolution = question.status === 'answered' ? 'answered' : 'not_relevant';
     await client.query(
-      `UPDATE ai_question SET status = 'resolved', resolution = $2, resolved_at = now(), dismiss_reason = $3
-        WHERE id = $1`,
-      [input.questionId, resolution, input.reason],
+      `UPDATE ai_question SET status = 'resolved', resolution = ?, resolved_at = NOW(6), dismiss_reason = ?
+        WHERE id = ?`,
+      [resolution, input.reason, input.questionId],
     );
     await audit(client, input, 'question.resolved', { section: question.section, resolution, reason: input.reason });
     return { id: input.questionId, status: 'resolved', resolution, reason: input.reason };
@@ -144,9 +149,9 @@ export async function reopenQuestion(
     }
     const status = question.answer_text !== null ? 'answered' : 'open';
     await client.query(
-      `UPDATE ai_question SET status = $2, resolution = NULL, resolved_at = NULL, dismiss_reason = NULL
-        WHERE id = $1`,
-      [input.questionId, status],
+      `UPDATE ai_question SET status = ?, resolution = NULL, resolved_at = NULL, dismiss_reason = NULL
+        WHERE id = ?`,
+      [status, input.questionId],
     );
     await audit(client, input, 'question.reopened', { section: question.section, status });
     return { id: input.questionId, status };

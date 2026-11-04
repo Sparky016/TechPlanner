@@ -25,7 +25,7 @@ function request(method: string, path: string): NextRequest {
 
 beforeAll(async () => {
   await resetDatabase();
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', ['acc-me', 'Me User']);
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', ['acc-me', 'Me User']);
   cookie = await withTransaction((client) => createSession(client, 'acc-me'));
 });
 
@@ -44,7 +44,7 @@ describe('/api/me', () => {
     const ack = await ackPOST(request('POST', '/api/me/ack-data-notice'), { params: Promise.resolve({}) });
     expect(ack.status).toBe(200);
     const rows = await query<{ data_notice_ack_at: Date | null }>(
-      'SELECT data_notice_ack_at FROM app_user WHERE atlassian_account_id = $1',
+      'SELECT data_notice_ack_at FROM app_user WHERE atlassian_account_id = ?',
       ['acc-me'],
     );
     expect(rows[0].data_notice_ack_at).not.toBeNull();

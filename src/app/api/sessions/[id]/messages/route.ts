@@ -27,7 +27,7 @@ interface MessageRow {
 export const GET = withApiHandler<{ id: string }>({}, async (ctx) => {
   const session = await requireSessionAccess(ctx, ctx.params.id);
   const rows = await query<MessageRow>(
-    'SELECT seq, role, content, question_id, created_at FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+    'SELECT seq, role, content, question_id, created_at FROM conversation_message WHERE session_id = ? ORDER BY seq',
     [session.id],
   );
   const messages = rows.map((r) => ({

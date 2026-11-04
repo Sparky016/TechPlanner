@@ -13,7 +13,8 @@ dist
 .github
 .ai
 ai-logs
-tests
+# tests/ stays in the context: `next build` type-checks the whole repo, and scripts/perf and playwright.config.ts import from it.
+# (It is not copied into the runtime image.)
 evals
 test-results
 playwright-report

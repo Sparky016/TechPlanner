@@ -25,9 +25,12 @@ export const MOCK_USER = { accountId: 'e2e-account-1', name: 'Erin Facilitator',
 /** Confluence page linked from ABC-123's description. */
 export const LINKED_PAGE_ID = '5001';
 
-// Own database: every spec's resetDatabase() drops the whole public schema.
+// Own database: every spec's resetDatabase() drops and re-creates it. Users from scripts/mysql-bootstrap.sql: the
+// app and worker run as the app user; migrations, the reset and spec assertions (sql()) as the owner.
 export const DATABASE_URL =
-  process.env.E2E_DATABASE_URL ?? 'postgres://techplanner:techplanner@localhost:5432/techplanner_e2e';
+  process.env.E2E_DATABASE_URL ?? 'mysql://techplanner_app:app-dev-password@localhost:3306/techplanner_e2e';
+export const MIGRATE_DATABASE_URL =
+  process.env.E2E_MIGRATE_DATABASE_URL ?? 'mysql://techplanner_owner:owner-dev-password@localhost:3306/techplanner_e2e';
 
 /** Environment for migrate, web and worker. No .env file is read; LLM is always the scripted fake. */
 export const APP_ENV: Record<string, string> = {
@@ -39,6 +42,7 @@ export const APP_ENV: Record<string, string> = {
   OAUTH_REDIRECT_URI: `${APP_URL}/auth/callback`,
   TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 39).toString('base64'),
   DATABASE_URL,
+  MIGRATE_DATABASE_URL,
   APP_BASE_URL: APP_URL,
   // FakeLlmClient never uses the token; the schema still requires one.
   COPILOT_GITHUB_TOKEN: 'e2e-unused',

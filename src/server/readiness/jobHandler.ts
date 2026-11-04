@@ -15,7 +15,7 @@ export async function handleReadinessEvaluate(data: unknown): Promise<void> {
 
   const rows = await query<{ facilitator_id: string | null; display_name: string | null }>(
     `SELECT s.facilitator_id, u.display_name FROM planning_session s
-     LEFT JOIN app_user u ON u.atlassian_account_id = s.facilitator_id WHERE s.id = $1`,
+     LEFT JOIN app_user u ON u.atlassian_account_id = s.facilitator_id WHERE s.id = ?`,
     [sessionId],
   );
   if (rows.length === 0) throw new NonRetryableJobError(`Session ${sessionId} not found`);

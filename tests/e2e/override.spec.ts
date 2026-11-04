@@ -40,7 +40,7 @@ test('AC-8: publish with an open Critical Issue requires a justification (>= 20 
 
   // Audit log: readiness.override with the justification and the open critical issues.
   const overrides = await sql<{ details: { justification: string; openCriticalIssues: { section: string }[] } }>(
-    "SELECT details FROM audit_record WHERE action = 'readiness.override' AND session_id = $1",
+    "SELECT details FROM audit_record WHERE action = 'readiness.override' AND session_id = ?",
     [sessionId],
   );
   expect(overrides).toHaveLength(1);
@@ -56,7 +56,7 @@ test('AC-8: publish with an open Critical Issue requires a justification (>= 20 
   expect(header).toContain('Override justification');
   expect(header).toContain(JUSTIFICATION);
   const [{ confluence_page_id: pageId }] = await sql<{ confluence_page_id: string }>(
-    'SELECT confluence_page_id FROM planning_session WHERE id = $1',
+    'SELECT confluence_page_id FROM planning_session WHERE id = ?',
     [sessionId],
   );
   expect(state.pages[pageId].body).toContain(JUSTIFICATION);

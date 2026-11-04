@@ -1,9 +1,8 @@
-import type { PoolClient } from 'pg';
-import { AtlassianApiError } from '@/server/atlassian/client';
+import { AtlassianApiError, settleAll } from '@/server/atlassian/client';
 import { discoverConfluencePageRefs, getPageMarkdown } from '@/server/atlassian/confluence';
 import { getIssueSnapshot, type JiraIssueSnapshot } from '@/server/atlassian/jira';
 import { getConfig } from '@/server/config';
-import { query } from '@/server/db/pool';
+import { type DbClient, query } from '@/server/db/pool';
 import { ingestAttachments, type AttachmentMeta } from '@/server/ingest/attachments';
 import { applyContextBudget, type BudgetItem } from '@/server/ingest/budget';
 import { getLlmClient } from '@/server/llm';
@@ -45,6 +44,8 @@ interface SourceSnapshotRow {
 const FETCH_CONCURRENCY = 5;
 
 // Runs `fn` over `items` with at most `limit` calls in flight; results keep input order.
+// After a call rejects no new calls start, and the rejection is thrown only once in-flight calls have settled,
+// so no Atlassian request outlives the caller.
 export async function mapWithConcurrency<T, R>(
   items: readonly T[],
   limit: number,
@@ -52,13 +53,19 @@ export async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
+  let failed = false;
   const worker = async (): Promise<void> => {
-    while (next < items.length) {
+    while (!failed && next < items.length) {
       const index = next++;
-      results[index] = await fn(items[index]);
+      try {
+        results[index] = await fn(items[index]);
+      } catch (err) {
+        failed = true;
+        throw err;
+      }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  await settleAll(Array.from({ length: Math.min(limit, items.length) }, worker));
   return results;
 }
 
@@ -256,7 +263,7 @@ export async function collectSources(userId: string, issues: JiraIssueSnapshot[]
 }
 
 export async function insertSnapshots(
-  client: PoolClient,
+  client: DbClient,
   sessionId: string,
   snapshots: SourceSnapshotInput[],
   retrievedAt: Date,
@@ -264,7 +271,7 @@ export async function insertSnapshots(
   for (const s of snapshots) {
     await client.query(
       `INSERT INTO source_snapshot (session_id, kind, ref, title, content_text, ingest_status, detail, retrieved_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [sessionId, s.kind, s.ref, s.title, s.contentText, s.ingestStatus, JSON.stringify(s.detail), retrievedAt],
     );
   }
@@ -288,10 +295,10 @@ export async function loadCurrentSnapshots(sessionId: string): Promise<SourceSna
   const rows = await query<SourceSnapshotRow>(
     `SELECT id, kind, ref, title, content_text, ingest_status, detail, retrieved_at
        FROM source_snapshot
-      WHERE session_id = $1
-        AND retrieved_at = (SELECT max(retrieved_at) FROM source_snapshot WHERE session_id = $1)
+      WHERE session_id = ?
+        AND retrieved_at = (SELECT max(retrieved_at) FROM source_snapshot WHERE session_id = ?)
       ORDER BY id`,
-    [sessionId],
+    [sessionId, sessionId],
   );
   return rows.map(mapSnapshotRow);
 }

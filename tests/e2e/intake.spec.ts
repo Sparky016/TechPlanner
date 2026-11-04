@@ -29,7 +29,7 @@ const questionItem = (page: Page, text: string) => questionsRegion(page).getByRo
 const heading = (page: Page, text: string) => questionsRegion(page).getByRole('heading', { name: text, level: 2 });
 
 async function auditCount(sessionId: string, action: string): Promise<number> {
-  return (await sql('SELECT 1 FROM audit_record WHERE action = $1 AND session_id = $2', [action, sessionId])).length;
+  return (await sql('SELECT 1 FROM audit_record WHERE action = ? AND session_id = ?', [action, sessionId])).length;
 }
 
 test('GI flow 1: Create session, Ingest (chained analysis), answer, resolve, resolve as not relevant, Discuss with AI', async ({
@@ -39,7 +39,7 @@ test('GI flow 1: Create session, Ingest (chained analysis), answer, resolve, res
   const sessionId = await createSession(page, 'ABC-123', { ingest: false });
 
   // Not ingested: no snapshots, no AI, the repository section is available, and the discussion is disabled.
-  expect(await sql('SELECT 1 FROM source_snapshot WHERE session_id = $1', [sessionId])).toHaveLength(0);
+  expect(await sql('SELECT 1 FROM source_snapshot WHERE session_id = ?', [sessionId])).toHaveLength(0);
   await expect(page.getByText('Sources not ingested yet.')).toBeVisible();
   await expect(page.getByRole('list', { name: 'Sources' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Code repository' })).toBeVisible();
@@ -58,19 +58,19 @@ test('GI flow 1: Create session, Ingest (chained analysis), answer, resolve, res
   await expect(section(page, 'Executive Summary')).toContainText('E2E analysis draft: users export the report as CSV.');
 
   const [intake] = await sql<{ ingested_at: Date | null; analyzed_at: Date | null }>(
-    'SELECT ingested_at, analyzed_at FROM planning_session WHERE id = $1',
+    'SELECT ingested_at, analyzed_at FROM planning_session WHERE id = ?',
     [sessionId],
   );
   expect(intake.ingested_at).not.toBeNull();
   expect(intake.analyzed_at).not.toBeNull();
   expect(
-    await sql("SELECT 1 FROM conversation_message WHERE session_id = $1 AND role = 'system' AND content LIKE 'Sources ingested at %'", [
+    await sql("SELECT 1 FROM conversation_message WHERE session_id = ? AND role = 'system' AND content LIKE 'Sources ingested at %'", [
       sessionId,
     ]),
   ).toHaveLength(1);
   expect(await auditCount(sessionId, 'sources.ingested')).toBe(1);
   const [analysisTurn] = await sql<{ details: { turnKind: string } }>(
-    "SELECT details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1",
+    "SELECT details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = ?",
     [sessionId],
   );
   expect(analysisTurn.details.turnKind).toBe('analysis');
@@ -95,7 +95,7 @@ test('GI flow 1: Create session, Ingest (chained analysis), answer, resolve, res
   const answered = questionsRegion(page).getByRole('group', { name: 'Answered — awaiting resolve (1)' });
   await expect(answered).toContainText('The export is capped at 50000 rows.');
   const [answerRow] = await sql<{ status: string; answer_text: string; answered_via: string }>(
-    'SELECT status, answer_text, answered_via FROM ai_question WHERE session_id = $1 AND text = $2',
+    'SELECT status, answer_text, answered_via FROM ai_question WHERE session_id = ? AND text = ?',
     [sessionId, Q_SIZE],
   );
   expect(answerRow).toMatchObject({ status: 'answered', answered_via: 'facilitator' });
@@ -120,7 +120,7 @@ test('GI flow 1: Create session, Ingest (chained analysis), answer, resolve, res
   await expect(questionItem(page, Q_COLUMNS)).toContainText('Resolved — not relevant');
   await expect(questionItem(page, Q_COLUMNS)).toContainText('Reason: The template fixes the columns');
   const rows = await sql<{ text: string; status: string; resolution: string; dismiss_reason: string | null }>(
-    'SELECT text, status, resolution, dismiss_reason FROM ai_question WHERE session_id = $1 ORDER BY text',
+    'SELECT text, status, resolution, dismiss_reason FROM ai_question WHERE session_id = ? ORDER BY text',
     [sessionId],
   );
   expect(rows.map((r) => [r.text, r.status, r.resolution])).toEqual([
@@ -139,7 +139,7 @@ test('GI flow 1: Create session, Ingest (chained analysis), answer, resolve, res
   await expect(section(page, 'Security')).toContainText('E2E discussion result: only facilitators may export reports.');
   await expect(page.getByRole('list', { name: 'Messages' })).toContainText('Security is updated.');
   const kinds = await sql<{ kind: string }>(
-    "SELECT details->>'turnKind' AS kind FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1 ORDER BY id",
+    "SELECT details->>'$.turnKind' AS kind FROM audit_record WHERE action = 'ai.suggestion' AND session_id = ? ORDER BY id",
     [sessionId],
   );
   expect(kinds.map((k) => k.kind)).toEqual(['analysis', 'answer', 'message']);
@@ -159,11 +159,11 @@ test('GI flow 2: Create and ingest opens the workspace with sources and a stream
   await expect.poll(() => new URL(page.url()).search).toBe('');
 
   const analyses = () =>
-    sql("SELECT 1 FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1 AND details->>'turnKind' = 'analysis'", [
+    sql("SELECT 1 FROM audit_record WHERE action = 'ai.suggestion' AND session_id = ? AND details->>'$.turnKind' = 'analysis'", [
       sessionId,
     ]);
   const notices = () =>
-    sql("SELECT 1 FROM conversation_message WHERE session_id = $1 AND role = 'system' AND content LIKE 'Initial analysis requested by %'", [
+    sql("SELECT 1 FROM conversation_message WHERE session_id = ? AND role = 'system' AND content LIKE 'Initial analysis requested by %'", [
       sessionId,
     ]);
   expect(await analyses()).toHaveLength(1);
@@ -180,5 +180,5 @@ test('GI flow 2: Create and ingest opens the workspace with sources and a stream
     expect(await analyses()).toHaveLength(1);
     expect(await notices()).toHaveLength(1);
   }
-  expect(await sql('SELECT 1 FROM ai_question WHERE session_id = $1', [sessionId])).toHaveLength(3);
+  expect(await sql('SELECT 1 FROM ai_question WHERE session_id = ?', [sessionId])).toHaveLength(3);
 });

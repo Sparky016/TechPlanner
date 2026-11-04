@@ -6,6 +6,7 @@ vi.hoisted(() => {
 });
 
 import { resetDatabase } from './setup';
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { resetConfigForTests } from '@/server/config';
 import { db, query } from '@/server/db/pool';
@@ -22,12 +23,14 @@ let keySeq = 0;
 
 async function createSession(): Promise<string> {
   keySeq++;
-  const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ($1, ARRAY[$1]) RETURNING id',
-    [`FAC-${keySeq}`],
+  const key = `FAC-${keySeq}`;
+  const id = randomUUID();
+  await query(
+    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, JSON_ARRAY(?))',
+    [id, key, key],
   );
-  await initWorkingCopy(rows[0].id);
-  return rows[0].id;
+  await initWorkingCopy(id);
+  return id;
 }
 
 async function collect(it: AsyncIterable<FacilitatorEvent>): Promise<FacilitatorEvent[]> {
@@ -77,7 +80,7 @@ describe('runFacilitatorTurn persistence', () => {
     expect(question).toMatchObject({ text: 'What is the p95 login latency target?', section: 'Performance' });
 
     const messages = await query<{ seq: number; role: string; content: string }>(
-      'SELECT seq, role, content FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+      'SELECT seq, role, content FROM conversation_message WHERE session_id = ? ORDER BY seq',
       [sessionId],
     );
     expect(messages).toEqual([
@@ -87,7 +90,7 @@ describe('runFacilitatorTurn persistence', () => {
     expect(events.at(-1)).toEqual({ type: 'done', messageSeq: 2 });
 
     const questions = await query<{ id: string; section: string; text: string; status: string }>(
-      'SELECT id, section, text, status FROM ai_question WHERE session_id = $1',
+      'SELECT id, section, text, status FROM ai_question WHERE session_id = ?',
       [sessionId],
     );
     expect(questions).toEqual([
@@ -129,7 +132,7 @@ describe('runFacilitatorTurn persistence', () => {
       expect(wc?.sections.Scope.body).toBe('Human scope v2');
       expect(wc?.sections.Assumptions.body).toBe('AI assumptions');
       const pending = await query<{ section: string; status: string; patch: { content: string } }>(
-        'SELECT section, status, patch FROM pending_suggestion WHERE session_id = $1',
+        'SELECT section, status, patch FROM pending_suggestion WHERE session_id = ?',
         [sessionId],
       );
       expect(pending).toEqual([{ section: 'Scope', status: 'pending', patch: expect.objectContaining({ content: 'AI scope' }) }]);
@@ -148,11 +151,11 @@ describe('runFacilitatorTurn persistence', () => {
     await turn(sessionId, 'Start.');
 
     const audits = await query<{ user_id: string; result: string; details: Record<string, unknown> }>(
-      "SELECT user_id, result, details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1",
+      "SELECT user_id, result, details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = ?",
       [sessionId],
     );
     expect(audits).toHaveLength(1);
-    const [q] = await query<{ id: string }>('SELECT id FROM ai_question WHERE session_id = $1', [sessionId]);
+    const [q] = await query<{ id: string }>('SELECT id FROM ai_question WHERE session_id = ?', [sessionId]);
     expect(audits[0]).toMatchObject({ user_id: 'acc-1', result: 'success' });
     expect(audits[0].details).toMatchObject({
       messageSeq: 2,
@@ -166,7 +169,7 @@ describe('runFacilitatorTurn persistence', () => {
     fake.enqueue([{ type: 'text-delta', text: 'Hmm.' }, { type: 'done' }], [{ type: 'text-delta', text: 'Ok.' }, { type: 'done' }]);
     await turn(sessionId, 'Anything else?');
     expect(fake.calls).toHaveLength(3);
-    const after = await query("SELECT 1 FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1", [sessionId]);
+    const after = await query("SELECT 1 FROM audit_record WHERE action = 'ai.suggestion' AND session_id = ?", [sessionId]);
     expect(after).toHaveLength(2);
   });
 
@@ -183,19 +186,19 @@ describe('runFacilitatorTurn persistence', () => {
     const events = await run(sessionId, { kind: 'analysis' });
     expect(events.at(-1)).toEqual({ type: 'done', messageSeq: 2 });
     const messages = await query<{ role: string; content: string }>(
-      'SELECT role, content FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+      'SELECT role, content FROM conversation_message WHERE session_id = ? ORDER BY seq',
       [sessionId],
     );
     expect(messages).toEqual([
       { role: 'system', content: 'Initial analysis requested by Ada.' },
       { role: 'ai', content: 'Summary.' },
     ]);
-    const [session] = await query<{ analyzed_at: Date | null }>('SELECT analyzed_at FROM planning_session WHERE id = $1', [
+    const [session] = await query<{ analyzed_at: Date | null }>('SELECT analyzed_at FROM planning_session WHERE id = ?', [
       sessionId,
     ]);
     expect(session.analyzed_at).toBeInstanceOf(Date);
     const [audit] = await query<{ details: Record<string, unknown> }>(
-      "SELECT details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1",
+      "SELECT details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = ?",
       [sessionId],
     );
     expect(audit.details).toMatchObject({ turnKind: 'analysis', messageSeq: 2 });
@@ -203,26 +206,27 @@ describe('runFacilitatorTurn persistence', () => {
 
   it('answer: persists only the AI message and names the question in the prompt (GI-14)', async () => {
     const sessionId = await createSession();
-    const [q] = await query<{ id: string }>(
-      "INSERT INTO ai_question (session_id, section, text, status) VALUES ($1, 'Security', 'Which IdP?', 'answered') RETURNING id",
-      [sessionId],
+    const q = { id: randomUUID() };
+    await query(
+      "INSERT INTO ai_question (id, session_id, section, text, status) VALUES (?, ?, 'Security', 'Which IdP?', 'answered')",
+      [q.id, sessionId],
     );
     // The answer route (task 46) persists the answer message before the turn.
     await query(
-      "INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES ($1, 1, 'facilitator', 'Okta', $2)",
+      "INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES (?, 1, 'facilitator', 'Okta', ?)",
       [sessionId, q.id],
     );
     fake.enqueue([patch('Security', 'IdP: Okta.'), { type: 'done' }]);
     await run(sessionId, { kind: 'answer', questionId: q.id, text: 'Okta' });
 
-    const messages = await query<{ role: string }>('SELECT role FROM conversation_message WHERE session_id = $1 ORDER BY seq', [
+    const messages = await query<{ role: string }>('SELECT role FROM conversation_message WHERE session_id = ? ORDER BY seq', [
       sessionId,
     ]);
     expect(messages).toEqual([{ role: 'facilitator' }, { role: 'ai' }]);
     expect(fake.calls[0].system).toContain(`The facilitator answered question ${q.id}: "Which IdP?".`);
     expect(fake.calls[0].messages.at(-1)).toEqual({ role: 'user', content: 'Okta' });
     const [audit] = await query<{ details: Record<string, unknown> }>(
-      "SELECT details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = $1",
+      "SELECT details FROM audit_record WHERE action = 'ai.suggestion' AND session_id = ?",
       [sessionId],
     );
     expect(audit.details).toMatchObject({ turnKind: 'answer', questionId: q.id });
@@ -233,7 +237,7 @@ describe('runFacilitatorTurn persistence', () => {
     fake.enqueue([{ type: 'error', code: 'transient', message: 'upstream', retryable: true }]);
     const events = await turn(sessionId, 'Hello?');
     expect(events).toEqual([{ type: 'error', code: 'transient', message: 'upstream' }]);
-    const messages = await query<{ role: string }>('SELECT role FROM conversation_message WHERE session_id = $1', [sessionId]);
+    const messages = await query<{ role: string }>('SELECT role FROM conversation_message WHERE session_id = ?', [sessionId]);
     expect(messages).toEqual([{ role: 'facilitator' }]);
   });
 });

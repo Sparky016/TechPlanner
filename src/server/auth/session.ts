@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { PoolClient } from 'pg';
-import { query } from '@/server/db/pool';
+import { type DbClient, query, withTransaction } from '@/server/db/pool';
 import { HttpError } from '@/server/http/errors';
 
 // Server-only: never import from src/lib or client components.
@@ -60,11 +59,11 @@ export function clearOauthStateCookie(): string {
 }
 
 // Creates an app_session row inside the caller's transaction; returns the cookie value (never stored).
-export async function createSession(client: PoolClient, userId: string): Promise<string> {
+export async function createSession(client: DbClient, userId: string): Promise<string> {
   const value = randomBytes(32).toString('base64url');
   await client.query(
     `INSERT INTO app_session (id_hash, user_id, expires_at)
-     VALUES ($1, $2, now() + make_interval(hours => $3))`,
+     VALUES (?, ?, NOW(6) + INTERVAL ? HOUR)`,
     [hashSessionId(value), userId, IDLE_HOURS],
   );
   return value;
@@ -74,16 +73,24 @@ export async function createSession(client: PoolClient, userId: string): Promise
 export async function getCurrentUser(request: Request): Promise<CurrentUser | null> {
   const value = readCookie(request, SESSION_COOKIE);
   if (!value) return null;
+  const idHash = hashSessionId(value);
+  // user_id references app_user, so a non-null user_id means the user exists. The read-back repeats the validity
+  // check: a session that was not slid (expired or deleted meanwhile) yields no row.
+  await query(
+    `UPDATE app_session
+        SET last_seen_at = NOW(6),
+            expires_at = LEAST(created_at + INTERVAL ? DAY, NOW(6) + INTERVAL ? HOUR)
+      WHERE id_hash = ?
+        AND expires_at > NOW(6)
+        AND user_id IS NOT NULL`,
+    [ABSOLUTE_DAYS, IDLE_HOURS, idHash],
+  );
   const rows = await query<{ account_id: string; display_name: string }>(
-    `UPDATE app_session s
-        SET last_seen_at = now(),
-            expires_at = LEAST(s.created_at + make_interval(days => $2), now() + make_interval(hours => $3))
-       FROM app_user u
-      WHERE s.id_hash = $1
-        AND s.expires_at > now()
-        AND u.atlassian_account_id = s.user_id
-     RETURNING u.atlassian_account_id AS account_id, u.display_name`,
-    [hashSessionId(value), ABSOLUTE_DAYS, IDLE_HOURS],
+    `SELECT u.atlassian_account_id AS account_id, u.display_name
+       FROM app_session s JOIN app_user u ON u.atlassian_account_id = s.user_id
+      WHERE s.id_hash = ?
+        AND s.expires_at > NOW(6)`,
+    [idHash],
   );
   const row = rows[0];
   return row ? { accountId: row.account_id, displayName: row.display_name } : null;
@@ -99,9 +106,14 @@ export async function requireUser(request: Request): Promise<CurrentUser> {
 export async function deleteSession(request: Request): Promise<string | null> {
   const value = readCookie(request, SESSION_COOKIE);
   if (!value) return null;
-  const rows = await query<{ user_id: string | null }>(
-    'DELETE FROM app_session WHERE id_hash = $1 RETURNING user_id',
-    [hashSessionId(value)],
-  );
-  return rows[0]?.user_id ?? null;
+  const idHash = hashSessionId(value);
+  return withTransaction(async (client) => {
+    const { rows } = await client.query<{ user_id: string | null }>(
+      'SELECT user_id FROM app_session WHERE id_hash = ? FOR UPDATE',
+      [idHash],
+    );
+    if (rows.length === 0) return null;
+    await client.query('DELETE FROM app_session WHERE id_hash = ?', [idHash]);
+    return rows[0].user_id;
+  });
 }

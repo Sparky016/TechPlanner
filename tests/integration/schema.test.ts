@@ -1,9 +1,12 @@
-import { resetDatabase } from './setup';
+import { asOwner, dropDatabase, migrateDatabase, resetDatabase } from './setup';
+import { randomUUID } from 'node:crypto';
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { db, query, withTransaction } from '@/server/db/pool';
+import { getConfig } from '@/server/config';
+import { isCheckViolation, isForeignKeyViolation, isTriggerRejection } from '@/server/db/errors';
+import { createDbPool, db, query, withTransaction } from '@/server/db/pool';
 import { MIGRATIONS_DIR, runMigrations } from '../../scripts/migrate';
 
 const TABLES = [
@@ -24,10 +27,12 @@ const TABLES = [
 ];
 
 async function createSession(): Promise<string> {
-  const [row] = await query<{ id: string }>(
-    "INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ('ABC-1', ARRAY['ABC-1']) RETURNING id",
+  const id = randomUUID();
+  await query(
+    "INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, 'ABC-1', '[\"ABC-1\"]')",
+    [id],
   );
-  return row.id;
+  return id;
 }
 
 beforeAll(async () => {
@@ -41,79 +46,103 @@ afterAll(async () => {
 describe('migrations', () => {
   it('creates all 14 tables and records the migration', async () => {
     const rows = await query<{ table_name: string }>(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
+      "SELECT table_name AS table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'",
     );
     const names = rows.map((r) => r.table_name);
     for (const table of TABLES) expect(names).toContain(table);
 
-    const applied = await query<{ filename: string }>('SELECT filename FROM schema_migrations');
-    expect(applied.map((r) => r.filename)).toContain('0001_init.sql');
-    expect(applied.map((r) => r.filename)).toContain('0005_guided_intake.sql');
+    // The app user has no grant on schema_migrations.
+    const applied = await asOwner((c) => c.query<{ filename: string }>('SELECT filename FROM schema_migrations'));
+    expect(applied.rows.map((r) => r.filename)).toContain('0001_init.sql');
+    expect(applied.rows.map((r) => r.filename)).toContain('0005_guided_intake.sql');
   });
 
   it('is a no-op when re-run', async () => {
-    expect(await runMigrations(db)).toEqual([]);
+    expect(await migrateDatabase()).toEqual([]);
+  });
+
+  it('serialises concurrent runs: every file is applied exactly once (AC4)', async () => {
+    const owner = new URL(getConfig().MIGRATE_DATABASE_URL!);
+    const scratch = `${decodeURIComponent(owner.pathname.slice(1))}_concurrent`;
+    owner.pathname = '/';
+    const admin = createDbPool(owner.toString());
+    owner.pathname = `/${scratch}`;
+    const pools = [createDbPool(owner.toString()), createDbPool(owner.toString())];
+    try {
+      await dropDatabase(admin, scratch);
+      await admin.query(`CREATE DATABASE \`${scratch}\``);
+      const runs = await Promise.all(pools.map((p) => runMigrations(p)));
+
+      const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
+      expect([...runs[0], ...runs[1]].sort()).toEqual(files);
+      const recorded = await pools[0].query<{ filename: string }>('SELECT filename FROM schema_migrations');
+      expect(recorded.rows.map((r) => r.filename).sort()).toEqual(files);
+    } finally {
+      await dropDatabase(admin, scratch).catch(() => undefined);
+      await Promise.all([admin.end(), ...pools.map((p) => p.end())]);
+    }
   });
 });
 
 describe('check constraints', () => {
   it('rejects an invalid planning_session.status', async () => {
     await expect(
-      query("INSERT INTO planning_session (primary_ticket_key, ticket_keys, status) VALUES ('ABC-1', '{}', 'bogus')"),
-    ).rejects.toMatchObject({ code: '23514' });
+      query("INSERT INTO planning_session (primary_ticket_key, ticket_keys, status) VALUES ('ABC-1', '[]', 'bogus')"),
+    ).rejects.toSatisfy(isCheckViolation);
   });
 
   it('rejects invalid enum values on other tables', async () => {
     const sessionId = await createSession();
     await expect(
-      query("INSERT INTO conversation_message (session_id, seq, role, content) VALUES ($1, 1, 'bogus', 'x')", [
+      query("INSERT INTO conversation_message (session_id, seq, role, content) VALUES (?, 1, 'bogus', 'x')", [
         sessionId,
       ]),
-    ).rejects.toMatchObject({ code: '23514' });
+    ).rejects.toSatisfy(isCheckViolation);
     await expect(
       query(
-        "INSERT INTO issue (session_id, severity, section, description, fingerprint) VALUES ($1, 'bogus', 's', 'd', 'f')",
+        "INSERT INTO issue (session_id, severity, section, description, fingerprint) VALUES (?, 'bogus', 's', 'd', 'f')",
         [sessionId],
       ),
-    ).rejects.toMatchObject({ code: '23514' });
+    ).rejects.toSatisfy(isCheckViolation);
     await expect(
-      query("INSERT INTO audit_record (action, result, hash) VALUES ('x', 'bogus', '\\x00')"),
-    ).rejects.toMatchObject({ code: '23514' });
+      query("INSERT INTO audit_record (action, result, hash) VALUES ('x', 'bogus', X'00')"),
+    ).rejects.toSatisfy(isCheckViolation);
   });
 
   it('constrains the guided intake question fields (0005)', async () => {
     const sessionId = await createSession();
     for (const column of ['status', 'answered_via', 'resolution']) {
       await expect(
-        query(`INSERT INTO ai_question (session_id, text, ${column}) VALUES ($1, 'q', 'bogus')`, [sessionId]),
-      ).rejects.toMatchObject({ code: '23514' });
+        query(`INSERT INTO ai_question (session_id, text, ${column}) VALUES (?, 'q', 'bogus')`, [sessionId]),
+      ).rejects.toSatisfy(isCheckViolation);
     }
     // 'dismissed' stays allowed until the contract step; the new fields accept NULL.
     for (const status of ['open', 'answered', 'resolved', 'dismissed']) {
-      await query("INSERT INTO ai_question (session_id, text, status) VALUES ($1, 'q', $2)", [sessionId, status]);
+      await query("INSERT INTO ai_question (session_id, text, status) VALUES (?, 'q', ?)", [sessionId, status]);
     }
-    const [q] = await query<{ id: string }>(
-      `INSERT INTO ai_question (session_id, text, status, answer_text, answered_at, answered_via, resolution, resolved_at)
-       VALUES ($1, 'q', 'resolved', 'a', now(), 'facilitator', 'answered', now()) RETURNING id`,
-      [sessionId],
+    const questionId = randomUUID();
+    await query(
+      `INSERT INTO ai_question (id, session_id, text, status, answer_text, answered_at, answered_via, resolution, resolved_at)
+       VALUES (?, ?, 'q', 'resolved', 'a', NOW(6), 'facilitator', 'answered', NOW(6))`,
+      [questionId, sessionId],
     );
-    await query("INSERT INTO ai_question (session_id, text, answered_via) VALUES ($1, 'q', 'ai')", [sessionId]);
-    await query("INSERT INTO ai_question (session_id, text, resolution) VALUES ($1, 'q', 'not_relevant')", [sessionId]);
+    await query("INSERT INTO ai_question (session_id, text, answered_via) VALUES (?, 'q', 'ai')", [sessionId]);
+    await query("INSERT INTO ai_question (session_id, text, resolution) VALUES (?, 'q', 'not_relevant')", [sessionId]);
 
     // conversation_message.question_id must name an existing question.
     await query(
-      "INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES ($1, 1, 'facilitator', 'a', $2)",
-      [sessionId, q.id],
+      "INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES (?, 1, 'facilitator', 'a', ?)",
+      [sessionId, questionId],
     );
     await expect(
       query(
-        "INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES ($1, 2, 'facilitator', 'a', gen_random_uuid())",
+        "INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES (?, 2, 'facilitator', 'a', UUID())",
         [sessionId],
       ),
-    ).rejects.toMatchObject({ code: '23503' });
+    ).rejects.toSatisfy(isForeignKeyViolation);
 
     const [s] = await query<{ ingested_at: Date | null; analyzed_at: Date | null }>(
-      'SELECT ingested_at, analyzed_at FROM planning_session WHERE id = $1',
+      'SELECT ingested_at, analyzed_at FROM planning_session WHERE id = ?',
       [sessionId],
     );
     expect(s).toEqual({ ingested_at: null, analyzed_at: null });
@@ -122,27 +151,27 @@ describe('check constraints', () => {
 
 describe('withTransaction', () => {
   it('commits on success', async () => {
-    const id = await withTransaction(async (client) => {
-      const res = await client.query<{ id: string }>(
-        "INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ('TX-OK', '{}') RETURNING id",
+    const id = randomUUID();
+    await withTransaction(async (client) => {
+      await client.query(
+        "INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, 'TX-OK', '[]')",
+        [id],
       );
-      return res.rows[0].id;
     });
-    expect(await query('SELECT 1 FROM planning_session WHERE id = $1', [id])).toHaveLength(1);
+    expect(await query('SELECT 1 FROM planning_session WHERE id = ?', [id])).toHaveLength(1);
   });
 
   it('rolls back on a thrown error and releases the client', async () => {
     await expect(
       withTransaction(async (client) => {
-        await client.query("INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ('TX-FAIL', '{}')");
+        await client.query("INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ('TX-FAIL', '[]')");
         throw new Error('boom');
       }),
     ).rejects.toThrow('boom');
 
     expect(await query("SELECT 1 FROM planning_session WHERE primary_ticket_key = 'TX-FAIL'")).toHaveLength(0);
     // Released: the pool has no checked-out clients.
-    expect(db.totalCount - db.idleCount).toBe(0);
-    expect(db.waitingCount).toBe(0);
+    expect(db.stats()).toEqual({ checkedOut: 0, waiting: 0 });
   });
 });
 
@@ -150,34 +179,65 @@ describe('revision immutability', () => {
   it('rejects updating sections but allows published false -> true', async () => {
     const sessionId = await createSession();
     await query(
-      "INSERT INTO revision (session_id, number, sections, trigger) VALUES ($1, 1, '{\"a\": 1}', 'save')",
+      "INSERT INTO revision (session_id, number, sections, `trigger`) VALUES (?, 1, '{\"a\": 1}', 'save')",
       [sessionId],
     );
 
     await expect(
-      query('UPDATE revision SET sections = \'{"a": 2}\' WHERE session_id = $1 AND number = 1', [sessionId]),
-    ).rejects.toMatchObject({ code: '23001' });
+      query('UPDATE revision SET sections = \'{"a": 2}\' WHERE session_id = ? AND number = 1', [sessionId]),
+    ).rejects.toSatisfy(isTriggerRejection);
     await expect(
       query(
-        'UPDATE revision SET published = true, readiness_score = 99 WHERE session_id = $1 AND number = 1',
+        'UPDATE revision SET published = true, readiness_score = 99 WHERE session_id = ? AND number = 1',
         [sessionId],
       ),
-    ).rejects.toMatchObject({ code: '23001' });
+    ).rejects.toSatisfy(isTriggerRejection);
 
-    await query('UPDATE revision SET published = true WHERE session_id = $1 AND number = 1', [sessionId]);
+    await query('UPDATE revision SET published = true WHERE session_id = ? AND number = 1', [sessionId]);
     const [row] = await query<{ published: boolean; sections: unknown }>(
-      'SELECT published, sections FROM revision WHERE session_id = $1 AND number = 1',
+      'SELECT published, sections FROM revision WHERE session_id = ? AND number = 1',
       [sessionId],
     );
     expect(row).toEqual({ published: true, sections: { a: 1 } });
 
     await expect(
-      query('UPDATE revision SET published = false WHERE session_id = $1 AND number = 1', [sessionId]),
-    ).rejects.toMatchObject({ code: '23001' });
+      query('UPDATE revision SET published = false WHERE session_id = ? AND number = 1', [sessionId]),
+    ).rejects.toSatisfy(isTriggerRejection);
   });
 });
 
-// Runs last: it rebuilds the schema at 0004, seeds it, then applies 0005 on top (spec §7 backfill).
+describe('audit_record append-only (AC3)', () => {
+  async function auditId(): Promise<string> {
+    await query("INSERT INTO audit_record (action, result, hash) VALUES ('test.append_only', 'success', X'01')");
+    const [row] = await query<{ id: string }>(
+      "SELECT id FROM audit_record WHERE action = 'test.append_only' ORDER BY id DESC LIMIT 1",
+    );
+    return row.id;
+  }
+
+  it('rejects UPDATE and DELETE by trigger, even for the owner', async () => {
+    const id = await auditId();
+    await asOwner(async (owner) => {
+      await expect(owner.query("UPDATE audit_record SET action = 'x' WHERE id = ?", [id])).rejects.toSatisfy(
+        isTriggerRejection,
+      );
+      await expect(owner.query('DELETE FROM audit_record WHERE id = ?', [id])).rejects.toSatisfy(isTriggerRejection);
+    });
+    expect(await query('SELECT action FROM audit_record WHERE id = ?', [id])).toEqual([{ action: 'test.append_only' }]);
+  });
+
+  it('refuses UPDATE, DELETE and TRUNCATE to the app user by privileges', async () => {
+    const id = await auditId();
+    // ER_TABLEACCESS_DENIED_ERROR: the privilege check runs before any trigger.
+    const denied = { errno: 1142 };
+    await expect(query("UPDATE audit_record SET action = 'x' WHERE id = ?", [id])).rejects.toMatchObject(denied);
+    await expect(query('DELETE FROM audit_record WHERE id = ?', [id])).rejects.toMatchObject(denied);
+    await expect(query('TRUNCATE audit_record')).rejects.toMatchObject(denied);
+    expect(await query('SELECT action FROM audit_record WHERE id = ?', [id])).toEqual([{ action: 'test.append_only' }]);
+  });
+});
+
+// Runs last: it rebuilds the schema at 0004, seeds it, then applies 0005 (and 0006) on top (spec §7 backfill).
 describe('0005 guided intake backfill', () => {
   let dir: string;
 
@@ -193,39 +253,41 @@ describe('0005 guided intake backfill', () => {
   });
 
   it('migrates dismissed questions to resolved and marks sessions with snapshots as ingested and analyzed', async () => {
-    await db.query('DROP SCHEMA public CASCADE');
-    await db.query('CREATE SCHEMA public');
-    await runMigrations(db, dir);
+    await resetDatabase(dir);
 
     const withSources = await createSession();
     const withoutSources = await createSession();
     const other = await createSession();
+    // Session time zone is UTC (src/server/db/mysql.ts), so these DATETIME literals are UTC.
     await query(
       `INSERT INTO source_snapshot (session_id, kind, ref, ingest_status, retrieved_at) VALUES
-         ($1, 'jira_issue', 'ABC-1', 'ingested', '2026-10-02T10:00:00Z'),
-         ($1, 'confluence_page', '123', 'ingested', '2026-10-01T09:00:00Z'),
-         ($1, 'jira_issue', 'ABC-1', 'ingested', '2026-10-03T08:00:00Z'),
-         ($2, 'jira_issue', 'ABC-1', 'unavailable', '2026-10-05T12:00:00Z')`,
-      [withSources, other],
+         (?, 'jira_issue', 'ABC-1', 'ingested', '2026-10-02 10:00:00'),
+         (?, 'confluence_page', '123', 'ingested', '2026-10-01 09:00:00'),
+         (?, 'jira_issue', 'ABC-1', 'ingested', '2026-10-03 08:00:00'),
+         (?, 'jira_issue', 'ABC-1', 'unavailable', '2026-10-05 12:00:00')`,
+      [withSources, withSources, withSources, other],
     );
-    const [dismissed] = await query<{ id: string }>(
-      `INSERT INTO ai_question (session_id, text, status, dismiss_reason, created_at)
-       VALUES ($1, 'Dismissed?', 'dismissed', 'Out of scope', '2026-10-04T11:00:00Z') RETURNING id`,
-      [withSources],
+    const dismissed = { id: randomUUID() };
+    await query(
+      `INSERT INTO ai_question (id, session_id, text, status, dismiss_reason, created_at)
+       VALUES (?, ?, 'Dismissed?', 'dismissed', 'Out of scope', '2026-10-04 11:00:00')`,
+      [dismissed.id, withSources],
     );
-    const [open] = await query<{ id: string }>(
-      "INSERT INTO ai_question (session_id, text, status) VALUES ($1, 'Open?', 'open') RETURNING id",
-      [withSources],
-    );
-    const [answered] = await query<{ id: string }>(
-      "INSERT INTO ai_question (session_id, text, status) VALUES ($1, 'Answered?', 'answered') RETURNING id",
-      [withSources],
-    );
-    await query("INSERT INTO conversation_message (session_id, seq, role, content) VALUES ($1, 1, 'facilitator', 'Hi')", [
+    const open = { id: randomUUID() };
+    await query("INSERT INTO ai_question (id, session_id, text, status) VALUES (?, ?, 'Open?', 'open')", [
+      open.id,
+      withSources,
+    ]);
+    const answered = { id: randomUUID() };
+    await query("INSERT INTO ai_question (id, session_id, text, status) VALUES (?, ?, 'Answered?', 'answered')", [
+      answered.id,
+      withSources,
+    ]);
+    await query("INSERT INTO conversation_message (session_id, seq, role, content) VALUES (?, 1, 'facilitator', 'Hi')", [
       withSources,
     ]);
 
-    expect(await runMigrations(db)).toEqual(['0005_guided_intake.sql']);
+    expect(await migrateDatabase()).toEqual(['0005_guided_intake.sql', '0006_job_queue.sql']);
 
     const sessions = await query<{ id: string; ingested_at: Date | null; analyzed_at: Date | null }>(
       'SELECT id, ingested_at, analyzed_at FROM planning_session',
@@ -270,7 +332,7 @@ describe('0005 guided intake backfill', () => {
     expect(q.get(answered.id)).toMatchObject({ status: 'answered', resolution: null, resolved_at: null });
 
     const [message] = await query<{ question_id: string | null }>(
-      'SELECT question_id FROM conversation_message WHERE session_id = $1',
+      'SELECT question_id FROM conversation_message WHERE session_id = ?',
       [withSources],
     );
     expect(message.question_id).toBeNull();

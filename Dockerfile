@@ -24,7 +24,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN ATLASSIAN_CLIENT_ID=build ATLASSIAN_CLIENT_SECRET=build ATLASSIAN_CLOUD_ID=build \
     OAUTH_REDIRECT_URI=http://localhost:3000/api/auth/callback \
     TOKEN_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
-    DATABASE_URL=postgres://build:build@localhost:5432/build APP_BASE_URL=http://localhost:3000 \
+    DATABASE_URL=mysql://build:build@localhost:3306/build APP_BASE_URL=http://localhost:3000 \
     COPILOT_GITHUB_TOKEN=build FACILITATOR_MODEL=build EVALUATOR_MODEL=build \
     CONFLUENCE_SPACE_KEY=build CONFLUENCE_PARENT_PAGE_ID=build \
     npm run build

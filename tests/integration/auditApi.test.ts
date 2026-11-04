@@ -1,4 +1,5 @@
 import { resetDatabase } from './setup';
+import { randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET as auditGET } from '@/app/api/sessions/[id]/audit/route';
@@ -36,23 +37,24 @@ async function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<
 }
 
 async function seedUser(user: { accountId: string; displayName: string }): Promise<void> {
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     user.accountId,
     user.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, NOW(6) + INTERVAL 1 HOUR, '["read:jira-work"]')`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
 
 async function createPlanningSession(primaryKey: string): Promise<string> {
-  const rows = await query<{ id: string }>(
-    'INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ($1, ARRAY[$1, $2]) RETURNING id',
-    [primaryKey, `${primaryKey}-LINKED`],
+  const id = randomUUID();
+  await query(
+    'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, ?, JSON_ARRAY(?, ?))',
+    [id, primaryKey, primaryKey, `${primaryKey}-LINKED`],
   );
-  return rows[0].id;
+  return id;
 }
 
 async function sessionCookieFor(userId: string): Promise<string> {

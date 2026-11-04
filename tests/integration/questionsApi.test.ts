@@ -44,12 +44,14 @@ interface TestSession {
 
 async function createLockedSession(opts: { ingested?: boolean } = {}): Promise<TestSession> {
   keySeq++;
-  const rows = await query<{ id: string }>(
-    `INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id, ingested_at, analyzed_at)
-     VALUES ($1, ARRAY[$1], $2, CASE WHEN $3 THEN now() END, CASE WHEN $3 THEN now() END) RETURNING id`,
-    [`QST-${keySeq}`, ALICE.accountId, opts.ingested ?? true],
+  const id = randomUUID();
+  const key = `QST-${keySeq}`;
+  const ingested = opts.ingested ?? true;
+  await query(
+    `INSERT INTO planning_session (id, primary_ticket_key, ticket_keys, facilitator_id, ingested_at, analyzed_at)
+     VALUES (?, ?, JSON_ARRAY(?), ?, CASE WHEN ? THEN NOW(6) END, CASE WHEN ? THEN NOW(6) END)`,
+    [id, key, key, ALICE.accountId, ingested, ingested],
   );
-  const id = rows[0].id;
   await initWorkingCopy(id);
   const tabId = randomUUID();
   await acquireOrRenewLock(id, tabId);
@@ -61,14 +63,16 @@ async function insertQuestion(
   text: string,
   fields: { status?: string; answerText?: string; resolution?: string } = {},
 ): Promise<string> {
-  const [row] = await query<{ id: string }>(
-    `INSERT INTO ai_question (session_id, section, text, status, answer_text, answered_via, resolution, resolved_at)
-     VALUES ($1, 'Security', $2, $3, $4::text, CASE WHEN $4::text IS NOT NULL THEN 'facilitator' END, $5::text,
-             CASE WHEN $5::text IS NOT NULL THEN now() END)
-     RETURNING id`,
-    [s.id, text, fields.status ?? 'open', fields.answerText ?? null, fields.resolution ?? null],
+  const id = randomUUID();
+  const answerText = fields.answerText ?? null;
+  const resolution = fields.resolution ?? null;
+  await query(
+    `INSERT INTO ai_question (id, session_id, section, text, status, answer_text, answered_via, resolution, resolved_at)
+     VALUES (?, ?, 'Security', ?, ?, ?, CASE WHEN ? IS NOT NULL THEN 'facilitator' END, ?,
+             CASE WHEN ? IS NOT NULL THEN NOW(6) END)`,
+    [id, s.id, text, fields.status ?? 'open', answerText, answerText, resolution, resolution],
   );
-  return row.id;
+  return id;
 }
 
 function request(path: string, opts: { tabId?: string; body?: unknown } = {}): NextRequest {
@@ -144,19 +148,19 @@ interface QuestionState {
 async function question(qid: string): Promise<QuestionState> {
   const [row] = await query<QuestionState>(
     `SELECT status, answer_text, answered_at, answered_via, resolution, resolved_at, dismiss_reason
-       FROM ai_question WHERE id = $1`,
+       FROM ai_question WHERE id = ?`,
     [qid],
   );
   return row;
 }
 
 async function messages(s: TestSession): Promise<{ role: string; content: string; question_id: string | null }[]> {
-  return query('SELECT role, content, question_id FROM conversation_message WHERE session_id = $1 ORDER BY seq', [s.id]);
+  return query('SELECT role, content, question_id FROM conversation_message WHERE session_id = ? ORDER BY seq', [s.id]);
 }
 
 async function audits(s: TestSession, action: string): Promise<{ result: string; correlation_id: string; details: Record<string, unknown> }[]> {
   return query(
-    'SELECT result, correlation_id, details FROM audit_record WHERE session_id = $1 AND action = $2 ORDER BY id',
+    'SELECT result, correlation_id, details FROM audit_record WHERE session_id = ? AND action = ? ORDER BY id',
     [s.id, action],
   );
 }
@@ -177,17 +181,17 @@ function gateFakeRun(): { open: () => void; restore: () => void } {
 
 beforeAll(async () => {
   await resetDatabase();
-  await db.query('DROP SCHEMA IF EXISTS pgboss CASCADE');
+  await db.query('DELETE FROM job');
   resetConfigForTests();
   resetLlmClientForTests();
   fake = getLlmClient() as FakeLlmClient;
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     ALICE.accountId,
     ALICE.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, NOW(6) + INTERVAL 1 HOUR, '["read:jira-work"]')`,
     [ALICE.accountId, encryptSecret('token-alice')],
   );
   cookie = await withTransaction((client) => createSession(client, ALICE.accountId));
@@ -215,7 +219,7 @@ afterEach(() => {
 
 afterAll(async () => {
   await stopQueue();
-  await db.query('DROP SCHEMA IF EXISTS pgboss CASCADE');
+  await db.query('DELETE FROM job');
   await db.end();
 });
 

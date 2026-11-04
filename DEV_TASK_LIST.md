@@ -2,7 +2,7 @@
 
 source: SPEC_DOC.md
 generated: 2026-10-05 08:17
-updated: 2026-10-29
+updated: 2026-11-04
 
 Status values: PENDING | IN_PROGRESS | EVAL | REWORK | DONE | BLOCKED
 
@@ -14,6 +14,7 @@ Phases:
 5. **UI**: shell and pages, three-panel workspace, history and audit views
 6. **Hardening & verification**: Docker/runbook, E2E, LLM evals, performance, accessibility
 7. **Guided intake** (`docs/specs/guided-intake-and-question-answering.md`): explicit ingest, initial analysis, question answer/resolve, Discuss with AI
+8. **MySQL migration** ([spec](docs/specs/mysql-migration.md)): ADRs, dialect-neutral data layer, SQL queue, MySQL cutover, hardening, hosting-server ops, verification
 
 ## Tasks
 
@@ -70,6 +71,13 @@ Phases:
 | 49 | 7 | [Discuss with AI: collapsible overview conversation](DEV_TASK_49.yml) | medium | medium | sonnet / medium | 47 | DONE | bb1b80d |
 | 50 | 7 | [New session page: Create and ingest](DEV_TASK_50.yml) | medium | low | sonnet / low | 44, 47 | DONE | 903de87 |
 | 51 | 7 | [Guided intake verification and docs (E2E, a11y, evals, SPEC_DOC, ADR 0017)](DEV_TASK_51.yml) | medium | medium | sonnet / medium | 48, 49, 50 | DONE | 7c968df..dc28da9 |
+| 52 | 8 | [ADRs for the MySQL migration (new ADR-0018, amend ADR-0001 and ADR-0013)](DEV_TASK_52.yml) | medium | trivial | haiku / low | — | DONE | c5be59e |
+| 53 | 8 | [Dialect-neutral data-access layer on PostgreSQL (DbClient, ? placeholders, no RETURNING, lock and error helpers)](DEV_TASK_53.yml) | critical | high | opus / high | 52 | DONE | 3ed56dc..9d3d93a |
+| 54 | 8 | [Replace pg-boss with an in-house SQL job queue (on PostgreSQL first)](DEV_TASK_54.yml) | high | high | opus / medium | 53 | DONE | 3194b54 |
+| 55 | 8 | [MySQL 8.4 cutover: mysql2 driver, MySQL migrations, dialect SQL, per-table grants, test harness and dev setup](DEV_TASK_55.yml) | critical | critical | opus / high | 53, 54 | DONE | 30b290d..eb2d287 |
+| 56 | 8 | [MySQL integrity and concurrency hardening: audit hash round-trip, gap-lock review, deadlock retry, pool sizing](DEV_TASK_56.yml) | high | high | opus / medium | 55 | DONE | 6467953..b94a5e2 |
+| 57 | 8 | [Production on the hosting server: native MySQL setup, compose wiring, server config, backups and runbook](DEV_TASK_57.yml) | high | medium | sonnet / medium | 55 | DONE | becd1f6, see log |
+| 58 | 8 | [MySQL migration verification gate: full suites, perf targets, audit verify, residue checks](DEV_TASK_58.yml) | high | low | haiku / low | 56, 57 | DONE | d1bd2a6 |
 
 ## Execution notes
 
@@ -96,8 +104,8 @@ Phases:
   - 0003 is task 19.
   - 0004 is the code-repository change (ADR-0016); 0005 is task 43.
   - Any further migration takes the next free number at commit time. Migrations are forward-only.
-- **Parallel integration tests** must each use their own database (e.g. `techplanner_t03`): `resetDatabase()` drops the whole public schema.
-- **Integration tests** need `docker compose -f docker-compose.dev.yml up -d` (Postgres 16). Atlassian is always mocked with undici MockAgent or the task-39 mock server.
+- **Parallel integration tests** must each use their own database (e.g. `techplanner_t03`, set through `DATABASE_URL`): `resetDatabase()` drops and re-creates the whole database as the owner user.
+- **Integration and E2E tests** need a local native MySQL 8.4 (no Docker) set up with `scripts/mysql-bootstrap.sql` (README "Database"). Integration tests use `techplanner_test` (E2E `techplanner_e2e`), run as `techplanner_app` and reset and migrate as `techplanner_owner`. Atlassian is always mocked with undici MockAgent or the task-39 mock server.
 - **LLM in tests**: all non-eval tests use `LLM_FAKE=1` / `FakeLlmClient`. Only task 40 (and optionally 41) needs a real Copilot token.
 - **Every Atlassian call uses the acting user's token** (SR-1.2). No shared Atlassian credentials anywhere.
 - **Parallel lanes**:
@@ -105,6 +113,7 @@ Phases:
   - Phase 2: 12 can run alongside the 11 → 13/14 chain.
   - Phase 4: 28 → (29, 30, 31) in parallel → 27.
   - Phase 7: 43 → (44, 45) in parallel → (46, 47) in parallel → (48, 49, 50) in parallel → 51. 44 and 45 touch disjoint files; 47 and 49 both edit `Conversation.tsx` (47 only swaps its send path to `runTurn`), so land 47 first.
+  - Phase 8 (MySQL migration, tasks 52-58, built on the guided-intake tree after the merge of `main`): 52 → 53 → 54 → 55 → (56, 57) in parallel → 58. 53 and 54 land on PostgreSQL with every suite green; 55 is the only task that switches databases, so the branch is never half-migrated.
 - **Stakeholder ratification:** SPEC_DOC §12 asks for D-1, D-2, D-8 and D-9 to be ratified. Tasks 01, 12, 30 and 31 assume the spec's resolved positions. If the decisions change, rework those tasks and the tasks that depend on them.
 
 ## Open knowledge gaps
@@ -319,3 +328,26 @@ All gaps have a stated fallback in their task file. None blocks `/orchestrate`.
 2026-10-29 13:xx | 51 | worker complete @ 7c968df..dc28da9 (e2e 18/18 incl. clarification AC-13 now passing, unit 387, integration 166, build ok, eval validate-only both modes; AC4 real-model not run — no COPILOT_GITHUB_TOKEN; extra: system-label contrast fix) → eval dispatched (sonnet/low, detached worktree, full e2e)
 2026-10-29 14:xx | 51 | eval PASS → DONE @ 7c968df..dc28da9 (worktree: lint/typecheck clean, unit 387, integration 166, e2e 18/18, build ok with config env, eval validate-only both modes; §11 #7 context listing covered by facilitator.test.ts:431 and questionsApi.test.ts:398; stale README line removed by orchestrator)
 2026-10-29 14:xx | phase 7 | ALL 9 TASKS DONE. Open: AC4 real-model analysis eval + baseline-report.json and a real-model "resolved question not re-asked" check (need COPILOT_GITHUB_TOKEN); contract migration dropping 'dismissed' and /dismiss next release; NFR-5 pool exhaustion unchanged; minor follow-ups recorded per task above
+2026-11-04 09:00 | phase 8 | MySQL migration (tasks 52-58, originally numbered 43-49 on branch ccr-c4118930-60znik) rebased onto main's guided intake by merge; ids renumbered because main's phase 7 uses 43-51; ADR 0017→0018, migration 0005_job_queue→0006_job_queue. Log below is the pre-merge branch history; its task numbers are the new ones.
+2026-10-29 12:00 | phase 8 | planned: tasks 52-58 for MySQL 8.4 migration (docs/specs/mysql-migration.md)
+2026-10-29 09:45 | 52 | worker (haiku/low) complete @ c5be59e → orchestrator eval PASS (AC1; README source cell tidied) → DONE
+2026-10-29 10:00 | phase 8 | baseline on native Postgres 16: unit 336, integration 140, e2e 13/14 (clarification.spec fails pre-migration: note-input label intercepts Send click — UI bug, out of scope); MySQL 8.4 for verification runs in a sandbox-only container (repo dev setup stays Docker-free)
+2026-10-29 10:00 | 53 | worker dispatched (opus/high)
+2026-10-29 10:40 | 53 | worker complete @ 3ed56dc..9d3d93a (unit 349, integration 140, e2e 13/14 baseline-equal; audit read-back bounded by id > head; e2e sql() helper uses ? via translator) → eval dispatched (sonnet/medium)
+2026-10-29 11:20 | 53 | eval PASS → DONE @ 3ed56dc..9d3d93a (unit 349, integration 140 — one flaky sessions.test fetch-not-called on 1 of 3 runs, unrelated; e2e 13/14 baseline; notes: getCurrentUser now rejects the request whose 30-day cap expires it, acquireOrRenewLock holder read-back non-atomic like before)
+2026-10-29 11:20 | 54 | worker dispatched (opus/medium)
+2026-10-29 11:40 | 54 | worker complete @ 3194b54 (integration 147 incl. 11 queue cases, unit 349, e2e 13/14 baseline; +finished_at, +hasPendingJob, superseded-on-requeue-collision) → eval dispatched (sonnet/medium)
+2026-10-29 12:10 | 54 | eval PASS → DONE @ 3194b54 (unit 349, integration 147, jobs x3 stable, e2e 13/14 baseline; note: late finish() after visibility-timeout requeue can mark the newer activation — activation token folded into 46)
+2026-10-29 12:10 | 55 | worker dispatched (opus/high); MySQL 8.4.13 sandbox container on :3306
+2026-10-29 13:40 | 55 | worker complete @ 30b290d..3749d8c (unit 340, integration 151 x3, e2e 13/14 baseline; deviations: READ COMMITTED isolation (REPEATABLE READ snapshot would fork audit chain), withTxLock via upsert (avoids S→X deadlock), uuid CHAR(36) ascii_general_ci, app_lock.name 255; log_bin_trust_function_creators needed for triggers; Dockerfile build broken until 48) → eval dispatched (opus/medium); Postgres stopped
+2026-10-29 14:20 | 55 | eval FAIL (AC2 flaky: sessions.test stray /remotelink fetch from Promise.all in getIssueSnapshot, exposed by MySQL timing; all else PASS incl. 60-way concurrent audit chain probe, audit:verify OK) → rework cycle 1 dispatched (opus/medium; +spec/ADR READ COMMITTED note, orphan tables_priv cleanup)
+2026-10-29 14:50 | 55 | rework 1 complete @ 6ea3f6b..eb2d287 (settleAll for Atlassian fan-outs; sessions.test 10/10, integration 3x151, unit 343, e2e 13/14 baseline; READ COMMITTED documented; resets revoke table grants) → re-eval dispatched (opus/medium)
+2026-10-29 15:20 | 55 | re-eval PASS (rework cycle 1) → DONE @ 30b290d..eb2d287 (sessions.test 10/10, integration 3x151, unit 343; new tests fail against Promise.all)
+2026-10-29 15:20 | 56,57 | workers dispatched in parallel (47 opus/medium, 48 sonnet/medium; disjoint files)
+2026-10-29 16:00 | 57 | worker complete @ becd1f6 (compose up healthy on host MySQL, backup→restore→audit:verify OK 5, owner creds only in migrate; +.dockerignore no longer excludes tests/ — next build typechecks files importing tests/e2e/support/env; image build needs npm_ca secret in sandbox) → eval dispatched (sonnet/low)
+2026-10-29 16:30 | 57 | eval PASS (compose healthy, backup/restore/audit:verify, owner creds migrate-only, tests/ not in runtime image) → orchestrator fix: pin compose network 172.30.0.0/24 on br-techplanner (verified MySQL sees 172.30.0.x; users/APP_DB_USER/ufw updated), backup user over socket (skip_name_resolve) → DONE
+2026-10-29 17:10 | 56 | worker complete @ 6467953..b94a5e2 (unit 349, integration 164, concurrency 20/20; MySQL JSON misparses ~12% of 16-17-digit doubles → assertStorableDetails rejects non-round-tripping numbers; opt-in deadlock retry on evaluate/recordSectionEdit/flushEditAudits; DB_POOL_SIZE + DB_POOL_ACQUIRE_TIMEOUT_MS → 503 db_pool_exhausted; db_pool_wait_seconds) → eval dispatched (sonnet/medium)
+2026-10-29 17:40 | 56 | eval PASS → DONE @ 6467953..b94a5e2 (all ~25 recordAudit callers pass integers/strings only; 60k-value fuzz: no accepted number fails round-trip; concurrency 20/20; integration 164 x2); orchestrator: DB_POOL_* added to prod compose + runbook
+2026-10-29 17:40 | 58 | verification gate dispatched (haiku/low)
+2026-10-29 18:30 | 58 | gate PASS → DONE @ d1bd2a6 (clean clone: lint, typecheck, build, unit 349; integration 164; e2e 13/14 — only the pre-existing clarification.spec UI failure; audit:verify OK; perf: app overhead within ADR-0007, NFR-5 run A now 0 errors (Postgres 79.5%); residue greps clean; spec Implemented). Perf run B fake-latency not applied — not comparable. Orchestrator: perf report corrected to state the sandbox MySQL was a container stand-in.
+2026-10-29 18:30 | run | PHASE 8 DONE (52-58). Open: clarification.spec UI bug (pre-existing); real-LLM NFR-1/2 unmeasured; native MySQL APT install, ufw, systemd drop-in, cron and bind-address on a real hosting server unverified (sandbox only).

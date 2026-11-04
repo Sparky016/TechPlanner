@@ -110,17 +110,17 @@ export async function loadSessionContext(sessionId: string): Promise<SessionCont
   const [snapshots, messageRows, issues, questionRows] = await Promise.all([
     loadCurrentSnapshots(sessionId),
     query<MessageRow>(
-      'SELECT seq, role, content, created_at FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+      'SELECT seq, role, content, created_at FROM conversation_message WHERE session_id = ? ORDER BY seq',
       [sessionId],
     ),
     query<ContextIssue>(
       `SELECT id, severity, section, description, status FROM issue
-       WHERE session_id = $1 AND status <> 'resolved' ORDER BY created_at, id`,
+       WHERE session_id = ? AND status <> 'resolved' ORDER BY created_at, id`,
       [sessionId],
     ),
     query<QuestionRow>(
       `SELECT id, issue_id, section, text, status, answer_text, answered_via, resolution, dismiss_reason
-         FROM ai_question WHERE session_id = $1 ORDER BY created_at, id`,
+         FROM ai_question WHERE session_id = ? ORDER BY created_at, id`,
       [sessionId],
     ),
   ]);

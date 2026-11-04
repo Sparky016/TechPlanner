@@ -3,8 +3,13 @@
 #   docker build -t techplanner .
 #   docker compose --env-file prod.env -f docker-compose.prod.example.yml up -d
 #
-# Order is enforced by depends_on: postgres healthy -> migrate (one-shot) completes -> worker and web start.
-# In production, point DATABASE_URL at the managed database and drop the postgres service.
+# MySQL 8.4 runs natively on the hosting server, not in a container (docs/runbook.md §7). The containers reach it
+# through host.docker.internal, which host-gateway maps to the Docker bridge gateway; MySQL must listen there.
+# The project network is pinned (subnet 172.30.0.0/24, bridge br-techplanner) because MySQL sees connections
+# from that subnet: the database users' host part and the firewall rule depend on it (docs/runbook.md §7.3, §7.4).
+# Order is enforced by depends_on: migrate (one-shot) completes -> worker and web start.
+# Credentials: web and worker get the restricted app user (DATABASE_URL). Only migrate gets the owner user
+# (MIGRATE_DATABASE_URL, passed to it as DATABASE_URL) and APP_DB_USER, the grantee of the per-table grants.
 # Required variables use ${VAR:?}: compose refuses to start without them, and no secret has a default here.
 
 name: techplanner-prod
@@ -15,12 +20,12 @@ x-app-env: &app-env
   ATLASSIAN_CLOUD_ID: ${ATLASSIAN_CLOUD_ID:?}
   OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:?}
   TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?}
-  DATABASE_URL: ${DATABASE_URL:?}
   APP_BASE_URL: ${APP_BASE_URL:?}
   COPILOT_GITHUB_TOKEN: ${COPILOT_GITHUB_TOKEN:?}
   FACILITATOR_MODEL: ${FACILITATOR_MODEL:?}
   EVALUATOR_MODEL: ${EVALUATOR_MODEL:?}
   CONTEXT_TOKEN_BUDGET: ${CONTEXT_TOKEN_BUDGET:-150000}
+  ANALYSIS_MAX_QUESTIONS: ${ANALYSIS_MAX_QUESTIONS:-}
   CONFLUENCE_SPACE_KEY: ${CONFLUENCE_SPACE_KEY:?}
   CONFLUENCE_PARENT_PAGE_ID: ${CONFLUENCE_PARENT_PAGE_ID:?}
   CONFLUENCE_PROJECT_OVERRIDES: ${CONFLUENCE_PROJECT_OVERRIDES:-}
@@ -28,34 +33,23 @@ x-app-env: &app-env
   DOWNSTREAM_WEBHOOK_SECRET: ${DOWNSTREAM_WEBHOOK_SECRET:-}
   SECTION_WEIGHTS: ${SECTION_WEIGHTS:-}
   METRICS_TOKEN: ${METRICS_TOKEN:-}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-}
+  DB_POOL_ACQUIRE_TIMEOUT_MS: ${DB_POOL_ACQUIRE_TIMEOUT_MS:-}
   # '1' only for smoke tests without a Copilot-entitled token; never in production.
   LLM_FAKE: ${LLM_FAKE:-0}
 
 services:
-  # Local stand-in for the managed database. Not published on the host.
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-techplanner}
-      POSTGRES_USER: ${POSTGRES_USER:-techplanner}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
-    volumes:
-      - techplanner-prod-pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-
   migrate:
     image: ${TECHPLANNER_IMAGE:-techplanner}
     environment:
       <<: *app-env
       ROLE: migrate
-    depends_on:
-      postgres:
-        condition: service_healthy
+      # Owner user (DDL). Present in this service only; web and worker never see it.
+      DATABASE_URL: ${MIGRATE_DATABASE_URL:?}
+      # Must equal the 'user'@'host' the app user was created with (e.g. 'techplanner_app'@'172.30.0.%').
+      APP_DB_USER: ${APP_DB_USER:?}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     restart: 'no'
 
   worker:
@@ -63,6 +57,9 @@ services:
     environment:
       <<: *app-env
       ROLE: worker
+      DATABASE_URL: ${DATABASE_URL:?}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -73,6 +70,9 @@ services:
     environment:
       <<: *app-env
       ROLE: web
+      DATABASE_URL: ${DATABASE_URL:?}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     ports:
       - '${WEB_PORT:-3000}:3000'
     depends_on:
@@ -82,5 +82,10 @@ services:
         condition: service_started
     restart: unless-stopped
 
-volumes:
-  techplanner-prod-pgdata:
+networks:
+  default:
+    driver_opts:
+      com.docker.network.bridge.name: br-techplanner
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

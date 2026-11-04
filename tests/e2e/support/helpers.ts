@@ -1,18 +1,21 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { execSync } from 'node:child_process';
-import { Pool } from 'pg';
-import { APP_ENV, ATLASSIAN_MOCK_URL, DATABASE_URL, WEBHOOK_URL } from './env';
+import { createDbPool, type DbPool } from '../../../src/server/db/mysql';
+import { APP_ENV, ATLASSIAN_MOCK_URL, MIGRATE_DATABASE_URL, WEBHOOK_URL } from './env';
 
 // Shared spec helpers: database reset, mock control, login and the workspace interactions every spec needs.
 
-let pool: Pool | undefined;
+// Owner connections (the app's own driver settings), so the reset may drop the database.
+let pool: DbPool | undefined;
+// Grantee of the migrations' per-table grants: the same setting and default scripts/migrate.ts reads.
+const APP_DB_USER = process.env.APP_DB_USER || "'techplanner_app'@'%'";
 
-function db(): Pool {
-  pool ??= new Pool({ connectionString: DATABASE_URL, max: 2, allowExitOnIdle: true });
+function db(): DbPool {
+  pool ??= createDbPool(MIGRATE_DATABASE_URL);
   return pool;
 }
 
-/** Runs SQL against the E2E database (assertions only; the app owns all writes). */
+/** Runs SQL with `?` placeholders against the E2E database (assertions only; the app owns all writes). */
 export async function sql<T extends Record<string, unknown> = Record<string, unknown>>(
   text: string,
   params: unknown[] = [],
@@ -26,12 +29,32 @@ export function runScript(script: string): string {
 }
 
 /**
- * Destroys all data: drops and recreates schema public, then migrates (as tests/integration/setup.ts does).
+ * Destroys all data: drops and re-creates the database, then migrates (as tests/integration/setup.ts does).
+ * The job queue lives in it too, so no job from an earlier spec survives the reset. The app's and worker's pooled
+ * connections keep the database as their default and see the new tables once the migration has run.
  * scripts/migrate.ts runs as a child process because Playwright's loader cannot import it (import.meta).
  */
 export async function resetDatabase(): Promise<void> {
-  await db().query('DROP SCHEMA public CASCADE');
-  await db().query('CREATE SCHEMA public');
+  const database = decodeURIComponent(new URL(MIGRATE_DATABASE_URL).pathname.slice(1));
+  const name = `\`${database.replace(/`/g, '``')}\``;
+  const client = await db().connect();
+  try {
+    // The migrations' per-table grants to the app user outlive DROP DATABASE: revoke them first.
+    const tables = await client.query<{ name: string }>(
+      'SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?',
+      [database],
+    );
+    for (const { name: table } of tables.rows) {
+      await client.query(
+        `REVOKE IF EXISTS ALL PRIVILEGES ON ${name}.\`${table.replace(/`/g, '``')}\` FROM ${APP_DB_USER}`,
+      );
+    }
+    await client.query(`DROP DATABASE IF EXISTS ${name}`);
+    await client.query(`CREATE DATABASE ${name} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
+  } finally {
+    // DROP DATABASE unsets this connection's default database: discard it rather than pool it.
+    client.release(true);
+  }
   runScript('migrate');
 }
 

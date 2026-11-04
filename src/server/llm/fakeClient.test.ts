@@ -101,7 +101,7 @@ describe('getLlmClient', () => {
       ATLASSIAN_CLOUD_ID: 'cloud',
       OAUTH_REDIRECT_URI: 'http://localhost:3000/api/auth/callback',
       TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
-      DATABASE_URL: 'postgres://u:p@localhost:5432/db',
+      DATABASE_URL: 'mysql://u:p@localhost:3306/db',
       COPILOT_GITHUB_TOKEN: 'ghp_x',
       FACILITATOR_MODEL: 'model-a',
       EVALUATOR_MODEL: 'model-b',

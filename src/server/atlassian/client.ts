@@ -172,3 +172,15 @@ export async function atlassianJson<T>(
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
+
+// Like Promise.all, but settles only after every promise has settled, then throws the first rejection in input
+// order. Keeps a failed fan-out from leaving Atlassian requests running after the caller has given up.
+export async function settleAll<T extends readonly unknown[] | []>(
+  promises: T,
+): Promise<{ -readonly [K in keyof T]: Awaited<T[K]> }> {
+  const results = await Promise.allSettled(promises);
+  for (const r of results) if (r.status === 'rejected') throw r.reason;
+  return results.map((r) => (r as PromiseFulfilledResult<unknown>).value) as {
+    -readonly [K in keyof T]: Awaited<T[K]>;
+  };
+}

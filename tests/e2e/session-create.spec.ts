@@ -14,13 +14,13 @@ test('GI-2: creating a session ingests nothing; the workspace offers Ingest tick
   await expect(page.getByRole('list', { name: 'Sources' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Refresh sources' })).toHaveCount(0);
   await expect(ingestButton(page)).toBeEnabled();
-  expect(await sql('SELECT 1 FROM source_snapshot WHERE session_id = $1', [sessionId])).toHaveLength(0);
+  expect(await sql('SELECT 1 FROM source_snapshot WHERE session_id = ?', [sessionId])).toHaveLength(0);
   const [row] = await sql<{ ingested_at: Date | null; analyzed_at: Date | null }>(
-    'SELECT ingested_at, analyzed_at FROM planning_session WHERE id = $1',
+    'SELECT ingested_at, analyzed_at FROM planning_session WHERE id = ?',
     [sessionId],
   );
   expect(row).toEqual({ ingested_at: null, analyzed_at: null });
-  const created = await sql('SELECT 1 FROM audit_record WHERE action = $1 AND session_id = $2', ['draft.created', sessionId]);
+  const created = await sql('SELECT 1 FROM audit_record WHERE action = ? AND session_id = ?', ['draft.created', sessionId]);
   expect(created).toHaveLength(1);
 
   // The sources appear only after the facilitator ingests (Analyze after ingest unchecked: no AI turn is consumed).
@@ -52,18 +52,18 @@ test('AC-2: ingesting a session with ABC-123 shows its description, comments, at
 
   // The description and comments are snapshotted into the session as AI context (the UI lists sources by title).
   const [issue] = await sql<{ content_text: string }>(
-    "SELECT content_text FROM source_snapshot WHERE session_id = $1 AND kind = 'jira_issue' AND ref = 'ABC-123'",
+    "SELECT content_text FROM source_snapshot WHERE session_id = ? AND kind = 'jira_issue' AND ref = 'ABC-123'",
     [sessionId],
   );
   expect(issue.content_text).toContain('Users can export the report.');
   expect(issue.content_text).toContain('Exports must handle at least 10000 rows.');
   expect(issue.content_text).toContain('CSV must be UTF-8 with a header row.');
   const [page5001] = await sql<{ content_text: string }>(
-    "SELECT content_text FROM source_snapshot WHERE session_id = $1 AND kind = 'confluence_page' AND ref = '5001'",
+    "SELECT content_text FROM source_snapshot WHERE session_id = ? AND kind = 'confluence_page' AND ref = '5001'",
     [sessionId],
   );
   expect(page5001.content_text).toContain('Stream rows to the client to keep memory flat.');
 
-  const created = await sql('SELECT 1 FROM audit_record WHERE action = $1 AND session_id = $2', ['draft.created', sessionId]);
+  const created = await sql('SELECT 1 FROM audit_record WHERE action = ? AND session_id = ?', ['draft.created', sessionId]);
   expect(created).toHaveLength(1);
 });

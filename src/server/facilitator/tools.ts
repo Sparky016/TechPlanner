@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import type { CurrentUser } from '@/server/auth/session';
 import { isAzureDevOpsEnabled } from '@/server/azureDevOps/client';
-import { query } from '@/server/db/pool';
+import { db, query } from '@/server/db/pool';
 import type { LlmToolDefinition } from '@/server/llm';
 import { applyAiPatch } from '@/server/spec/workingCopyRepo';
 import { SECTION_NAMES, type SectionName } from '../../lib/spec/sections';
@@ -146,19 +147,20 @@ function askQuestionTool(state: FacilitatorTurnState): LlmToolDefinition {
       let target: SectionName | null = section ?? null;
       if (issueId !== undefined) {
         const [issue] = await query<{ section: SectionName }>(
-          'SELECT section FROM issue WHERE id = $1 AND session_id = $2',
+          'SELECT section FROM issue WHERE id = ? AND session_id = ?',
           [issueId, state.sessionId],
         );
         if (!issue) return `Unknown issue id: ${issueId}`;
         target ??= issue.section;
       }
-      const [row] = await query<{ id: string }>(
-        "INSERT INTO ai_question (session_id, issue_id, section, text, status) VALUES ($1, $2, $3, $4, 'open') RETURNING id",
-        [state.sessionId, issueId ?? null, target, text],
+      const id = randomUUID();
+      await query(
+        "INSERT INTO ai_question (id, session_id, issue_id, section, text, status) VALUES (?, ?, ?, ?, ?, 'open')",
+        [id, state.sessionId, issueId ?? null, target, text],
       );
-      state.questionIds.push(row.id);
-      state.pending.push({ type: 'question', questionId: row.id, text, section: target });
-      return `Question recorded (id ${row.id})`;
+      state.questionIds.push(id);
+      state.pending.push({ type: 'question', questionId: id, text, section: target });
+      return `Question recorded (id ${id})`;
     },
   };
 }
@@ -181,16 +183,17 @@ function markQuestionAnsweredTool(state: FacilitatorTurnState): LlmToolDefinitio
     handler: async (args) => {
       const { questionId, answerSummary } = args as MarkQuestionAnsweredArgs;
       const summary = answerSummary?.trim() ? answerSummary.trim() : null;
-      const rows = await query(
-        `UPDATE ai_question SET status = 'answered', answer_text = $3, answered_at = now(), answered_via = 'ai'
-          WHERE id = $1 AND session_id = $2 AND status = 'open' RETURNING id`,
-        [questionId, state.sessionId, summary],
+      const { rowCount } = await db.query(
+        `UPDATE ai_question SET status = 'answered', answer_text = ?, answered_at = NOW(6), answered_via = 'ai'
+          WHERE id = ? AND session_id = ? AND status = 'open'`,
+        [summary, questionId, state.sessionId],
       );
-      if (rows.length > 0) return `Question ${questionId} marked answered`;
-      const [current] = await query<{ status: string }>(
-        'SELECT status FROM ai_question WHERE id = $1 AND session_id = $2',
+      if (rowCount > 0) return `Question ${questionId} marked answered`;
+      const { rows } = await db.query<{ status: string }>(
+        'SELECT status FROM ai_question WHERE id = ? AND session_id = ?',
         [questionId, state.sessionId],
       );
+      const current = rows[0];
       if (!current) return `No open question with id ${questionId}`;
       return current.status === 'answered'
         ? `Question ${questionId} is already answered`

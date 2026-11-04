@@ -48,11 +48,11 @@ test('AC-11: publish creates/updates the Confluence page, attaches, inserts the 
   await expect(page.getByRole('dialog', { name: 'Publish with override' })).toBeHidden();
 
   const [session] = await sql<{ status: string; confluence_page_id: string; confluence_page_version: number }>(
-    'SELECT status, confluence_page_id, confluence_page_version FROM planning_session WHERE id = $1',
+    'SELECT status, confluence_page_id, confluence_page_version FROM planning_session WHERE id = ?',
     [sessionId],
   );
   expect(session.status).toBe('published');
-  const [run] = await sql<{ id: string }>('SELECT id FROM publish_run WHERE session_id = $1', [sessionId]);
+  const [run] = await sql<{ id: string }>('SELECT id FROM publish_run WHERE session_id = ?', [sessionId]);
 
   const after = await mockState(request);
   // Confluence: one page created under the configured space/parent.

@@ -2,7 +2,7 @@
 
 export type JobHandler = (data: unknown) => Promise<void>;
 
-// Throw from a handler to fail the job terminally without pg-boss retries.
+// Throw from a handler to fail the job terminally without queue retries.
 export class NonRetryableJobError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);

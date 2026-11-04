@@ -1,9 +1,8 @@
-import type { PoolClient } from 'pg';
 import { AtlassianApiError } from '@/server/atlassian/client';
 import { recordAudit } from '@/server/audit/audit';
 import type { CurrentUser } from '@/server/auth/session';
 import { ReauthRequiredError } from '@/server/auth/tokens';
-import { withTransaction } from '@/server/db/pool';
+import { type DbClient, withTransaction } from '@/server/db/pool';
 import { HttpError } from '@/server/http/errors';
 import { getCorrelationId } from '@/server/observability/context';
 import { logger } from '@/server/observability/logger';
@@ -145,14 +144,19 @@ async function collectBatch(user: CurrentUser, session: PlanningSessionRow): Pro
 }
 
 // Inside the caller's transaction, which must already hold the planning_session row lock (serialises seq).
-async function appendSystemMessage(client: PoolClient, sessionId: string, content: string): Promise<number> {
-  const seq = await client.query<{ seq: number }>(
-    `INSERT INTO conversation_message (session_id, seq, role, content)
-     VALUES ($1, (SELECT coalesce(max(seq), 0) + 1 FROM conversation_message WHERE session_id = $1), 'system', $2)
-     RETURNING seq`,
-    [sessionId, content],
+async function appendSystemMessage(client: DbClient, sessionId: string, content: string): Promise<number> {
+  const nextSeq = await client.query<{ seq: string }>(
+    'SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM conversation_message WHERE session_id = ?',
+    [sessionId],
   );
-  return seq.rows[0].seq;
+  // INT + 1 is a BIGINT in MySQL, which the driver returns as a string.
+  const seq = Number(nextSeq.rows[0].seq);
+  await client.query("INSERT INTO conversation_message (session_id, seq, role, content) VALUES (?, ?, 'system', ?)", [
+    sessionId,
+    seq,
+    content,
+  ]);
+  return seq;
 }
 
 async function loadSession(sessionId: string): Promise<PlanningSessionRow> {
@@ -181,7 +185,7 @@ export async function refreshSources(user: CurrentUser, sessionId: string): Prom
 
   const messageSeq = await withTransaction(async (client) => {
     // Serialises concurrent refreshes/messages for this session while seq is computed.
-    await client.query('SELECT 1 FROM planning_session WHERE id = $1 FOR UPDATE', [session.id]);
+    await client.query('SELECT 1 FROM planning_session WHERE id = ? FOR UPDATE', [session.id]);
     await insertSnapshots(client, session.id, next, retrievedAt);
     if (added.length === 0 && removed.length === 0 && changed.length === 0) return null;
     return appendSystemMessage(client, session.id, buildMessage(retrievedAt, added, removed, changed));
@@ -276,12 +280,12 @@ export async function ingestSources(
     committed = await withTransaction(async (client) => {
       // Re-check under the row lock: a racing ingest may have committed while we fetched. Throwing rolls back.
       const locked = await client.query<{ ingested_at: Date | null }>(
-        'SELECT ingested_at FROM planning_session WHERE id = $1 FOR UPDATE',
+        'SELECT ingested_at FROM planning_session WHERE id = ? FOR UPDATE',
         [session.id],
       );
       if (locked.rows[0]?.ingested_at) throw alreadyIngested();
       await insertSnapshots(client, session.id, next, ingestedAt);
-      await client.query('UPDATE planning_session SET ingested_at = $2 WHERE id = $1', [session.id, ingestedAt]);
+      await client.query('UPDATE planning_session SET ingested_at = ? WHERE id = ?', [ingestedAt, session.id]);
       const messageSeq = await appendSystemMessage(client, session.id, buildIngestMessage(ingestedAt, counts));
       await recordAudit(
         { ...audit, action: 'sources.ingested', result: 'success', details: { ...counts, via } },

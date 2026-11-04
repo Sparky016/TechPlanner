@@ -5,7 +5,10 @@ export const UNTRUSTED_TAG = 'untrusted_source_data';
 
 /** Prevents untrusted text from closing its own block. */
 export function neutralise(text: string): string {
-  return text.replace(new RegExp(`<(/?)${UNTRUSTED_TAG}`, 'gi'), '<$1untrusted-source-data');
+  return text.replace(
+    new RegExp(`<(/?)${UNTRUSTED_TAG}`, 'gi'),
+    (_match, slash: string) => `<${slash}untrusted-source-data`,
+  );
 }
 
 export function attr(value: string | null): string {

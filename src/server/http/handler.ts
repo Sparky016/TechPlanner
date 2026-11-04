@@ -3,6 +3,7 @@ import { ZodError } from 'zod';
 import { recordAudit } from '@/server/audit/audit';
 import { type CurrentUser, getCurrentUser } from '@/server/auth/session';
 import { ReauthRequiredError } from '@/server/auth/tokens';
+import { isPoolAcquireTimeout } from '@/server/db/errors';
 import { verifyCsrf } from '@/server/http/csrf';
 import { HttpError } from '@/server/http/errors';
 import { newCorrelationId, type RequestContext, runWithContext } from '@/server/observability/context';
@@ -39,10 +40,10 @@ interface ErrorBody {
   };
 }
 
-function errorResponse(status: number, body: ErrorBody): Response {
+function errorResponse(status: number, body: ErrorBody, headers: Record<string, string> = {}): Response {
   return Response.json(body, {
     status,
-    headers: { 'Cache-Control': 'no-store' },
+    headers: { 'Cache-Control': 'no-store', ...headers },
   });
 }
 
@@ -101,6 +102,16 @@ async function toErrorResponse(
         correlationId,
       },
     });
+  }
+  if (isPoolAcquireTimeout(err)) {
+    // Every pooled connection stayed busy for the acquire timeout. Fail fast and audit nothing: the audit write
+    // would wait for a connection too.
+    logger.warn({ route }, 'Database connection pool exhausted');
+    return errorResponse(
+      503,
+      { error: { message: 'The service is busy; retry shortly', code: 'db_pool_exhausted', correlationId } },
+      { 'Retry-After': '1' },
+    );
   }
   if (err instanceof ZodError) {
     return errorResponse(400, {

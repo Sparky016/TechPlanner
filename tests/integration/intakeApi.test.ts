@@ -41,13 +41,13 @@ async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
 }
 
 async function seedUser(user: { accountId: string; displayName: string }): Promise<void> {
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     user.accountId,
     user.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, NOW(6) + INTERVAL 1 HOUR, '["read:jira-work"]')`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
@@ -65,12 +65,13 @@ async function createLockedSession(
   opts: { ingested?: boolean; analyzed?: boolean; clarificationEnded?: boolean } = {},
 ): Promise<TestSession> {
   keySeq++;
-  const rows = await query<{ id: string }>(
-    `INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id, ingested_at, analyzed_at, clarification_ended)
-     VALUES ($1, ARRAY[$1], $2, CASE WHEN $3 THEN now() END, CASE WHEN $4 THEN now() END, $5) RETURNING id`,
-    [`INT-${keySeq}`, ALICE.accountId, opts.ingested ?? true, opts.analyzed ?? false, opts.clarificationEnded ?? false],
+  const id = randomUUID();
+  const key = `INT-${keySeq}`;
+  await query(
+    `INSERT INTO planning_session (id, primary_ticket_key, ticket_keys, facilitator_id, ingested_at, analyzed_at, clarification_ended)
+     VALUES (?, ?, JSON_ARRAY(?), ?, CASE WHEN ? THEN NOW(6) END, CASE WHEN ? THEN NOW(6) END, ?)`,
+    [id, key, key, ALICE.accountId, opts.ingested ?? true, opts.analyzed ?? false, opts.clarificationEnded ?? false],
   );
-  const id = rows[0].id;
   await initWorkingCopy(id);
   const tabId = randomUUID();
   await acquireOrRenewLock(id, tabId);
@@ -137,11 +138,11 @@ function ask(text: string): FakeStep {
 }
 
 async function messages(s: TestSession): Promise<{ role: string; content: string }[]> {
-  return query('SELECT role, content FROM conversation_message WHERE session_id = $1 ORDER BY seq', [s.id]);
+  return query('SELECT role, content FROM conversation_message WHERE session_id = ? ORDER BY seq', [s.id]);
 }
 
 async function analyzedAt(s: TestSession): Promise<Date | null> {
-  const [row] = await query<{ analyzed_at: Date | null }>('SELECT analyzed_at FROM planning_session WHERE id = $1', [
+  const [row] = await query<{ analyzed_at: Date | null }>('SELECT analyzed_at FROM planning_session WHERE id = ?', [
     s.id,
   ]);
   return row.analyzed_at;
@@ -163,7 +164,7 @@ function gateFakeRun(): { open: () => void; restore: () => void } {
 
 beforeAll(async () => {
   await resetDatabase();
-  await db.query('DROP SCHEMA IF EXISTS pgboss CASCADE');
+  await db.query('DELETE FROM job');
   resetConfigForTests();
   resetLlmClientForTests();
   fake = getLlmClient() as FakeLlmClient;
@@ -183,7 +184,7 @@ afterEach(() => {
 
 afterAll(async () => {
   await stopQueue();
-  await db.query('DROP SCHEMA IF EXISTS pgboss CASCADE');
+  await db.query('DELETE FROM job');
   await db.end();
 });
 
@@ -225,7 +226,7 @@ describe('POST /analyze (SSE)', () => {
     expect(toolResults).toHaveLength(9);
     expect(toolResults.slice(0, 8).every((r) => r.startsWith('Question recorded'))).toBe(true);
     expect(toolResults[8]).toBe(QUESTION_LIMIT_MESSAGE);
-    const questions = await query('SELECT 1 FROM ai_question WHERE session_id = $1', [s.id]);
+    const questions = await query('SELECT 1 FROM ai_question WHERE session_id = ?', [s.id]);
     expect(questions).toHaveLength(8);
 
     expect(await messages(s)).toEqual([
@@ -245,7 +246,7 @@ describe('POST /analyze (SSE)', () => {
     });
 
     const audits = await query<{ result: string; correlation_id: string; details: Record<string, unknown> }>(
-      "SELECT result, correlation_id, details FROM audit_record WHERE session_id = $1 AND action = 'ai.suggestion'",
+      "SELECT result, correlation_id, details FROM audit_record WHERE session_id = ? AND action = 'ai.suggestion'",
       [s.id],
     );
     expect(audits).toHaveLength(1);
@@ -263,7 +264,7 @@ describe('POST /analyze (SSE)', () => {
     expect(await messages(s)).toEqual([]);
 
     // The turn lock was released.
-    await query('UPDATE planning_session SET ingested_at = now() WHERE id = $1', [s.id]);
+    await query('UPDATE planning_session SET ingested_at = NOW(6) WHERE id = ?', [s.id]);
     fake.enqueue([patch('Scope', 'Drafted'), { type: 'done' }]);
     const ok = await analyze(s);
     expect(ok.status).toBe(200);
@@ -355,7 +356,7 @@ describe('POST /analyze (SSE)', () => {
     expect(await messages(s)).toEqual([{ role: 'system', content: 'Initial analysis requested by Alice.' }]);
     expect(await analyzedAt(s)).toBeNull();
     const audits = await query<{ result: string; details: Record<string, unknown> }>(
-      "SELECT result, details FROM audit_record WHERE session_id = $1 AND action = 'ai.suggestion'",
+      "SELECT result, details FROM audit_record WHERE session_id = ? AND action = 'ai.suggestion'",
       [s.id],
     );
     expect(audits).toHaveLength(1);

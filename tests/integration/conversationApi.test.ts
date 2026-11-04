@@ -40,13 +40,13 @@ async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
 }
 
 async function seedUser(user: { accountId: string; displayName: string }): Promise<void> {
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     user.accountId,
     user.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, NOW(6) + INTERVAL 1 HOUR, '["read:jira-work"]')`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
@@ -63,12 +63,13 @@ interface TestSession {
 // Ingested by default (AI turns need ingested sources, GI-23); ingested_at is set directly, not via /ingest.
 async function createLockedSession(opts: { ingested?: boolean } = {}): Promise<TestSession> {
   keySeq++;
-  const rows = await query<{ id: string }>(
-    `INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id, ingested_at)
-     VALUES ($1, ARRAY[$1], $2, CASE WHEN $3 THEN now() END) RETURNING id`,
-    [`CNV-${keySeq}`, ALICE.accountId, opts.ingested ?? true],
+  const key = `CNV-${keySeq}`;
+  const id = randomUUID();
+  await query(
+    `INSERT INTO planning_session (id, primary_ticket_key, ticket_keys, facilitator_id, ingested_at)
+     VALUES (?, ?, JSON_ARRAY(?), ?, CASE WHEN ? THEN NOW(6) END)`,
+    [id, key, key, ALICE.accountId, opts.ingested ?? true ? 1 : 0],
   );
-  const id = rows[0].id;
   await initWorkingCopy(id);
   const tabId = randomUUID();
   await acquireOrRenewLock(id, tabId);
@@ -153,7 +154,7 @@ function gateFakeRun(): { open: () => void; restore: () => void } {
 
 beforeAll(async () => {
   await resetDatabase();
-  await db.query('DROP SCHEMA IF EXISTS pgboss CASCADE');
+  await db.query('DELETE FROM job');
   resetConfigForTests();
   resetLlmClientForTests();
   fake = getLlmClient() as FakeLlmClient;
@@ -173,7 +174,7 @@ afterEach(() => {
 
 afterAll(async () => {
   await stopQueue();
-  await db.query('DROP SCHEMA IF EXISTS pgboss CASCADE');
+  await db.query('DELETE FROM job');
   await db.end();
 });
 
@@ -220,7 +221,7 @@ describe('POST /messages (SSE)', () => {
     expect(await history(s)).toEqual([]);
 
     // The turn lock was released: once ingested, a turn runs.
-    await query('UPDATE planning_session SET ingested_at = now() WHERE id = $1', [s.id]);
+    await query('UPDATE planning_session SET ingested_at = NOW(6) WHERE id = ?', [s.id]);
     fake.enqueue([patch('Scope', 'Now'), { type: 'done' }]);
     const ok = await sendMessage(s, 'Now');
     expect(ok.status).toBe(200);
@@ -296,7 +297,7 @@ describe('POST /messages (SSE)', () => {
     const messages = await history(s);
     expect(messages.map((m) => m.content)).toContain('Abort me');
     const audits = await query<{ result: string }>(
-      "SELECT result FROM audit_record WHERE session_id = $1 AND action = 'ai.suggestion' ORDER BY id",
+      "SELECT result FROM audit_record WHERE session_id = ? AND action = 'ai.suggestion' ORDER BY id",
       [s.id],
     );
     expect(audits[0].result).toBe('failure');
@@ -378,11 +379,12 @@ describe('POST /notes', () => {
 
 describe('questions', () => {
   async function insertQuestion(s: TestSession, text: string): Promise<string> {
-    const [row] = await query<{ id: string }>(
-      "INSERT INTO ai_question (session_id, section, text, status) VALUES ($1, 'Security', $2, 'open') RETURNING id",
-      [s.id, text],
+    const id = randomUUID();
+    await query(
+      "INSERT INTO ai_question (id, session_id, section, text, status) VALUES (?, ?, 'Security', ?, 'open')",
+      [id, s.id, text],
     );
-    return row.id;
+    return id;
   }
 
   function dismiss(s: TestSession, qid: string, body?: unknown): Promise<Response> {
@@ -406,7 +408,7 @@ describe('questions', () => {
     });
 
     const [row] = await query<{ status: string; dismiss_reason: string; resolution: string; resolved_at: Date | null }>(
-      'SELECT status, dismiss_reason, resolution, resolved_at FROM ai_question WHERE id = $1',
+      'SELECT status, dismiss_reason, resolution, resolved_at FROM ai_question WHERE id = ?',
       [qid],
     );
     expect(row).toEqual({
@@ -417,13 +419,13 @@ describe('questions', () => {
     });
 
     const audits = await query<{ user_id: string; details: Record<string, unknown>; correlation_id: string }>(
-      "SELECT user_id, details, correlation_id FROM audit_record WHERE session_id = $1 AND action = 'question.resolved'",
+      "SELECT user_id, details, correlation_id FROM audit_record WHERE session_id = ? AND action = 'question.resolved'",
       [s.id],
     );
     expect(audits).toHaveLength(1);
     expect(audits[0].user_id).toBe(ALICE.accountId);
     expect(audits[0].details).toMatchObject({ questionId: qid, section: 'Security', resolution: 'not_relevant', reason: 'Out of scope' });
-    const legacy = await query("SELECT 1 FROM audit_record WHERE session_id = $1 AND action = 'question.dismissed'", [s.id]);
+    const legacy = await query("SELECT 1 FROM audit_record WHERE session_id = ? AND action = 'question.dismissed'", [s.id]);
     expect(legacy).toHaveLength(0);
     expect(audits[0].correlation_id).toBe(res.headers.get('x-correlation-id'));
 
@@ -438,11 +440,11 @@ describe('questions', () => {
     ]);
 
     // Only from open: an answered question is rejected (use /resolve).
-    await query("UPDATE ai_question SET status = 'answered', answer_text = 'EU' WHERE id = $1", [other]);
+    await query("UPDATE ai_question SET status = 'answered', answer_text = 'EU' WHERE id = ?", [other]);
     const answered = await dismiss(s, other);
     expect(answered.status).toBe(409);
     expect(await errorCode(answered)).toBe('question_not_open');
-    await query("UPDATE ai_question SET status = 'open', answer_text = NULL WHERE id = $1", [other]);
+    await query("UPDATE ai_question SET status = 'open', answer_text = NULL WHERE id = ?", [other]);
 
     // Already resolved -> 409; unknown -> 404; reason too long -> 413.
     const again = await dismiss(s, qid);
@@ -455,17 +457,18 @@ describe('questions', () => {
   it('lists the answer and resolution fields, and the question a message answers (GI-12)', async () => {
     const s = await createLockedSession();
     const open = await insertQuestion(s, 'Which IdP?');
-    const [answered] = await query<{ id: string }>(
-      `INSERT INTO ai_question (session_id, section, text, status, answer_text, answered_at, answered_via, resolution, resolved_at)
-       VALUES ($1, 'Scope', 'Which region?', 'resolved', 'EU only', '2026-10-02T10:00:00Z', 'facilitator', 'answered',
-               '2026-10-03T10:00:00Z')
-       RETURNING id`,
-      [s.id],
+    const answered = { id: randomUUID() };
+    // Session time zone is UTC, so these DATETIME literals are UTC.
+    await query(
+      `INSERT INTO ai_question (id, session_id, section, text, status, answer_text, answered_at, answered_via, resolution, resolved_at)
+       VALUES (?, ?, 'Scope', 'Which region?', 'resolved', 'EU only', '2026-10-02 10:00:00', 'facilitator', 'answered',
+               '2026-10-03 10:00:00')`,
+      [answered.id, s.id],
     );
     await query(
       `INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES
-         ($1, 1, 'facilitator', 'Hello', NULL), ($1, 2, 'facilitator', 'EU only', $2)`,
-      [s.id, answered.id],
+         (?, 1, 'facilitator', 'Hello', NULL), (?, 2, 'facilitator', 'EU only', ?)`,
+      [s.id, s.id, answered.id],
     );
 
     const list = await questionsGET(request('GET', `/api/sessions/${s.id}/questions`), {

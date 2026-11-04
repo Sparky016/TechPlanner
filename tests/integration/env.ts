@@ -8,7 +8,10 @@ const defaults: Record<string, string> = {
   ATLASSIAN_CLOUD_ID: 'test-cloud-id',
   OAUTH_REDIRECT_URI: 'http://localhost:3000/api/auth/callback',
   TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
-  DATABASE_URL: 'postgres://techplanner:techplanner@localhost:5432/techplanner',
+  // Users from scripts/mysql-bootstrap.sql: queries run as the app user, setup.ts resets and migrates as the owner.
+  // setup.ts takes the database name from DATABASE_URL only, so overriding DATABASE_URL picks another database.
+  DATABASE_URL: 'mysql://techplanner_app:app-dev-password@localhost:3306/techplanner_test',
+  MIGRATE_DATABASE_URL: 'mysql://techplanner_owner:owner-dev-password@localhost:3306/techplanner_test',
   COPILOT_GITHUB_TOKEN: 'test-copilot-token',
   FACILITATOR_MODEL: 'test-facilitator-model',
   EVALUATOR_MODEL: 'test-evaluator-model',

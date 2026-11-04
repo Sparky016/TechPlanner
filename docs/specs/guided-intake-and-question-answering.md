@@ -200,7 +200,11 @@ Accessibility (NFR-10): every new control is a native `button`/`textarea` with a
 
 ## 7. Data model and migration
 
-New migration `db/migrations/0005_guided_intake.sql`:
+New migration `db/migrations/0005_guided_intake.sql`. The SQL below is the PostgreSQL design; the migration as
+applied is its MySQL 8.4 port (ADR-0018, `docs/specs/mysql-migration.md` §4): `DATETIME(6)` timestamps, `MEDIUMTEXT`
+answer, `VARCHAR(32)` enums with named CHECKs, `question_id CHAR(36)` with a named foreign key, one `ALTER TABLE` per
+statement and a multi-table `UPDATE ... JOIN` backfill. MySQL named the inline status CHECK of `0001_init.sql`
+`ai_question_chk_1`; the migration drops that one and adds `ai_question_status_check`, the name the contract step drops.
 
 ```sql
 ALTER TABLE planning_session

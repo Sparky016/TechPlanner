@@ -8,7 +8,7 @@ vi.hoisted(() => {
     ATLASSIAN_CLOUD_ID: 'cloud-id',
     OAUTH_REDIRECT_URI: 'http://localhost:3000/auth/callback',
     TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
-    DATABASE_URL: 'postgres://techplanner:techplanner@localhost:5432/techplanner_t23',
+    DATABASE_URL: 'mysql://techplanner:techplanner@localhost:3306/techplanner_t23',
     COPILOT_GITHUB_TOKEN: 'ghp_x',
     FACILITATOR_MODEL: 'model-a',
     EVALUATOR_MODEL: 'model-b',
@@ -19,7 +19,7 @@ vi.hoisted(() => {
   });
 });
 
-vi.mock('@/server/db/pool', () => ({ query: vi.fn(), withTransaction: vi.fn() }));
+vi.mock('@/server/db/pool', () => ({ db: { query: vi.fn() }, query: vi.fn(), withTransaction: vi.fn() }));
 vi.mock('@/server/audit/audit', () => ({ recordAudit: vi.fn() }));
 vi.mock('@/server/spec/workingCopyRepo', () => ({ markAiRead: vi.fn(), applyAiPatch: vi.fn() }));
 vi.mock('@/server/readiness/schedule', () => ({ scheduleEvaluation: vi.fn() }));
@@ -27,7 +27,7 @@ vi.mock('./context', () => ({ loadSessionContext: vi.fn() }));
 
 import { recordAudit } from '@/server/audit/audit';
 import { resetConfigForTests } from '@/server/config';
-import { query, withTransaction } from '@/server/db/pool';
+import { db, query, withTransaction } from '@/server/db/pool';
 import { FakeLlmClient, getLlmClient, resetLlmClientForTests, type FakeStep } from '@/server/llm';
 import { executeToolCall } from '@/server/llm/toolCall';
 import { scheduleEvaluation } from '@/server/readiness/schedule';
@@ -101,10 +101,7 @@ beforeEach(() => {
   questionInserts = [];
   vi.mocked(loadSessionContext).mockResolvedValue(context());
   vi.mocked(query).mockImplementation(async (text: string, params?: unknown[]) => {
-    if (/INSERT INTO ai_question/.test(text)) {
-      questionInserts.push(params ?? []);
-      return [{ id: `q-${questionInserts.length}` }] as never;
-    }
+    if (/INSERT INTO ai_question/.test(text)) questionInserts.push(params ?? []);
     if (/SELECT id, text FROM ai_question/.test(text) && params?.[0] === QUESTION) {
       return [{ id: QUESTION, text: 'Which IdP?' }] as never;
     }
@@ -124,7 +121,9 @@ describe('facilitator tools', () => {
     expect(results[3]).toBe(QUESTION_LIMIT_MESSAGE);
     expect(results.slice(0, 3).every((r) => r.startsWith('Question recorded'))).toBe(true);
     expect(questionInserts).toHaveLength(3);
-    expect(state.questionIds).toEqual(['q-1', 'q-2', 'q-3']);
+    // Ids are generated client-side and inserted as the first parameter.
+    expect(state.questionIds).toEqual(questionInserts.map((p) => p[0]));
+    expect(new Set(state.questionIds).size).toBe(3);
   });
 
   it('enforces the limit across a whole turn run', async () => {
@@ -148,32 +147,31 @@ describe('facilitator tools', () => {
   describe('mark_question_answered (GI-19)', () => {
     const markTool = () =>
       createFacilitatorTools(createTurnState(SESSION, new Date(), false)).find((t) => t.name === 'mark_question_answered')!;
-    const updates = () => vi.mocked(query).mock.calls.filter(([text]) => /UPDATE ai_question/.test(text));
+    // The tool writes through db.query: the UPDATE's rowCount (matched rows) says whether the question was open.
+    const dbQuery = () => vi.mocked(db.query);
+    const updates = () => dbQuery().mock.calls.filter(([text]) => /UPDATE ai_question/.test(text));
+    const result = (rows: unknown[], rowCount = rows.length) => ({ rows, rowCount }) as never;
 
     it('stores the answerSummary as answer_text with answered_via ai, only for an open question', async () => {
-      vi.mocked(query).mockImplementation(async (text: string) =>
-        (/UPDATE ai_question/.test(text) ? [{ id: QUESTION }] : []) as never,
-      );
+      dbQuery().mockImplementation(async (text: string) => (/UPDATE ai_question/.test(text) ? result([], 1) : result([])));
       const out = await executeToolCall(markTool(), { questionId: QUESTION, answerSummary: '  Okta via SAML  ' });
       expect(out).toMatchObject({ ok: true, result: `Question ${QUESTION} marked answered` });
       const [[text, params]] = updates();
-      expect(text).toMatch(/answer_text = \$3, answered_at = now\(\), answered_via = 'ai'/);
+      expect(text).toMatch(/answer_text = \?, answered_at = NOW\(6\), answered_via = 'ai'/);
       expect(text).toMatch(/status = 'open'/);
-      expect(params).toEqual([QUESTION, SESSION, 'Okta via SAML']);
+      expect(params).toEqual(['Okta via SAML', QUESTION, SESSION]);
     });
 
     it('marks without a summary (answer_text stays NULL)', async () => {
-      vi.mocked(query).mockImplementation(async (text: string) =>
-        (/UPDATE ai_question/.test(text) ? [{ id: QUESTION }] : []) as never,
-      );
+      dbQuery().mockImplementation(async (text: string) => (/UPDATE ai_question/.test(text) ? result([], 1) : result([])));
       await executeToolCall(markTool(), { questionId: QUESTION });
-      expect(updates()[0][1]).toEqual([QUESTION, SESSION, null]);
+      expect(updates()[0][1]).toEqual([null, QUESTION, SESSION]);
     });
 
     it('refuses resolved and already answered questions, and rejects an oversize summary', async () => {
       let status = 'resolved';
-      vi.mocked(query).mockImplementation(async (text: string) =>
-        (/SELECT status FROM ai_question/.test(text) ? [{ status }] : []) as never,
+      dbQuery().mockImplementation(async (text: string) =>
+        /SELECT status FROM ai_question/.test(text) ? result([{ status }]) : result([]),
       );
       expect((await executeToolCall(markTool(), { questionId: QUESTION, answerSummary: 'x' })).result).toBe(
         `Question ${QUESTION} is resolved and cannot be changed`,
@@ -182,14 +180,14 @@ describe('facilitator tools', () => {
       expect((await executeToolCall(markTool(), { questionId: QUESTION })).result).toBe(
         `Question ${QUESTION} is already answered`,
       );
-      vi.mocked(query).mockResolvedValue([] as never);
+      dbQuery().mockResolvedValue(result([]));
       expect((await executeToolCall(markTool(), { questionId: QUESTION })).result).toBe(
         `No open question with id ${QUESTION}`,
       );
-      vi.mocked(query).mockClear();
+      dbQuery().mockClear();
       const big = await executeToolCall(markTool(), { questionId: QUESTION, answerSummary: 'x'.repeat(2_001) });
       expect(big.ok).toBe(false);
-      expect(query).not.toHaveBeenCalled();
+      expect(db.query).not.toHaveBeenCalled();
     });
   });
 
@@ -249,7 +247,8 @@ describe('runFacilitatorTurn (fake LLM)', () => {
 /** The roles and SQL the runner sent through withTransaction, in order. */
 function txWrites(): string[] {
   return (client.query.mock.calls as [string, unknown[]][]).flatMap(([text, params]) => {
-    if (/INSERT INTO conversation_message/.test(text)) return [`message:${String(params[1])}:${String(params[2])}`];
+    // Parameters: session_id, seq, role, content.
+    if (/INSERT INTO conversation_message/.test(text)) return [`message:${String(params[2])}:${String(params[3])}`];
     if (/UPDATE planning_session SET analyzed_at/.test(text)) return ['analyzed_at'];
     return [];
   });
@@ -287,7 +286,7 @@ describe('runFacilitatorTurn turn kinds (spec §8.2)', () => {
     expect(system).toContain(ANALYSIS_TEXT(8));
     expect(system).toContain('Ask at most 8 questions per turn');
     expect(fake.calls[0].tools.find((t) => t.name === 'ask_question')?.description).toContain('At most 8 per turn');
-    expect(auditDetails()).toMatchObject({ turnKind: 'analysis', questions: Array.from({ length: 8 }, (_, i) => `q-${i + 1}`) });
+    expect(auditDetails()).toMatchObject({ turnKind: 'analysis', questions: questionInserts.map((p) => p[0]) });
   });
 
   it('analysis: reads its limit from ANALYSIS_MAX_QUESTIONS', async () => {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -15,7 +16,9 @@ import { findMatch, judgeMatch, rate, type Candidate, type CheckTally, type Seed
 const FIXTURES_DIR = join(process.cwd(), 'evals', 'fixtures');
 const REPORT_PATH = join(process.cwd(), 'evals', 'report.json');
 const ANALYSIS_REPORT_PATH = join(process.cwd(), 'evals', 'report-analysis.json');
-const DEFAULT_EVAL_DATABASE_URL = 'postgres://techplanner:techplanner@localhost:5432/techplanner_eval';
+// Users from scripts/mysql-bootstrap.sql: the run uses the app user; the reset (drop, create, migrate) the owner.
+const DEFAULT_EVAL_DATABASE_URL = 'mysql://techplanner_app:app-dev-password@localhost:3306/techplanner_eval';
+const DEFAULT_EVAL_MIGRATE_DATABASE_URL = 'mysql://techplanner_owner:owner-dev-password@localhost:3306/techplanner_eval';
 
 const MIN_FIXTURES = 20;
 const HELD_OUT_COUNT = 5;
@@ -228,21 +231,6 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
 // ---------------------------------------------------------------------------------------------------------------
 // Real run (server modules are imported lazily, after the environment is prepared)
 
-async function ensureDatabase(url: string): Promise<void> {
-  const { Client } = await import('pg');
-  const name = decodeURIComponent(new URL(url).pathname.slice(1));
-  const admin = new URL(url);
-  admin.pathname = '/postgres';
-  const client = new Client({ connectionString: admin.toString() });
-  await client.connect();
-  try {
-    const { rowCount } = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [name]);
-    if (rowCount === 0) await client.query(`CREATE DATABASE "${name.replace(/"/g, '""')}"`);
-  } finally {
-    await client.end();
-  }
-}
-
 function ticketText(f: Fixture): string {
   const t = f.ticket;
   const comments = t.comments.map((c) => `${c.author}: ${c.body}`);
@@ -260,10 +248,9 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
       return 2;
     }
   }
-  // Never the application database: resetDatabase() drops the whole public schema.
-  const evalDbUrl = process.env.EVAL_DATABASE_URL || DEFAULT_EVAL_DATABASE_URL;
-  process.env.DATABASE_URL = evalDbUrl;
-  await ensureDatabase(evalDbUrl);
+  // Never the application database: resetDatabase() drops and re-creates the database DATABASE_URL names.
+  process.env.DATABASE_URL = process.env.EVAL_DATABASE_URL || DEFAULT_EVAL_DATABASE_URL;
+  process.env.MIGRATE_DATABASE_URL = process.env.EVAL_MIGRATE_DATABASE_URL || DEFAULT_EVAL_MIGRATE_DATABASE_URL;
 
   const { resetDatabase } = await import('../tests/integration/setup');
   const { getConfig } = await import('@/server/config');
@@ -281,12 +268,12 @@ async function run(fixtures: Fixture[], opts: Options): Promise<number> {
 
   async function createSession(f: Fixture, run: number, purpose: string): Promise<string> {
     return withTransaction(async (client) => {
-      const { rows } = await client.query<{ id: string }>(
-        // ingested_at is set: AI turns are refused before ingestion (GI-23) and the seeded snapshot stands for the ingest.
-        'INSERT INTO planning_session (primary_ticket_key, ticket_keys, ingested_at) VALUES ($1, ARRAY[$1], now()) RETURNING id',
-        [f.ticket.key],
+      const sessionId = randomUUID();
+      // ingested_at is set: AI turns are refused before ingestion (GI-23) and the seeded snapshot stands for the ingest.
+      await client.query(
+        'INSERT INTO planning_session (id, primary_ticket_key, ticket_keys, ingested_at) VALUES (?, ?, JSON_ARRAY(?), NOW(6))',
+        [sessionId, f.ticket.key, f.ticket.key],
       );
-      const sessionId = rows[0].id;
       const initial = { ...emptySections(), ...f.draft };
       await initWorkingCopy(sessionId, initial, client);
       await insertSnapshots(

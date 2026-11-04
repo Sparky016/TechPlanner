@@ -1,4 +1,5 @@
 import { resetDatabase } from './setup';
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { db, query } from '@/server/db/pool';
 import { emptySections } from '@/lib/spec/document';
@@ -17,14 +18,16 @@ import {
 } from '@/server/spec/workingCopyRepo';
 
 async function createSession(): Promise<string> {
-  const [row] = await query<{ id: string }>(
-    "INSERT INTO planning_session (primary_ticket_key, ticket_keys) VALUES ('ABC-1', ARRAY['ABC-1']) RETURNING id",
+  const id = randomUUID();
+  await query(
+    "INSERT INTO planning_session (id, primary_ticket_key, ticket_keys) VALUES (?, 'ABC-1', '[\"ABC-1\"]')",
+    [id],
   );
-  return row.id;
+  return id;
 }
 
 async function suggestionStatus(id: string): Promise<string> {
-  const [row] = await query<{ status: string }>('SELECT status FROM pending_suggestion WHERE id = $1', [id]);
+  const [row] = await query<{ status: string }>('SELECT status FROM pending_suggestion WHERE id = ?', [id]);
   return row.status;
 }
 
@@ -199,7 +202,7 @@ describe('AC5: concurrency', () => {
       if (ai.status !== 'fulfilled') return;
       const wc = await getWorkingCopy(sessionId);
       const suggestions = await query<{ patch: { content: string } }>(
-        'SELECT patch FROM pending_suggestion WHERE session_id = $1',
+        'SELECT patch FROM pending_suggestion WHERE session_id = ?',
         [sessionId],
       );
 

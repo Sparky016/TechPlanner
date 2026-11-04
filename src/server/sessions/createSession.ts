@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { recordAudit } from '@/server/audit/audit';
 import { isValidIssueKey } from '@/server/atlassian/jira';
 import type { CurrentUser } from '@/server/auth/session';
@@ -42,19 +43,20 @@ export async function createSession(
   const primary = keys[0];
   if (!options.confirmDuplicate) {
     const existing = await query<{ id: string }>(
-      'SELECT id FROM planning_session WHERE primary_ticket_key = $1 ORDER BY created_at, id',
+      'SELECT id FROM planning_session WHERE primary_ticket_key = ? ORDER BY created_at, id',
       [primary],
     );
     if (existing.length > 0) return { kind: 'duplicate', existingSessionIds: existing.map((r) => r.id) };
   }
 
   const session = await withTransaction(async (client) => {
-    const inserted = await client.query<PlanningSessionDbRow>(
-      `INSERT INTO planning_session (primary_ticket_key, ticket_keys, facilitator_id, code_repository)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [primary, keys, user.accountId, options.codeRepository ?? null],
+    const id = randomUUID();
+    await client.query(
+      `INSERT INTO planning_session (id, primary_ticket_key, ticket_keys, facilitator_id, code_repository)
+       VALUES (?, ?, ?, ?, ?)`,
+      [id, primary, JSON.stringify(keys), user.accountId, options.codeRepository ?? null],
     );
+    const inserted = await client.query<PlanningSessionDbRow>('SELECT * FROM planning_session WHERE id = ?', [id]);
     const row = mapSessionRow(inserted.rows[0]);
     await initWorkingCopy(row.id, undefined, client);
     await recordAudit(

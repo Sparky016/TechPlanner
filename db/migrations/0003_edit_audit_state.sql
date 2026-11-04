@@ -3,11 +3,19 @@
 -- last_audit_at starts the current 30 s window.
 
 CREATE TABLE edit_audit_state (
-  session_id uuid REFERENCES planning_session (id) ON DELETE CASCADE,
-  section text,
-  baseline_body text NOT NULL,
-  last_audit_at timestamptz NOT NULL,
-  PRIMARY KEY (session_id, section)
-);
+  session_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+  section VARCHAR(64) NOT NULL,
+  baseline_body MEDIUMTEXT NOT NULL,
+  last_audit_at DATETIME(6) NOT NULL,
+  PRIMARY KEY (session_id, section),
+  CONSTRAINT edit_audit_state_session_fk FOREIGN KEY (session_id) REFERENCES planning_session (id)
+    ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_bin;
 
-ALTER TABLE working_copy ADD COLUMN last_draft_updated_audit_at timestamptz;
+-- statement-break
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON edit_audit_state TO ${APP_DB_USER}
+
+-- statement-break
+
+ALTER TABLE working_copy ADD COLUMN last_draft_updated_audit_at DATETIME(6)

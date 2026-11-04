@@ -21,12 +21,12 @@ test('AC-6: the Generated Specification always contains the 27 FR-5 sections in 
   await page.reload();
   await expect(headings).toHaveText([...SECTION_NAMES]);
 
-  const [wc] = await sql<{ sections: Record<string, unknown> }>('SELECT sections FROM working_copy WHERE session_id = $1', [
+  const [wc] = await sql<{ sections: Record<string, unknown> }>('SELECT sections FROM working_copy WHERE session_id = ?', [
     sessionId,
   ]);
   expect(Object.keys(wc.sections).sort()).toEqual([...SECTION_NAMES].sort());
   const [rev] = await sql<{ sections: Record<string, unknown> }>(
-    'SELECT sections FROM revision WHERE session_id = $1 AND number = 1',
+    'SELECT sections FROM revision WHERE session_id = ? AND number = 1',
     [sessionId],
   );
   expect(Object.keys(rev.sections).sort()).toEqual([...SECTION_NAMES].sort());

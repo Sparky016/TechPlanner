@@ -5,6 +5,8 @@ import { Counter, Histogram, Registry } from 'prom-client';
 export const registry = new Registry();
 
 const SECONDS_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120];
+// Most pool waits are zero; the tail up to the acquire timeout (DB_POOL_ACQUIRE_TIMEOUT_MS, default 5 s) matters.
+const POOL_WAIT_BUCKETS = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 const SCORE_BUCKETS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 
 export const httpRequestDuration = new Histogram({
@@ -48,6 +50,20 @@ export const publishStepFailures = new Counter({
   name: 'publish_step_failures_total',
   help: 'Publish step failures',
   labelNames: ['step'] as const,
+  registers: [registry],
+});
+
+export const dbPoolWait = new Histogram({
+  name: 'db_pool_wait_seconds',
+  help: 'Time spent waiting for a pooled database connection, by outcome (acquired, timeout, error)',
+  labelNames: ['outcome'] as const,
+  buckets: POOL_WAIT_BUCKETS,
+  registers: [registry],
+});
+
+export const dbDeadlockRetries = new Counter({
+  name: 'db_deadlock_retries_total',
+  help: 'Transactions re-run after InnoDB chose them as a deadlock victim (withTransaction retryOnDeadlock)',
   registers: [registry],
 });
 
@@ -102,6 +118,14 @@ export function countAtlassianApiError(product: string, status: number | string)
 
 export function countPublishStepFailure(step: string): void {
   publishStepFailures.inc({ step });
+}
+
+export function observeDbPoolWait(seconds: number, outcome: 'acquired' | 'timeout' | 'error'): void {
+  dbPoolWait.observe({ outcome }, seconds);
+}
+
+export function countDbDeadlockRetry(): void {
+  dbDeadlockRetries.inc();
 }
 
 export function observeReadinessScore(score: number): void {

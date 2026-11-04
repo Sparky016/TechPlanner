@@ -30,7 +30,7 @@ test('AC-5: a section edited by the facilitator is not overwritten by a later AI
   await expect(scope.getByRole('textbox', { name: 'Scope content' })).toHaveText(USER_SCOPE);
 
   const [wc] = await sql<{ sections: Record<string, { body: string }> }>(
-    'SELECT sections FROM working_copy WHERE session_id = $1',
+    'SELECT sections FROM working_copy WHERE session_id = ?',
     [sessionId],
   );
   expect(wc.sections.Scope.body).toBe(USER_SCOPE);
@@ -40,6 +40,6 @@ test('AC-5: a section edited by the facilitator is not overwritten by a later AI
   await expect(suggestion).toBeHidden();
   await expect(scope.getByRole('textbox', { name: 'Scope content' })).toHaveText(USER_SCOPE);
   await expect
-    .poll(async () => (await sql('SELECT 1 FROM audit_record WHERE action = $1', ['ai.suggestion.rejected'])).length)
+    .poll(async () => (await sql('SELECT 1 FROM audit_record WHERE action = ?', ['ai.suggestion.rejected'])).length)
     .toBe(1);
 });

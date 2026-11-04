@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { recordAudit } from '@/server/audit/audit';
 import { getSiteUrl } from '@/server/atlassian/jira';
 import type { CurrentUser } from '@/server/auth/session';
@@ -123,7 +124,7 @@ function toRun(row: RunRow): PublishRun {
 
 async function loadRunRow(runId: string): Promise<RunRow | null> {
   if (!isUuid(runId)) return null;
-  const rows = await query<RunRow>('SELECT * FROM publish_run WHERE id = $1', [runId]);
+  const rows = await query<RunRow>('SELECT * FROM publish_run WHERE id = ?', [runId]);
   return rows[0] ?? null;
 }
 
@@ -183,12 +184,12 @@ export async function startPublish(input: StartPublishInput): Promise<StartPubli
         client,
       );
     }
-    const { rows } = await client.query<{ id: string }>(
-      `INSERT INTO publish_run (session_id, revision_number, override_justification, steps, status, created_by)
-       VALUES ($1, $2, $3, $4, 'running', $5) RETURNING id`,
-      [sessionId, rev.number, overrideJustification, JSON.stringify(initialSteps()), user.accountId],
+    const id = randomUUID();
+    await client.query(
+      `INSERT INTO publish_run (id, session_id, revision_number, override_justification, steps, status, created_by)
+       VALUES (?, ?, ?, ?, ?, 'running', ?)`,
+      [id, sessionId, rev.number, overrideJustification, JSON.stringify(initialSteps()), user.accountId],
     );
-    const id = rows[0].id;
     await recordAudit(
       {
         ...audit,
@@ -214,13 +215,13 @@ export async function startPublish(input: StartPublishInput): Promise<StartPubli
   return { kind: 'started', runId, revisionNumber };
 }
 
-// pg-boss cannot join the publish transaction, so the job is queued after commit. If queueing fails the run is
-// marked failed (its steps stay pending) so that Retry can pick it up.
+// enqueue() runs on its own pooled connection, outside the publish transaction, so the job is queued after commit.
+// If queueing fails the run is marked failed (its steps stay pending) so that Retry can pick it up.
 async function enqueueRun(runId: string, options: { confluenceAction?: ConfluenceAction }): Promise<void> {
   try {
     await enqueue(JOB_NAMES.publishRun, { runId, ...(options.confluenceAction ? { options } : {}) });
   } catch (err) {
-    await query("UPDATE publish_run SET status = 'failed', updated_at = now() WHERE id = $1", [runId]);
+    await query("UPDATE publish_run SET status = 'failed', updated_at = NOW(6) WHERE id = ?", [runId]);
     throw err;
   }
 }
@@ -237,12 +238,12 @@ export async function retryRun(
   if (!isUuid(runId)) return { kind: 'not_found' };
   const outcome = await withTransaction(async (client): Promise<RetryResult> => {
     const { rows } = await client.query<{ session_id: string; status: RunStatus }>(
-      'SELECT session_id, status FROM publish_run WHERE id = $1 FOR UPDATE',
+      'SELECT session_id, status FROM publish_run WHERE id = ? FOR UPDATE',
       [runId],
     );
     if (!rows[0] || rows[0].session_id !== sessionId) return { kind: 'not_found' };
     if (rows[0].status !== 'failed') return { kind: 'not_retryable' };
-    await client.query("UPDATE publish_run SET status = 'running', updated_at = now() WHERE id = $1", [runId]);
+    await client.query("UPDATE publish_run SET status = 'running', updated_at = NOW(6) WHERE id = ?", [runId]);
     return { kind: 'retried', runId };
   });
   if (outcome.kind === 'retried') await enqueueRun(runId, options);
@@ -259,7 +260,7 @@ async function buildContext(run: RunRow, options: { confluenceAction?: Confluenc
   }>(
     `SELECT s.primary_ticket_key, s.ticket_keys, u.display_name AS facilitator_name
        FROM planning_session s LEFT JOIN app_user u ON u.atlassian_account_id = s.facilitator_id
-      WHERE s.id = $1`,
+      WHERE s.id = ?`,
     [run.session_id],
   );
   const session = sessions[0];
@@ -267,7 +268,7 @@ async function buildContext(run: RunRow, options: { confluenceAction?: Confluenc
 
   const publisherId = run.created_by ?? '';
   const publishers = await query<{ display_name: string }>(
-    'SELECT display_name FROM app_user WHERE atlassian_account_id = $1',
+    'SELECT display_name FROM app_user WHERE atlassian_account_id = ?',
     [publisherId],
   );
   const facilitator = { accountId: publisherId, displayName: publishers[0]?.display_name ?? publisherId };
@@ -324,7 +325,7 @@ async function buildContext(run: RunRow, options: { confluenceAction?: Confluenc
 }
 
 async function persistSteps(runId: string, steps: StepState[]): Promise<void> {
-  await query('UPDATE publish_run SET steps = $2, updated_at = now() WHERE id = $1', [runId, JSON.stringify(steps)]);
+  await query('UPDATE publish_run SET steps = ?, updated_at = NOW(6) WHERE id = ?', [JSON.stringify(steps), runId]);
 }
 
 // Step errors never escape the worker: ReauthRequiredError (propagated by the Jira steps) and unexpected errors
@@ -402,13 +403,16 @@ async function finalize(run: RunRow, base: BaseContext | null, steps: StepState[
   const completed = steps.every((s) => s.status === 'success');
   const failedSteps = steps.filter((s) => s.status !== 'success').map((s) => s.name);
   const row = await withTransaction(async (client) => {
-    const { rows } = await client.query<RunRow>(
-      'UPDATE publish_run SET status = $2, steps = $3, updated_at = now() WHERE id = $1 RETURNING *',
-      [run.id, completed ? 'completed' : 'failed', JSON.stringify(steps)],
-    );
-    await client.query('UPDATE planning_session SET status = $2, updated_at = now() WHERE id = $1', [
-      run.session_id,
+    await client.query('UPDATE publish_run SET status = ?, steps = ?, updated_at = NOW(6) WHERE id = ?', [
+      completed ? 'completed' : 'failed',
+      JSON.stringify(steps),
+      run.id,
+    ]);
+    // The update holds the row lock until commit, so this reads exactly what it wrote.
+    const { rows } = await client.query<RunRow>('SELECT * FROM publish_run WHERE id = ?', [run.id]);
+    await client.query('UPDATE planning_session SET status = ?, updated_at = NOW(6) WHERE id = ?', [
       completed ? 'published' : 'partially_published',
+      run.session_id,
     ]);
     await recordAudit(
       {

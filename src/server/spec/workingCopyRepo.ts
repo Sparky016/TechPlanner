@@ -1,5 +1,5 @@
-import type { PoolClient } from 'pg';
-import { query, withTransaction } from '@/server/db/pool';
+import { randomUUID } from 'node:crypto';
+import { type DbClient, query, withTransaction } from '@/server/db/pool';
 import { SECTION_NAMES, type SectionName } from '../../lib/spec/sections';
 import { emptySections, validateSections, type SpecSections } from '../../lib/spec/document';
 import { applyPatchToBody, type SectionPatch } from './patch';
@@ -83,20 +83,24 @@ function isSectionName(name: string): name is SectionName {
   return (SECTION_NAMES as readonly string[]).includes(name);
 }
 
-async function lockWorkingCopy(client: PoolClient, sessionId: string): Promise<WorkingCopy> {
+async function lockWorkingCopy(client: DbClient, sessionId: string): Promise<WorkingCopy> {
   const { rows } = await client.query<WorkingCopyRow>(
-    'SELECT session_id, sections, version, updated_at FROM working_copy WHERE session_id = $1 FOR UPDATE',
+    'SELECT session_id, sections, version, updated_at FROM working_copy WHERE session_id = ? FOR UPDATE',
     [sessionId],
   );
   if (rows.length === 0) throw new WorkingCopyNotFoundError(sessionId);
   return toWorkingCopy(rows[0]);
 }
 
-async function writeSections(client: PoolClient, sessionId: string, sections: WorkingCopySections): Promise<number> {
-  const { rows } = await client.query<{ version: number }>(
-    'UPDATE working_copy SET sections = $2, version = version + 1, updated_at = now() WHERE session_id = $1 RETURNING version',
-    [sessionId, JSON.stringify(sections)],
+// Callers hold the row lock (lockWorkingCopy), so the version read back is the one this update wrote.
+async function writeSections(client: DbClient, sessionId: string, sections: WorkingCopySections): Promise<number> {
+  await client.query(
+    'UPDATE working_copy SET sections = ?, version = version + 1, updated_at = NOW(6) WHERE session_id = ?',
+    [JSON.stringify(sections), sessionId],
   );
+  const { rows } = await client.query<{ version: number }>('SELECT version FROM working_copy WHERE session_id = ?', [
+    sessionId,
+  ]);
   return rows[0].version;
 }
 
@@ -107,7 +111,7 @@ async function writeSections(client: PoolClient, sessionId: string, sections: Wo
 export async function initWorkingCopy(
   sessionId: string,
   initial?: SpecSections,
-  client?: PoolClient,
+  client?: DbClient,
 ): Promise<WorkingCopy> {
   const bodies = initial ?? emptySections();
   const sections = {} as WorkingCopySections;
@@ -117,18 +121,23 @@ export async function initWorkingCopy(
       lastAiReadAt: null,
       lastUserEditAt: null,
     };
-  const sql =
-    'INSERT INTO working_copy (session_id, sections) VALUES ($1, $2) RETURNING session_id, sections, version, updated_at';
-  const params = [sessionId, JSON.stringify(sections)];
-  const [row] = client
-    ? (await client.query<WorkingCopyRow>(sql, params)).rows
-    : await query<WorkingCopyRow>(sql, params);
-  return toWorkingCopy(row);
+  const insert = async (tx: DbClient): Promise<WorkingCopy> => {
+    await tx.query('INSERT INTO working_copy (session_id, sections) VALUES (?, ?)', [
+      sessionId,
+      JSON.stringify(sections),
+    ]);
+    const { rows } = await tx.query<WorkingCopyRow>(
+      'SELECT session_id, sections, version, updated_at FROM working_copy WHERE session_id = ?',
+      [sessionId],
+    );
+    return toWorkingCopy(rows[0]);
+  };
+  return client ? insert(client) : withTransaction(insert);
 }
 
 export async function getWorkingCopy(sessionId: string): Promise<WorkingCopy | null> {
   const rows = await query<WorkingCopyRow>(
-    'SELECT session_id, sections, version, updated_at FROM working_copy WHERE session_id = $1',
+    'SELECT session_id, sections, version, updated_at FROM working_copy WHERE session_id = ?',
     [sessionId],
   );
   return rows.length === 0 ? null : toWorkingCopy(rows[0]);
@@ -163,9 +172,9 @@ export async function markAiRead(sessionId: string, at: Date): Promise<void> {
     const iso = at.toISOString();
     const sections = {} as WorkingCopySections;
     for (const name of SECTION_NAMES) sections[name] = { ...wc.sections[name], lastAiReadAt: iso };
-    await client.query('UPDATE working_copy SET sections = $2 WHERE session_id = $1', [
-      sessionId,
+    await client.query('UPDATE working_copy SET sections = ? WHERE session_id = ?', [
       JSON.stringify(sections),
+      sessionId,
     ]);
   });
 }
@@ -180,11 +189,12 @@ export async function applyAiPatch(sessionId: string, patch: SectionPatch, aiRea
     const wc = await lockWorkingCopy(client, sessionId);
     const current = wc.sections[patch.section];
     if (current.lastUserEditAt !== null && new Date(current.lastUserEditAt).getTime() > aiReadAt.getTime()) {
-      const { rows } = await client.query<{ id: string }>(
-        "INSERT INTO pending_suggestion (session_id, section, patch, status) VALUES ($1, $2, $3, 'pending') RETURNING id",
-        [sessionId, patch.section, JSON.stringify(patch)],
+      const suggestionId = randomUUID();
+      await client.query(
+        "INSERT INTO pending_suggestion (id, session_id, section, patch, status) VALUES (?, ?, ?, ?, 'pending')",
+        [suggestionId, sessionId, patch.section, JSON.stringify(patch)],
       );
-      return { disposition: 'suggested', suggestionId: rows[0].id };
+      return { disposition: 'suggested', suggestionId };
     }
     const sections = {
       ...wc.sections,
@@ -207,9 +217,9 @@ type SuggestionRow = {
   status: string;
 };
 
-async function lockPendingSuggestion(client: PoolClient, suggestionId: string): Promise<SuggestionRow> {
+async function lockPendingSuggestion(client: DbClient, suggestionId: string): Promise<SuggestionRow> {
   const { rows } = await client.query<SuggestionRow>(
-    'SELECT id, session_id, patch, status FROM pending_suggestion WHERE id = $1 FOR UPDATE',
+    'SELECT id, session_id, patch, status FROM pending_suggestion WHERE id = ? FOR UPDATE',
     [suggestionId],
   );
   if (rows.length === 0) throw new SuggestionNotFoundError(suggestionId);
@@ -237,7 +247,7 @@ export async function acceptSuggestion(suggestionId: string, editedContent?: str
       },
     };
     const version = await writeSections(client, suggestion.session_id, sections);
-    await client.query("UPDATE pending_suggestion SET status = 'accepted', decided_at = now() WHERE id = $1", [
+    await client.query("UPDATE pending_suggestion SET status = 'accepted', decided_at = NOW(6) WHERE id = ?", [
       suggestionId,
     ]);
     return version;
@@ -247,7 +257,7 @@ export async function acceptSuggestion(suggestionId: string, editedContent?: str
 export async function rejectSuggestion(suggestionId: string): Promise<void> {
   await withTransaction(async (client) => {
     await lockPendingSuggestion(client, suggestionId);
-    await client.query("UPDATE pending_suggestion SET status = 'rejected', decided_at = now() WHERE id = $1", [
+    await client.query("UPDATE pending_suggestion SET status = 'rejected', decided_at = NOW(6) WHERE id = ?", [
       suggestionId,
     ]);
   });

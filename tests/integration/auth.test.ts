@@ -102,7 +102,7 @@ async function callback(query: string, cookie?: string): Promise<Response> {
 
 async function auditRows(action: string) {
   return query<{ user_id: string | null; result: string; details: Record<string, unknown> }>(
-    'SELECT user_id, result, details FROM audit_record WHERE action = $1 ORDER BY id',
+    'SELECT user_id, result, details FROM audit_record WHERE action = ? ORDER BY id',
     [action],
   );
 }
@@ -180,7 +180,7 @@ describe('GET /auth/callback', () => {
     expect(user).toEqual({ atlassian_account_id: 'acc-123', display_name: 'Ada Lovelace', email: 'ada@example.com' });
 
     const [token] = await query<{ enc_access_token: Buffer; enc_refresh_token: Buffer; scopes: string[] }>(
-      'SELECT enc_access_token, enc_refresh_token, scopes FROM oauth_token WHERE user_id = $1',
+      'SELECT enc_access_token, enc_refresh_token, scopes FROM oauth_token WHERE user_id = ?',
       ['acc-123'],
     );
     expect(token.enc_access_token.includes(Buffer.from('access-initial'))).toBe(false);
@@ -189,7 +189,7 @@ describe('GET /auth/callback', () => {
     expect(decryptSecret(token.enc_refresh_token)).toBe('refresh-initial');
     expect(token.scopes).toEqual([...OAUTH_SCOPES]);
 
-    const sessions = await query<{ id_hash: Buffer }>('SELECT id_hash FROM app_session WHERE user_id = $1', ['acc-123']);
+    const sessions = await query<{ id_hash: Buffer }>('SELECT id_hash FROM app_session WHERE user_id = ?', ['acc-123']);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id_hash.includes(Buffer.from(cookieValue(session)))).toBe(false);
 
@@ -256,9 +256,9 @@ describe('GET /auth/callback', () => {
 
 async function setExpiringToken(userId: string, refreshToken: string | null): Promise<void> {
   await query(
-    `UPDATE oauth_token SET enc_access_token = $2, enc_refresh_token = $3, expires_at = now() + interval '30 seconds'
-      WHERE user_id = $1`,
-    [userId, encryptSecret('access-expiring'), refreshToken === null ? null : encryptSecret(refreshToken)],
+    `UPDATE oauth_token SET enc_access_token = ?, enc_refresh_token = ?, expires_at = NOW(6) + INTERVAL 30 SECOND
+      WHERE user_id = ?`,
+    [encryptSecret('access-expiring'), refreshToken === null ? null : encryptSecret(refreshToken), userId],
   );
 }
 
@@ -280,14 +280,15 @@ describe('getValidAccessToken', () => {
     expect(mock.refreshBodies[0].refresh_token).toBe('refresh-current');
     expect(new Set(results)).toEqual(new Set(['access-rotated-1']));
 
-    const [row] = await query<{ enc_access_token: Buffer; enc_refresh_token: Buffer; secs: number }>(
-      `SELECT enc_access_token, enc_refresh_token, extract(epoch FROM expires_at - now())::int AS secs
-         FROM oauth_token WHERE user_id = $1`,
+    // TIMESTAMPDIFF is a BIGINT, which the driver returns as a string.
+    const [row] = await query<{ enc_access_token: Buffer; enc_refresh_token: Buffer; secs: string }>(
+      `SELECT enc_access_token, enc_refresh_token, TIMESTAMPDIFF(SECOND, NOW(6), expires_at) AS secs
+         FROM oauth_token WHERE user_id = ?`,
       ['acc-123'],
     );
     expect(decryptSecret(row.enc_access_token)).toBe('access-rotated-1');
     expect(decryptSecret(row.enc_refresh_token)).toBe('refresh-rotated-1');
-    expect(row.secs).toBeGreaterThan(3000);
+    expect(Number(row.secs)).toBeGreaterThan(3000);
 
     // Subsequent calls use the stored token.
     expect(await getValidAccessToken('acc-123')).toBe('access-rotated-1');
@@ -302,7 +303,7 @@ describe('getValidAccessToken', () => {
 
     await expect(getValidAccessToken('acc-123')).rejects.toBeInstanceOf(ReauthRequiredError);
 
-    expect(await query('SELECT 1 FROM oauth_token WHERE user_id = $1', ['acc-123'])).toHaveLength(0);
+    expect(await query('SELECT 1 FROM oauth_token WHERE user_id = ?', ['acc-123'])).toHaveLength(0);
     const failures = await auditRows('auth.refresh_failed');
     expect(failures).toHaveLength(before + 1);
     expect(failures.at(-1)).toMatchObject({ user_id: 'acc-123', result: 'failure' });
@@ -349,19 +350,20 @@ describe('session lifetime', () => {
 
     // Created 7 days minus 1 hour ago: sliding may only extend to the absolute cap.
     await query(
-      `UPDATE app_session SET created_at = now() - interval '7 days' + interval '1 hour'
-        WHERE id_hash = $1`,
+      `UPDATE app_session SET created_at = NOW(6) - INTERVAL 7 DAY + INTERVAL 1 HOUR
+        WHERE id_hash = ?`,
       [idHash],
     );
     expect(await getCurrentUser(req())).not.toBeNull();
-    const [{ remaining }] = await query<{ remaining: number }>(
-      'SELECT extract(epoch FROM expires_at - now())::int AS remaining FROM app_session WHERE id_hash = $1',
+    const [row] = await query<{ remaining: string }>(
+      'SELECT TIMESTAMPDIFF(SECOND, NOW(6), expires_at) AS remaining FROM app_session WHERE id_hash = ?',
       [idHash],
     );
+    const remaining = Number(row.remaining);
     expect(remaining).toBeLessThanOrEqual(3600);
     expect(remaining).toBeGreaterThan(3500);
 
-    await query("UPDATE app_session SET expires_at = now() - interval '1 second' WHERE id_hash = $1", [idHash]);
+    await query("UPDATE app_session SET expires_at = NOW(6) - INTERVAL 1 SECOND WHERE id_hash = ?", [idHash]);
     expect(await getCurrentUser(req())).toBeNull();
   });
 });

@@ -123,13 +123,13 @@ async function fakeFetch(input: RequestInfo | URL): Promise<Response> {
 }
 
 async function seedUser(user: { accountId: string; displayName: string }): Promise<void> {
-  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES ($1, $2)', [
+  await query('INSERT INTO app_user (atlassian_account_id, display_name) VALUES (?, ?)', [
     user.accountId,
     user.displayName,
   ]);
   await query(
     `INSERT INTO oauth_token (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-     VALUES ($1, $2, NULL, now() + interval '1 hour', ARRAY['read:jira-work'])`,
+     VALUES (?, ?, NULL, NOW(6) + INTERVAL 1 HOUR, '["read:jira-work"]')`,
     [user.accountId, encryptSecret(`token-${user.accountId}`)],
   );
 }
@@ -191,14 +191,14 @@ async function createIngested(cookie: string, ticketKeys: string[]): Promise<{ i
 
 async function ingestAudits(sessionId: string) {
   return query<{ result: string; details: Record<string, unknown>; ticket_ids: string[] }>(
-    "SELECT result, details, ticket_ids FROM audit_record WHERE action = 'sources.ingested' AND session_id = $1 ORDER BY id",
+    "SELECT result, details, ticket_ids FROM audit_record WHERE action = 'sources.ingested' AND session_id = ? ORDER BY id",
     [sessionId],
   );
 }
 
 async function snapshots(sessionId: string) {
   return query<{ kind: string; ref: string; ingest_status: string; detail: Record<string, unknown> }>(
-    'SELECT kind, ref, ingest_status, detail FROM source_snapshot WHERE session_id = $1 ORDER BY id',
+    'SELECT kind, ref, ingest_status, detail FROM source_snapshot WHERE session_id = ? ORDER BY id',
     [sessionId],
   );
 }
@@ -279,20 +279,20 @@ describe('POST /api/sessions', () => {
     expect(body).not.toHaveProperty('ingestError');
 
     const [row] = await query<{ facilitator_id: string; status: string; ingested_at: Date | null }>(
-      'SELECT facilitator_id, status, ingested_at FROM planning_session WHERE id = $1',
+      'SELECT facilitator_id, status, ingested_at FROM planning_session WHERE id = ?',
       [session.id],
     );
     expect(row).toEqual({ facilitator_id: ALICE.accountId, status: 'draft', ingested_at: null });
 
     // GI-2: tickets are read to validate them, but nothing is ingested at creation.
     expect(await snapshots(session.id)).toEqual([]);
-    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = $1', [session.id])).toEqual([]);
+    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = ?', [session.id])).toEqual([]);
     expect(await ingestAudits(session.id)).toEqual([]);
     const fetched = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
     expect(fetched.some((u) => u.includes('/attachment/content/'))).toBe(false);
 
     const [wc] = await query<{ sections: Record<string, { body: string }>; version: number }>(
-      'SELECT sections, version FROM working_copy WHERE session_id = $1',
+      'SELECT sections, version FROM working_copy WHERE session_id = ?',
       [session.id],
     );
     expect(Object.keys(wc.sections)).toHaveLength(SECTION_NAMES.length);
@@ -301,7 +301,7 @@ describe('POST /api/sessions', () => {
     expect(wc.version).toBe(0);
 
     const audits = await query<{ user_id: string; ticket_ids: string[]; result: string; details: object }>(
-      "SELECT user_id, ticket_ids, result, details FROM audit_record WHERE action = 'draft.created' AND session_id = $1",
+      "SELECT user_id, ticket_ids, result, details FROM audit_record WHERE action = 'draft.created' AND session_id = ?",
       [session.id],
     );
     expect(audits).toEqual([{ user_id: ALICE.accountId, ticket_ids: ['ABC-1', 'ABC-2'], result: 'success', details: {} }]);
@@ -471,13 +471,13 @@ describe('GET /api/sessions and /api/sessions/:id', () => {
     expect(await detail()).toEqual(none);
     expect(await listed()).toEqual(none);
 
-    await query("UPDATE planning_session SET ingested_at = '2026-10-01T09:00:00Z' WHERE id = $1", [id]);
+    await query("UPDATE planning_session SET ingested_at = '2026-10-01 09:00:00' WHERE id = ?", [id]);
     const ingested = { id, ingestedAt: '2026-10-01T09:00:00.000Z', analyzedAt: null, intakeState: 'ingested' };
     expect(await detail()).toEqual(ingested);
     expect(await listed()).toEqual(ingested);
 
     // As the 0005 backfill leaves existing sessions.
-    await query("UPDATE planning_session SET analyzed_at = ingested_at WHERE id = $1", [id]);
+    await query("UPDATE planning_session SET analyzed_at = ingested_at WHERE id = ?", [id]);
     const analyzed = { ...ingested, analyzedAt: '2026-10-01T09:00:00.000Z', intakeState: 'analyzed' };
     expect(await detail()).toEqual(analyzed);
     expect(await listed()).toEqual(analyzed);
@@ -508,7 +508,7 @@ describe('POST /api/sessions/:id/refresh-sources', () => {
     expect(body.messageSeq).toBe(2);
 
     const messages = await query<{ role: string; content: string }>(
-      'SELECT role, content FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+      'SELECT role, content FROM conversation_message WHERE session_id = ? ORDER BY seq',
       [id],
     );
     expect(messages).toHaveLength(2);
@@ -527,7 +527,7 @@ describe('POST /api/sessions/:id/refresh-sources', () => {
       routeArg(id),
     );
     expect(((await unchanged.json()) as { messageSeq: number | null }).messageSeq).toBeNull();
-    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = $1', [id])).toHaveLength(2);
+    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = ?', [id])).toHaveLength(2);
   });
 
   it('reports added and removed sources', async () => {
@@ -544,7 +544,7 @@ describe('POST /api/sessions/:id/refresh-sources', () => {
     const body = (await res.json()) as { added: { ref: string }[]; removed: unknown[] };
     expect(body.added.map((a) => a.ref)).toEqual(['333']);
     const [msg] = await query<{ content: string }>(
-      'SELECT content FROM conversation_message WHERE session_id = $1 AND seq = 2',
+      'SELECT content FROM conversation_message WHERE session_id = ? AND seq = 2',
       [id],
     );
     expect(msg.content).toContain('Added sources:');
@@ -611,14 +611,14 @@ describe('POST /api/sessions/:id/ingest', () => {
     expect(await snapshots(id)).toHaveLength(4);
 
     const [row] = await query<{ ingested_at: Date | null; analyzed_at: Date | null }>(
-      'SELECT ingested_at, analyzed_at FROM planning_session WHERE id = $1',
+      'SELECT ingested_at, analyzed_at FROM planning_session WHERE id = ?',
       [id],
     );
     expect(row.ingested_at?.toISOString()).toBe(body.ingestedAt);
     expect(row.analyzed_at).toBeNull();
 
     const messages = await query<{ seq: number; role: string; content: string }>(
-      'SELECT seq, role, content FROM conversation_message WHERE session_id = $1 ORDER BY seq',
+      'SELECT seq, role, content FROM conversation_message WHERE session_id = ? ORDER BY seq',
       [id],
     );
     expect(messages).toEqual([
@@ -674,12 +674,12 @@ describe('POST /api/sessions/:id/ingest', () => {
 
     const res = await ingest(alice, id, tab);
     expect(res.status).toBe(500);
-    const [row] = await query<{ ingested_at: Date | null }>('SELECT ingested_at FROM planning_session WHERE id = $1', [
+    const [row] = await query<{ ingested_at: Date | null }>('SELECT ingested_at FROM planning_session WHERE id = ?', [
       id,
     ]);
     expect(row.ingested_at).toBeNull();
     expect(await snapshots(id)).toEqual([]);
-    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = $1', [id])).toEqual([]);
+    expect(await query('SELECT 1 FROM conversation_message WHERE session_id = ?', [id])).toEqual([]);
     expect(await ingestAudits(id)).toEqual([
       { result: 'failure', ticket_ids: ['FAIL-1'], details: { via: 'ingest', errorCode: 'atlassian_500' } },
     ]);
@@ -823,7 +823,7 @@ describe('Azure DevOps code repository (ADR-0016)', () => {
     const cleared = await setRepository(id, tab, null);
     expect(await cleared.json()).toEqual({ codeRepository: null });
     const [row] = await query<{ code_repository: string | null }>(
-      'SELECT code_repository FROM planning_session WHERE id = $1',
+      'SELECT code_repository FROM planning_session WHERE id = ?',
       [id],
     );
     expect(row.code_repository).toBeNull();

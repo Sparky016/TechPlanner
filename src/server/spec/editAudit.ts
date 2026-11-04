@@ -1,7 +1,6 @@
-import type { PoolClient } from 'pg';
 import { recordAudit } from '@/server/audit/audit';
 import type { CurrentUser } from '@/server/auth/session';
-import { withTransaction } from '@/server/db/pool';
+import { type DbClient, withTransaction } from '@/server/db/pool';
 import { SECTION_NAMES, type SectionName } from '../../lib/spec/sections';
 import type { WorkingCopySections } from './workingCopyRepo';
 
@@ -9,7 +8,7 @@ import type { WorkingCopySections } from './workingCopyRepo';
 // Debounced edit auditing so keystroke-level autosave does not flood the audit log:
 // - user.edit at most once per section per 30 s (SR-4.4), with a unified diff from the last audited body;
 // - draft.updated at most once per session per 5 min (SR-10.3).
-// Times come from the JS clock (not SQL now()) so the windows are testable with a fake clock.
+// Times come from the JS clock (not SQL NOW(6)) so the windows are testable with a fake clock.
 
 export const USER_EDIT_WINDOW_MS = 30 * 1000;
 export const DRAFT_UPDATED_WINDOW_MS = 5 * 60 * 1000;
@@ -59,7 +58,7 @@ export function unifiedDiff(name: string, before: string, after: string): string
 }
 
 async function auditUserEdit(
-  client: PoolClient,
+  client: DbClient,
   sessionId: string,
   section: string,
   baseline: string,
@@ -81,8 +80,8 @@ async function auditUserEdit(
     client,
   );
   await client.query(
-    'UPDATE edit_audit_state SET baseline_body = $3, last_audit_at = $4 WHERE session_id = $1 AND section = $2',
-    [sessionId, section, body, now],
+    'UPDATE edit_audit_state SET baseline_body = ?, last_audit_at = ? WHERE session_id = ? AND section = ?',
+    [body, now, sessionId, section],
   );
 }
 
@@ -99,14 +98,16 @@ export async function recordSectionEdit(
   actor: EditAuditActor,
 ): Promise<boolean> {
   const now = new Date();
+  // Database work only, so a deadlock victim can re-run it: the upsert takes a next-key lock on a duplicate even at
+  // READ COMMITTED.
   return withTransaction(async (client) => {
     await client.query(
       `INSERT INTO edit_audit_state (session_id, section, baseline_body, last_audit_at)
-       VALUES ($1, $2, $3, $4) ON CONFLICT (session_id, section) DO NOTHING`,
+       VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE session_id = session_id`,
       [sessionId, section, previousBody, now],
     );
     const { rows } = await client.query<{ baseline_body: string; last_audit_at: Date }>(
-      'SELECT baseline_body, last_audit_at FROM edit_audit_state WHERE session_id = $1 AND section = $2 FOR UPDATE',
+      'SELECT baseline_body, last_audit_at FROM edit_audit_state WHERE session_id = ? AND section = ? FOR UPDATE',
       [sessionId, section],
     );
     const state = rows[0];
@@ -114,7 +115,7 @@ export async function recordSectionEdit(
     if (state.baseline_body === newBody) return false;
     await auditUserEdit(client, sessionId, section, state.baseline_body, newBody, actor, now);
     return true;
-  });
+  }, { retryOnDeadlock: true });
 }
 
 /**
@@ -123,15 +124,20 @@ export async function recordSectionEdit(
  */
 export async function flushEditAudits(sessionId: string, actor: EditAuditActor): Promise<number> {
   const now = new Date();
+  // Database work only, so a deadlock victim can re-run it (the edit_audit_state read below is a range lock).
   return withTransaction(async (client) => {
     const wc = await client.query<{ sections: WorkingCopySections }>(
-      'SELECT sections FROM working_copy WHERE session_id = $1 FOR UPDATE',
+      'SELECT sections FROM working_copy WHERE session_id = ? FOR UPDATE',
       [sessionId],
     );
     if (wc.rows.length === 0) return 0;
     const sections = wc.rows[0].sections;
+    // Range lock over this session's primary-key prefix. At READ COMMITTED (the session default, db/mysql.ts) only the
+    // matched rows are locked; at REPEATABLE READ it would also lock the gap up to the next session's first row and
+    // block that session's first upsert in recordSectionEdit. Taken under the working_copy row lock, so flushes of
+    // one session serialise before reaching it.
     const { rows } = await client.query<{ section: string; baseline_body: string }>(
-      'SELECT section, baseline_body FROM edit_audit_state WHERE session_id = $1 ORDER BY section FOR UPDATE',
+      'SELECT section, baseline_body FROM edit_audit_state WHERE session_id = ? ORDER BY section FOR UPDATE',
       [sessionId],
     );
     let written = 0;
@@ -143,7 +149,7 @@ export async function flushEditAudits(sessionId: string, actor: EditAuditActor):
       written++;
     }
     return written;
-  });
+  }, { retryOnDeadlock: true });
 }
 
 /** Records draft.updated { version } unless one was recorded for this session within 5 minutes. */
@@ -151,13 +157,12 @@ export async function recordDraftUpdated(sessionId: string, version: number, act
   const now = new Date();
   const cutoff = new Date(now.getTime() - DRAFT_UPDATED_WINDOW_MS);
   return withTransaction(async (client) => {
-    const { rows } = await client.query(
-      `UPDATE working_copy SET last_draft_updated_audit_at = $2
-        WHERE session_id = $1 AND (last_draft_updated_audit_at IS NULL OR last_draft_updated_audit_at <= $3)
-       RETURNING 1`,
-      [sessionId, now, cutoff],
+    const { rowCount } = await client.query(
+      `UPDATE working_copy SET last_draft_updated_audit_at = ?
+        WHERE session_id = ? AND (last_draft_updated_audit_at IS NULL OR last_draft_updated_audit_at <= ?)`,
+      [now, sessionId, cutoff],
     );
-    if (rows.length === 0) return false;
+    if (rowCount === 0) return false;
     await recordAudit(
       {
         action: 'draft.updated',
