@@ -1,6 +1,124 @@
 {
-  "$comment": "FakeLlmClient scenarios for the E2E suite (LLM_FAKE_SCRIPT). The first rule whose kind matches and whose 'match' occurs in the run's last user message supplies the steps. Facilitator rules key on the facilitator's message; evaluator rules key on a marker planted in the Executive Summary. The unmatched evaluator run reports nothing, so every section is missing and the mandatory critical issues fire.",
+  "$comment": "FakeLlmClient scenarios for the E2E suite (LLM_FAKE_SCRIPT). The first rule whose kind matches and whose 'match' occurs in the run's last user message supplies the steps. Facilitator rules key on the facilitator's message; evaluator rules key on a marker planted in the Executive Summary. The unmatched evaluator run reports nothing, so every section is missing and the mandatory critical issues fire. Guided intake (task 51): the analysis turn's last user message is the system notice 'Initial analysis requested by <name>.'; an answer turn's last user message is the answer text itself, so the answer and discussion rules key on markers in that text.",
   "rules": [
+    {
+      "kind": "facilitator",
+      "match": "Initial analysis requested by",
+      "steps": [
+        {
+          "type": "text-delta",
+          "text": "My understanding: users export the report as CSV. "
+        },
+        {
+          "type": "delay",
+          "ms": 800
+        },
+        {
+          "type": "tool-call",
+          "name": "apply_section_patch",
+          "args": {
+            "section": "Executive Summary",
+            "op": "replace",
+            "content": "E2E analysis draft: users export the report as CSV."
+          }
+        },
+        {
+          "type": "delay",
+          "ms": 800
+        },
+        {
+          "type": "tool-call",
+          "name": "ask_question",
+          "args": {
+            "text": "E2E analysis question: what is the maximum export size?",
+            "section": "Scope"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "ask_question",
+          "args": {
+            "text": "E2E analysis question: which columns are exported?",
+            "section": "Functional Requirements"
+          }
+        },
+        {
+          "type": "tool-call",
+          "name": "ask_question",
+          "args": {
+            "text": "E2E analysis question: who may export reports?",
+            "section": "Security"
+          }
+        },
+        {
+          "type": "text-delta",
+          "text": "I drafted the summary and have three questions."
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "kind": "facilitator",
+      "match": "#answer-limit",
+      "steps": [
+        {
+          "type": "text-delta",
+          "text": "Recording the export limit. "
+        },
+        {
+          "type": "delay",
+          "ms": 1200
+        },
+        {
+          "type": "tool-call",
+          "name": "apply_section_patch",
+          "args": {
+            "section": "Scope",
+            "op": "replace",
+            "content": "E2E answered scope: exports are limited to 50000 rows."
+          }
+        },
+        {
+          "type": "text-delta",
+          "text": "Scope now states the limit."
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "kind": "facilitator",
+      "match": "#discuss-security",
+      "steps": [
+        {
+          "type": "text-delta",
+          "text": "Settling the access rule. "
+        },
+        {
+          "type": "delay",
+          "ms": 400
+        },
+        {
+          "type": "tool-call",
+          "name": "apply_section_patch",
+          "args": {
+            "section": "Security",
+            "op": "replace",
+            "content": "E2E discussion result: only facilitators may export reports."
+          }
+        },
+        {
+          "type": "text-delta",
+          "text": "Security is updated."
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
     {
       "kind": "facilitator",
       "match": "#stream",

@@ -1,4 +1,4 @@
-# ADR-0017: Database Engine: MySQL 8.4 LTS
+# ADR-0018: Database Engine: MySQL 8.4 LTS
 
 Status: Accepted
 

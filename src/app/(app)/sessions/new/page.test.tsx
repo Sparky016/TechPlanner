@@ -83,4 +83,50 @@ describe('new session page', () => {
       await screen.findByText('Azure DevOps connection failed: Azure DevOps rejected the configured credential (ado_unauthorized).'),
     ).toBeTruthy();
   });
+
+  it('Create and ingest posts ingest:true and opens the workspace with analyze=1', async () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+    mockApi(() => ({ session: { id: 's-2' }, ingested: true }));
+    render(<NewSessionPage />);
+    fireEvent.change(screen.getByLabelText('Jira ticket keys'), { target: { value: 'ABC-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create and ingest' }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/sessions/s-2?analyze=1'));
+    expect(apiFetch).toHaveBeenCalledWith('/api/sessions', { method: 'POST', json: { ticketKeys: ['ABC-1'], ingest: true } });
+    vi.unstubAllGlobals();
+  });
+
+  it('Create and ingest opens the workspace with ingest=failed when ingest failed, and shows the busy label', async () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+    mockApi(() => ({ session: { id: 's-3' }, ingested: false, ingestError: { code: 'x', message: 'm', correlationId: 'c' } }));
+    render(<NewSessionPage />);
+    fireEvent.change(screen.getByLabelText('Jira ticket keys'), { target: { value: 'ABC-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create and ingest' }));
+    expect(screen.getByRole('button', { name: 'Creating and ingesting…' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Create session' }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/sessions/s-3?ingest=failed'));
+    vi.unstubAllGlobals();
+  });
+
+  it('Create anyway after a duplicate keeps the Create and ingest mode', async () => {
+    const { ApiError } = await import('@/lib/api/client');
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+    let calls = 0;
+    mockApi(() => {
+      if (calls++ === 0) throw new ApiError('exists', 409, 'session_exists', 'c1', { existingSessionIds: ['a'] });
+      return { session: { id: 's-4' }, ingested: true };
+    });
+    render(<NewSessionPage />);
+    fireEvent.change(screen.getByLabelText('Jira ticket keys'), { target: { value: 'ABC-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create and ingest' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Create another session anyway' }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/sessions/s-4?analyze=1'));
+    expect(apiFetch).toHaveBeenLastCalledWith('/api/sessions', {
+      method: 'POST',
+      json: { ticketKeys: ['ABC-1'], ingest: true, confirmDuplicate: true },
+    });
+    vi.unstubAllGlobals();
+  });
 });

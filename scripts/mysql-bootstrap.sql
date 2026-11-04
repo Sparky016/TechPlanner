@@ -3,7 +3,7 @@
 -- Safe to re-run: it creates only what is missing and never changes an existing password.
 --
 -- DEV-ONLY PASSWORDS. 'owner-dev-password' and 'app-dev-password' are for a developer machine and CI. Production
--- creates the users with generated passwords and the hosts narrowed to the Docker bridge subnet (task 48 runbook).
+-- creates the users with generated passwords and the hosts narrowed to the Docker bridge subnet (task 57 runbook).
 --
 -- Two users:
 --   techplanner_owner  DDL; runs migrations (MIGRATE_DATABASE_URL) and grants table privileges to the app user.

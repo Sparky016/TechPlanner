@@ -16,6 +16,7 @@ COPILOT_GITHUB_TOKEN=... FACILITATOR_MODEL=... EVALUATOR_MODEL=... npm run eval:
 # Options
 npm run eval:llm -- --repeat 3   # run every fixture 3 times to see variance (all runs count in the pass rates)
 npm run eval:llm -- --judge      # if keyword/section matching finds nothing, ask the evaluator model as a judge
+npm run eval:llm -- --mode analysis   # guided intake: score the initial analysis turn only (see below)
 ```
 
 `.env` is loaded if present. The harness always uses a dedicated database, never `DATABASE_URL`:
@@ -23,7 +24,8 @@ npm run eval:llm -- --judge      # if keyword/section matching finds nothing, as
 reset `EVAL_MIGRATE_DATABASE_URL`, default `mysql://techplanner_owner:owner-dev-password@localhost:3306/techplanner_eval`.
 The database is **reset** (dropped, re-created and migrated as the owner) at the start of every run.
 
-Output: a per-fixture line plus a summary on the console, and `evals/report.json`. That file holds per-check pass
+Output: a per-fixture line plus a summary on the console, and `evals/report.json` (`evals/report-analysis.json` for
+`--mode analysis`). That file holds per-check pass
 rates, held-out pass rates and the raw per-fixture results (questions asked, critical issues, section statuses).
 
 Exit codes:
@@ -69,6 +71,19 @@ Caveats:
 - A section the evaluator never reports becomes `missing` ("Not evaluated"). That counts as "not complete" for (c).
 - A gap fails (a) if a facilitator turn errors, because the remaining turns are skipped. Errors are listed per
   fixture in the report.
+
+## Analysis mode (`--mode analysis`)
+
+Guided intake (docs/specs/guided-intake-and-question-answering.md §10) replaces "within its first 2 turns" with "in
+the analysis turn" for SPEC_DOC §10 AC-3. In this mode the harness runs the **initial analysis turn**
+(`runFacilitatorTurn` with `{ kind: 'analysis' }`, question limit `ANALYSIS_MAX_QUESTIONS`) once per fixture, on a
+session with the seeded ticket snapshot and draft and `ingested_at` set, and scores only check (a): every seeded
+Critical gap must match a question asked **in that turn**. There are no scripted replies and no evaluator run, so
+checks (b)-(d) are not scored; the report has `"evalMode": "analysis"` and the same `heldOut` breakdown. The threshold is
+the one for check (a) (>= 90 %), until a real baseline run exists. Both modes set `ingested_at` on the sessions they
+create, because AI turns are refused before ingestion.
+
+With `--validate-only`, `--mode analysis` only validates the fixtures (the same schema check; no token or database).
 
 ## Fixtures
 

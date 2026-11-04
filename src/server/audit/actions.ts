@@ -1,5 +1,6 @@
-// Audit event names: every SR-12.1 event type, plus four events other SRs require auditing
-// that SR-12.1 does not name (refresh failure, question dismissal, accepted risk, lock take-over).
+// Audit event names: every SR-12.1 event type, plus events other SRs require auditing that SR-12.1 does not name
+// (refresh failure, question dismissal, accepted risk, lock take-over) and the guided intake events (spec §8.4).
+// question.dismissed is no longer emitted but stays for historical records.
 
 export const AUDIT_ACTIONS = [
   // SR-12.1
@@ -28,6 +29,11 @@ export const AUDIT_ACTIONS = [
   'question.dismissed',
   'issue.accepted_risk',
   'session.lock_taken_over',
+  // Guided intake (docs/specs/guided-intake-and-question-answering.md §8.4)
+  'sources.ingested',
+  'question.answered',
+  'question.resolved',
+  'question.reopened',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

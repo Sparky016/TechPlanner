@@ -1,9 +1,11 @@
 import { asOwner, dropDatabase, migrateDatabase, resetDatabase } from './setup';
 import { randomUUID } from 'node:crypto';
-import { readdir } from 'node:fs/promises';
+import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getConfig } from '@/server/config';
-import { isCheckViolation, isTriggerRejection } from '@/server/db/errors';
+import { isCheckViolation, isForeignKeyViolation, isTriggerRejection } from '@/server/db/errors';
 import { createDbPool, db, query, withTransaction } from '@/server/db/pool';
 import { MIGRATIONS_DIR, runMigrations } from '../../scripts/migrate';
 
@@ -52,6 +54,7 @@ describe('migrations', () => {
     // The app user has no grant on schema_migrations.
     const applied = await asOwner((c) => c.query<{ filename: string }>('SELECT filename FROM schema_migrations'));
     expect(applied.rows.map((r) => r.filename)).toContain('0001_init.sql');
+    expect(applied.rows.map((r) => r.filename)).toContain('0005_guided_intake.sql');
   });
 
   it('is a no-op when re-run', async () => {
@@ -104,6 +107,45 @@ describe('check constraints', () => {
     await expect(
       query("INSERT INTO audit_record (action, result, hash) VALUES ('x', 'bogus', X'00')"),
     ).rejects.toSatisfy(isCheckViolation);
+  });
+
+  it('constrains the guided intake question fields (0005)', async () => {
+    const sessionId = await createSession();
+    for (const column of ['status', 'answered_via', 'resolution']) {
+      await expect(
+        query(`INSERT INTO ai_question (session_id, text, ${column}) VALUES (?, 'q', 'bogus')`, [sessionId]),
+      ).rejects.toSatisfy(isCheckViolation);
+    }
+    // 'dismissed' stays allowed until the contract step; the new fields accept NULL.
+    for (const status of ['open', 'answered', 'resolved', 'dismissed']) {
+      await query("INSERT INTO ai_question (session_id, text, status) VALUES (?, 'q', ?)", [sessionId, status]);
+    }
+    const questionId = randomUUID();
+    await query(
+      `INSERT INTO ai_question (id, session_id, text, status, answer_text, answered_at, answered_via, resolution, resolved_at)
+       VALUES (?, ?, 'q', 'resolved', 'a', NOW(6), 'facilitator', 'answered', NOW(6))`,
+      [questionId, sessionId],
+    );
+    await query("INSERT INTO ai_question (session_id, text, answered_via) VALUES (?, 'q', 'ai')", [sessionId]);
+    await query("INSERT INTO ai_question (session_id, text, resolution) VALUES (?, 'q', 'not_relevant')", [sessionId]);
+
+    // conversation_message.question_id must name an existing question.
+    await query(
+      "INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES (?, 1, 'facilitator', 'a', ?)",
+      [sessionId, questionId],
+    );
+    await expect(
+      query(
+        "INSERT INTO conversation_message (session_id, seq, role, content, question_id) VALUES (?, 2, 'facilitator', 'a', UUID())",
+        [sessionId],
+      ),
+    ).rejects.toSatisfy(isForeignKeyViolation);
+
+    const [s] = await query<{ ingested_at: Date | null; analyzed_at: Date | null }>(
+      'SELECT ingested_at, analyzed_at FROM planning_session WHERE id = ?',
+      [sessionId],
+    );
+    expect(s).toEqual({ ingested_at: null, analyzed_at: null });
   });
 });
 
@@ -192,5 +234,107 @@ describe('audit_record append-only (AC3)', () => {
     await expect(query('DELETE FROM audit_record WHERE id = ?', [id])).rejects.toMatchObject(denied);
     await expect(query('TRUNCATE audit_record')).rejects.toMatchObject(denied);
     expect(await query('SELECT action FROM audit_record WHERE id = ?', [id])).toEqual([{ action: 'test.append_only' }]);
+  });
+});
+
+// Runs last: it rebuilds the schema at 0004, seeds it, then applies 0005 (and 0006) on top (spec §7 backfill).
+describe('0005 guided intake backfill', () => {
+  let dir: string;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'migrations-0004-'));
+    for (const f of await readdir(MIGRATIONS_DIR)) {
+      if (f.endsWith('.sql') && f < '0005') await copyFile(join(MIGRATIONS_DIR, f), join(dir, f));
+    }
+  });
+
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('migrates dismissed questions to resolved and marks sessions with snapshots as ingested and analyzed', async () => {
+    await resetDatabase(dir);
+
+    const withSources = await createSession();
+    const withoutSources = await createSession();
+    const other = await createSession();
+    // Session time zone is UTC (src/server/db/mysql.ts), so these DATETIME literals are UTC.
+    await query(
+      `INSERT INTO source_snapshot (session_id, kind, ref, ingest_status, retrieved_at) VALUES
+         (?, 'jira_issue', 'ABC-1', 'ingested', '2026-10-02 10:00:00'),
+         (?, 'confluence_page', '123', 'ingested', '2026-10-01 09:00:00'),
+         (?, 'jira_issue', 'ABC-1', 'ingested', '2026-10-03 08:00:00'),
+         (?, 'jira_issue', 'ABC-1', 'unavailable', '2026-10-05 12:00:00')`,
+      [withSources, withSources, withSources, other],
+    );
+    const dismissed = { id: randomUUID() };
+    await query(
+      `INSERT INTO ai_question (id, session_id, text, status, dismiss_reason, created_at)
+       VALUES (?, ?, 'Dismissed?', 'dismissed', 'Out of scope', '2026-10-04 11:00:00')`,
+      [dismissed.id, withSources],
+    );
+    const open = { id: randomUUID() };
+    await query("INSERT INTO ai_question (id, session_id, text, status) VALUES (?, ?, 'Open?', 'open')", [
+      open.id,
+      withSources,
+    ]);
+    const answered = { id: randomUUID() };
+    await query("INSERT INTO ai_question (id, session_id, text, status) VALUES (?, ?, 'Answered?', 'answered')", [
+      answered.id,
+      withSources,
+    ]);
+    await query("INSERT INTO conversation_message (session_id, seq, role, content) VALUES (?, 1, 'facilitator', 'Hi')", [
+      withSources,
+    ]);
+
+    expect(await migrateDatabase()).toEqual(['0005_guided_intake.sql', '0006_job_queue.sql']);
+
+    const sessions = await query<{ id: string; ingested_at: Date | null; analyzed_at: Date | null }>(
+      'SELECT id, ingested_at, analyzed_at FROM planning_session',
+    );
+    const byId = new Map(sessions.map((r) => [r.id, r]));
+    // min(retrieved_at) across every snapshot batch of the session.
+    expect(byId.get(withSources)).toMatchObject({
+      ingested_at: new Date('2026-10-01T09:00:00Z'),
+      analyzed_at: new Date('2026-10-01T09:00:00Z'),
+    });
+    expect(byId.get(other)).toMatchObject({
+      ingested_at: new Date('2026-10-05T12:00:00Z'),
+      analyzed_at: new Date('2026-10-05T12:00:00Z'),
+    });
+    expect(byId.get(withoutSources)).toMatchObject({ ingested_at: null, analyzed_at: null });
+
+    const questions = await query<{
+      id: string;
+      status: string;
+      resolution: string | null;
+      resolved_at: Date | null;
+      dismiss_reason: string | null;
+      answer_text: string | null;
+      answered_at: Date | null;
+      answered_via: string | null;
+    }>(
+      `SELECT id, status, resolution, resolved_at, dismiss_reason, answer_text, answered_at, answered_via
+         FROM ai_question`,
+    );
+    const q = new Map(questions.map((r) => [r.id, r]));
+    expect(q.get(dismissed.id)).toEqual({
+      id: dismissed.id,
+      status: 'resolved',
+      resolution: 'not_relevant',
+      resolved_at: new Date('2026-10-04T11:00:00Z'),
+      dismiss_reason: 'Out of scope',
+      answer_text: null,
+      answered_at: null,
+      answered_via: null,
+    });
+    expect(q.get(open.id)).toMatchObject({ status: 'open', resolution: null, resolved_at: null });
+    expect(q.get(answered.id)).toMatchObject({ status: 'answered', resolution: null, resolved_at: null });
+
+    const [message] = await query<{ question_id: string | null }>(
+      'SELECT question_id FROM conversation_message WHERE session_id = ?',
+      [withSources],
+    );
+    expect(message.question_id).toBeNull();
   });
 });

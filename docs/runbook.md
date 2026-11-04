@@ -2,7 +2,7 @@
 
 Source: SPEC_DOC.md §8 (deployment and rollback), ADR-0015 (Copilot CLI pin), task 38.
 
-The target hosting platform is not specified. This runbook therefore uses generic Docker and Compose terms. `docker-compose.prod.example.yml` is a working reference: map its services onto whatever the organisation's hosting server runs. The database is MySQL 8.4 LTS installed natively on that server (ADR-0017), not a container; §7 to §11 cover it.
+The target hosting platform is not specified. This runbook therefore uses generic Docker and Compose terms. `docker-compose.prod.example.yml` is a working reference: map its services onto whatever the organisation's hosting server runs. The database is MySQL 8.4 LTS installed natively on that server (ADR-0018), not a container; §7 to §11 cover it.
 
 ## 1. The image
 
@@ -56,7 +56,7 @@ Secrets. Store them in the hosting platform's secret store and inject them as en
 | `DOWNSTREAM_WEBHOOK_SECRET` | signing secret for the downstream webhook (required when `DOWNSTREAM_WEBHOOK_URL` is set) |
 | `METRICS_TOKEN`             | bearer token for `GET /metrics` (optional; `/metrics` returns 404 when unset) |
 
-Non-secret required settings: `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLOUD_ID`, `OAUTH_REDIRECT_URI`, `APP_BASE_URL`, `FACILITATOR_MODEL`, `EVALUATOR_MODEL`, `CONFLUENCE_SPACE_KEY` and `CONFLUENCE_PARENT_PAGE_ID`. `APP_DB_USER` is the `'user'@'host'` the migrations grant table privileges to; the `migrate` service needs it in production (§7.4). Optional settings: `DB_POOL_SIZE` (connections per process, default 20; web and worker each open a pool, so keep 2 × `DB_POOL_SIZE` plus headroom below MySQL's `max_connections`, default 151), `DB_POOL_ACQUIRE_TIMEOUT_MS` (default 5000; past it a request gets 503 `db_pool_exhausted`), `CONTEXT_TOKEN_BUDGET`, `CONFLUENCE_PROJECT_OVERRIDES`, `DOWNSTREAM_WEBHOOK_URL`, `SECTION_WEIGHTS` and `COPILOT_CLI_PATH`, which the image already sets.
+Non-secret required settings: `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLOUD_ID`, `OAUTH_REDIRECT_URI`, `APP_BASE_URL`, `FACILITATOR_MODEL`, `EVALUATOR_MODEL`, `CONFLUENCE_SPACE_KEY` and `CONFLUENCE_PARENT_PAGE_ID`. `APP_DB_USER` is the `'user'@'host'` the migrations grant table privileges to; the `migrate` service needs it in production (§7.4). Optional settings: `DB_POOL_SIZE` (connections per process, default 20; web and worker each open a pool, so keep 2 × `DB_POOL_SIZE` plus headroom below MySQL's `max_connections`, default 151), `DB_POOL_ACQUIRE_TIMEOUT_MS` (default 5000; past it a request gets 503 `db_pool_exhausted`), `CONTEXT_TOKEN_BUDGET`, `ANALYSIS_MAX_QUESTIONS` (default 8: the most questions the AI may ask in the initial analysis turn; every other turn keeps the limit of 3), `CONFLUENCE_PROJECT_OVERRIDES`, `DOWNSTREAM_WEBHOOK_URL`, `SECTION_WEIGHTS` and `COPILOT_CLI_PATH`, which the image already sets.
 
 `LLM_FAKE=1` swaps the Copilot client for a scripted fake. Use it only for smoke tests without a Copilot-entitled token, **never in production**.
 
@@ -127,7 +127,7 @@ Every migration must keep the **previous release** working against the **new sch
 
 ## 7. MySQL on the hosting server
 
-MySQL 8.4 LTS runs natively on the hosting server, so its data, upgrades and backups are independent of the app image (spec `docs/specs/mysql-migration.md` §11a, ADR-0017). The hosting OS and firewall are not specified in the repository. The steps below assume **Ubuntu 24.04 with `ufw`** as a fallback; on another distribution use the MySQL YUM repository, `firewalld` or `nftables`, and the equivalent service names. Run everything as root (or with `sudo`) on the server.
+MySQL 8.4 LTS runs natively on the hosting server, so its data, upgrades and backups are independent of the app image (spec `docs/specs/mysql-migration.md` §11a, ADR-0018). The hosting OS and firewall are not specified in the repository. The steps below assume **Ubuntu 24.04 with `ufw`** as a fallback; on another distribution use the MySQL YUM repository, `firewalld` or `nftables`, and the equivalent service names. Run everything as root (or with `sudo`) on the server.
 
 ### 7.1 Install MySQL 8.4 from the official MySQL APT repository
 
@@ -292,4 +292,4 @@ Take a dump before deploying any release that adds migrations, so step 3 always 
 
 ## 11. Audit TRUNCATE
 
-MySQL has no TRUNCATE triggers. `audit_record` is protected against `UPDATE` and `DELETE` by triggers, but against `TRUNCATE` **only by privileges**: the app user holds `SELECT, INSERT` on it and no `DROP`. The **owner** user can truncate it. This weakening of SR-12.3 is accepted (ADR-0013, ADR-0017). It is why owner credentials stay out of the `web` and `worker` containers (§2), why the owner's host is restricted (§7.4), and why the owner password is used for migrations only. A truncated chain is detectable only against an earlier dump, so keep the off-host copies (§8.2).
+MySQL has no TRUNCATE triggers. `audit_record` is protected against `UPDATE` and `DELETE` by triggers, but against `TRUNCATE` **only by privileges**: the app user holds `SELECT, INSERT` on it and no `DROP`. The **owner** user can truncate it. This weakening of SR-12.3 is accepted (ADR-0013, ADR-0018). It is why owner credentials stay out of the `web` and `worker` containers (§2), why the owner's host is restricted (§7.4), and why the owner password is used for migrations only. A truncated chain is detectable only against an earlier dump, so keep the off-host copies (§8.2).

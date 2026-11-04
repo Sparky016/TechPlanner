@@ -7,6 +7,8 @@
 | **Facilitator** | The authenticated Engineering Lead running a Planning Session (PRD §7). |
 | **Participant** | A Software Developer present in the meeting. In MVP participates verbally; does not log in to the session [D-3]. |
 | **Planning Session** | A persisted unit of work bound to one or more Jira tickets, containing conversation, notes, working copy and revisions (FR-2). |
+| **Intake state** | Where a Planning Session is in guided intake: `not_ingested` (created, sources not pulled), `ingested` (sources snapshotted, not yet analyzed) or `analyzed` (the initial AI analysis succeeded). Derived from `ingested_at` / `analyzed_at` (SR-2.9, SR-2.10). |
+| **Resolved question** | An AI question the Facilitator closed: resolution `answered` (after answering) or `not_relevant` (closed without an answer, optional reason). Replaces *dismissed*. The AI sees resolved questions in its context and does not re-ask them (SR-3.5). |
 | **Working Copy** | The current, unsaved-to-history state of the Generated Specification, updated live by AI and Facilitator (FR-4) [D-5]. |
 | **Revision** | An immutable snapshot of the Working Copy created by an explicit Save Draft, Restore, or Publish (FR-10, FR-11) [D-5]. |
 | **Section** | One of the 27 headings mandated by FR-5. |

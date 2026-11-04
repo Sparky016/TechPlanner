@@ -32,11 +32,11 @@ export async function asOwner<T>(fn: (client: DbClient) => Promise<T>): Promise<
   }
 }
 
-/** Applies pending migrations to the test database as the owner. */
-export async function migrateDatabase(): Promise<string[]> {
+/** Applies pending migrations (from `dir`, default db/migrations) to the test database as the owner. */
+export async function migrateDatabase(dir?: string): Promise<string[]> {
   const pool = createDbPool(ownerUrl(databaseName()));
   try {
-    return await runMigrations(pool);
+    return await runMigrations(pool, dir ? { dir } : {});
   } finally {
     await pool.end();
   }
@@ -60,8 +60,9 @@ export async function dropDatabase(admin: DbClient, name: string): Promise<void>
   await admin.query(`DROP DATABASE IF EXISTS ${quoted}`);
 }
 
-// Destroys all data in the target database: drops and re-creates it, then migrates.
-export async function resetDatabase(): Promise<void> {
+// Destroys all data in the target database: drops and re-creates it, then migrates (from `dir`, default
+// db/migrations).
+export async function resetDatabase(dir?: string): Promise<void> {
   const name = databaseName();
   const quoted = `\`${name.replace(/`/g, '``')}\``;
   // No default database: the one being dropped may not exist yet.
@@ -72,5 +73,5 @@ export async function resetDatabase(): Promise<void> {
   } finally {
     await admin.end();
   }
-  await migrateDatabase();
+  await migrateDatabase(dir);
 }

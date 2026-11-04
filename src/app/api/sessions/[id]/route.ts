@@ -1,6 +1,7 @@
 import { query } from '@/server/db/pool';
 import { withApiHandler } from '@/server/http/handler';
 import { requireSessionAccess } from '@/server/sessions/access';
+import { intakeState } from '@/server/sessions/repo';
 import { loadCurrentSnapshots } from '@/server/sessions/sources';
 
 // Server-only route; never cache.
@@ -40,6 +41,9 @@ export const GET = withApiHandler<{ id: string }>({}, async (ctx) => {
         codeRepository: session.codeRepository,
         confluencePageId: session.confluencePageId,
         confluencePageVersion: session.confluencePageVersion,
+        ingestedAt: session.ingestedAt?.toISOString() ?? null,
+        analyzedAt: session.analyzedAt?.toISOString() ?? null,
+        intakeState: intakeState(session),
         createdAt: session.createdAt.toISOString(),
         updatedAt: session.updatedAt.toISOString(),
       },

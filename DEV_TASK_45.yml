@@ -1,71 +1,84 @@
 id: "45"
-title: "Replace pg-boss with an in-house SQL job queue (on PostgreSQL first)"
+title: "Facilitator turn kinds, shared SSE turn route helper and the analysis turn (POST /analyze)"
 phase: 7
 severity: high
 complexity: high
 model: opus
-effort: medium
+effort: high
 eval_model: sonnet
 eval_effort: medium
-depends_on: ["44"]
+depends_on: ["43"]
 status: PENDING
-source: "docs/specs/mysql-migration.md §7"
+source: "docs/specs/guided-intake-and-question-answering.md GI-8-GI-10, GI-22-GI-24, §8.1, §8.2, §8.3 ANALYSIS_TEXT"
 
 objective: |
-  pg-boss only supports PostgreSQL. Replace it with a small queue on a `job` table, keeping the public API of
-  src/server/jobs/queue.ts, while the database is still PostgreSQL. Task 46 then only ports its DDL.
+  Generalise one facilitation turn to three kinds (message, analysis, answer), extract the SSE turn-route
+  boilerplate so every turn route shares the advisory turn lock, and add the initial analysis turn.
 
 scope:
   in:
-    - "db/migrations/0005_job_queue.sql (Postgres): job table per spec §7.2; singleton enforced by a partial unique index on (name, singleton_key) WHERE state = 'created'"
-    - "src/server/jobs/queue.ts: same exports (getQueue, stopQueue, enqueue, subscribeHandlers, EnqueueOptions); enqueue returns null on singleton conflict (isUniqueViolation)"
-    - "Fetch with SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1, mark active with locked_until, commit, run handler outside the transaction"
-    - "Retries: retryLimit 3, exponential backoff from retryDelay (default 1 s); NonRetryableJobError → deadletter with output.message"
-    - "Expired active jobs (crashed worker) return to created; completed jobs older than 7 days deleted on start and hourly"
-    - "Graceful stop waits for in-flight handlers (SIGTERM path in src/worker/index.ts unchanged)"
-    - "Integration tests: replace 'DROP SCHEMA IF EXISTS pgboss CASCADE' with 'DELETE FROM job' (jobs, readinessApi, conversationApi, publish tests)"
-    - "Remove pg-boss from package.json"
+    - "runFacilitatorTurn(input) takes `turn: { kind: 'message'; text } | { kind: 'analysis' } | { kind: 'answer'; questionId; text }`"
+    - "analysis: persist system message 'Initial analysis requested by <name>.', append ANALYSIS_TEXT, maxQuestions = ANALYSIS_MAX_QUESTIONS, set analyzed_at in the AI-message transaction on success only"
+    - "answer: the runner only appends ANSWER_TEXT(question) (persistence is task 46); define the type and prompt hook here so 46 adds a route only"
+    - "FacilitatorTurnState.maxQuestions replaces the MAX_QUESTIONS_PER_TURN constant inside ask_question; the constant stays as the default"
+    - "ai.suggestion details gain turnKind and (answer) questionId"
+    - "Config ANALYSIS_MAX_QUESTIONS (int, default 8) in config.ts and .env.example"
+    - "src/server/http/turnStream.ts: turnStreamResponse(ctx, session, run) - advisory lock acquire/409, first-token metric, error mapping, release in finally; messages route refactored onto it"
+    - "POST /api/sessions/:id/analyze: 409 not_ingested / already_analyzed / turn_in_progress"
+    - "POST /api/sessions/:id/messages: 409 not_ingested before ingest"
+    - "End clarification: analysis runs without ask_question (existing createFacilitatorTools behaviour)"
   out:
-    - "MySQL DDL for job (task 46)"
+    - "Answer/resolve/reopen routes and context question groups (task 46); UI (task 47)"
 
 files:
-  "db/migrations/0005_job_queue.sql": "create"
-  "src/server/jobs/queue.ts": "rewrite"
-  "src/server/jobs/registry.ts": "update comment (pg-boss → queue)"
-  "tests/integration/jobs.test.ts": "update; add retry/backoff, deadletter, singleton, crash-recovery cases"
-  "tests/integration/readinessApi.test.ts, conversationApi.test.ts, publish.test.ts": "update cleanup"
-  "package.json, package-lock.json": "remove pg-boss"
+  "src/server/facilitator/runTurn.ts": "update"
+  "src/server/facilitator/tools.ts": "update (maxQuestions on state)"
+  "src/server/facilitator/prompt.ts": "update (ANALYSIS_TEXT, ANSWER_TEXT, options.turn)"
+  "src/server/facilitator/facilitator.test.ts": "update"
+  "src/server/facilitator/__snapshots__/facilitator.test.ts.snap": "update"
+  "src/server/config.ts": "update"
+  "src/server/config.test.ts": "update"
+  ".env.example": "update"
+  "src/server/http/turnStream.ts": "create"
+  "src/app/api/sessions/[id]/messages/route.ts": "update POST to use turnStream"
+  "src/app/api/sessions/[id]/analyze/route.ts": "create"
+  "tests/integration/conversationApi.test.ts": "update (sessions must be ingested; not_ingested case)"
+  "tests/integration/intakeApi.test.ts": "create (analyze)"
+  "tests/integration/facilitator.test.ts": "update for the new input shape"
 
 implementation_notes: |
-  All queue SQL must be portable to MySQL 8.4 except the DDL: ? placeholders, no RETURNING, SKIP LOCKED,
-  timestamps computed as now() + interval passed in seconds from JS (keep interval arithmetic in one helper so
-  task 46 swaps one function). Poll every 1 s; re-poll immediately after a job completes. Visibility timeout:
-  15 min (longest publish step budget), configurable per queue.
-  'short' policy (readiness debounce, task 26): at most one job in state 'created' per (name, singletonKey);
-  an active job does not block a new one.
+  Conventions: FakeLlmClient.enqueue scripts with tool-call steps (ask_question, apply_section_patch) as in
+  facilitator.test.ts; integration tests set ingested_at via SQL instead of calling /ingest to stay independent
+  of task 44.
+  Keep the SR-3.2 corrective follow-up for every kind.
+  turnStream must keep today's semantics exactly: dedicated pool client for the advisory lock, release on abort,
+  `event: error` with correlationId. NFR-5 follow-up (pool exhaustion under many concurrent streams) is
+  unchanged by this task - do not widen it; note it in the commit body if touched.
+  evals/run.ts calls runFacilitatorTurn directly: update its call to the new input shape (turn: { kind: 'message' })
+  so `npm run eval:llm -- --validate-only` still passes.
 
 acceptance_criteria:
   - id: AC1
-    behavior: "Two enqueues with the same singletonKey while the first is queued yield one job and a null id"
-    verify: "npm run test:integration -- jobs"
+    behavior: "POST /analyze on an ingested session streams token/patch/question/done; analyzed_at set; up to 8 questions accepted, the 9th gets the limit message"
+    verify: "npm run test:integration -- intakeApi"
   - id: AC2
-    behavior: "Failing handler retries 3 times with growing delay, then state failed; NonRetryableJobError → deadletter without retry"
-    verify: "npm run test:integration -- jobs"
+    behavior: "Analyze before ingest -> 409 not_ingested; after analysis -> 409 already_analyzed; concurrent with a message turn -> 409 turn_in_progress"
+    verify: "npm run test:integration -- intakeApi"
   - id: AC3
-    behavior: "A job left active past locked_until is picked up again"
-    verify: "npm run test:integration -- jobs"
+    behavior: "LLM error during analysis: SSE error event, system message kept, analyzed_at stays NULL"
+    verify: "npm run test:integration -- intakeApi"
   - id: AC4
-    behavior: "Readiness debounce and publish retry behave as before"
-    verify: "npm run test:integration && npm run test:e2e"
+    behavior: "Message turns behave as before (existing conversationApi suite green) and return 409 not_ingested before ingest"
+    verify: "npm run test:integration -- conversationApi"
   - id: AC5
-    behavior: "pg-boss is gone"
-    verify: "! grep -rn 'pg-boss\\|pgboss' src tests scripts package.json"
+    behavior: "Unit tests cover per-kind prompt assembly and maxQuestions; eval harness validates"
+    verify: "npm test && npm run eval:llm -- --validate-only"
 
 risks_vulnerabilities:
-  - risk: "Duplicate execution after a visibility timeout on a slow but live handler"
-    mitigation: "Publish steps are idempotent (task 27); timeout set above the longest step"
+  - risk: "Refactoring the messages route regresses lock release on client abort"
+    mitigation: "Keep the existing abort test in conversationApi.test.ts and run it against the helper"
 
 knowledge_gaps: []
 
 commit_message: |
-  feat(task-45): replace pg-boss with a SQL job queue
+  feat(task-45): facilitator turn kinds, shared turn stream and initial analysis

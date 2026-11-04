@@ -37,7 +37,7 @@ import { verifyAuditChain } from '../../scripts/audit-verify';
 import type { SectionStatus } from '../../src/lib/readiness/types';
 import { SECTION_NAMES, type SectionName } from '../../src/lib/spec/sections';
 
-// docs/specs/mysql-migration.md §8 and DEV_TASK_47: parallel writers on one session must neither deadlock nor
+// docs/specs/mysql-migration.md §8 and DEV_TASK_56: parallel writers on one session must neither deadlock nor
 // corrupt state, and an exhausted pool must fail fast (NFR-5). Run 20 times in a row for AC2.
 
 const POOL_SIZE = 10;

@@ -32,6 +32,7 @@ describe('getConfig', () => {
   it('parses a valid environment with defaults and memoizes', () => {
     const cfg = getConfig();
     expect(cfg.CONTEXT_TOKEN_BUDGET).toBe(150000);
+    expect(cfg.ANALYSIS_MAX_QUESTIONS).toBe(8);
     expect(cfg.DOWNSTREAM_WEBHOOK_URL).toBeUndefined();
     expect(getConfig()).toBe(cfg);
   });
@@ -66,6 +67,19 @@ describe('getConfig', () => {
     expect(cfg.COPILOT_CLI_PATH).toBeUndefined();
     expect(cfg.SECTION_WEIGHTS).toBeUndefined();
     expect(cfg.CONTEXT_TOKEN_BUDGET).toBe(150000);
+  });
+
+  it('parses ANALYSIS_MAX_QUESTIONS and rejects a non-positive or fractional value', () => {
+    process.env.ANALYSIS_MAX_QUESTIONS = '';
+    expect(getConfig().ANALYSIS_MAX_QUESTIONS).toBe(8);
+    resetConfigForTests();
+    process.env.ANALYSIS_MAX_QUESTIONS = '5';
+    expect(getConfig().ANALYSIS_MAX_QUESTIONS).toBe(5);
+    for (const bad of ['0', '-1', '2.5', 'many']) {
+      resetConfigForTests();
+      process.env.ANALYSIS_MAX_QUESTIONS = bad;
+      expect(() => getConfig()).toThrow(/ANALYSIS_MAX_QUESTIONS/);
+    }
   });
 
   it('rejects a TOKEN_ENCRYPTION_KEY that is not 32 bytes', () => {

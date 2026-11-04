@@ -4,7 +4,7 @@ import { isUniqueViolation } from '@/server/db/errors';
 import { NonRetryableJobError, type JobHandler } from './registry';
 
 // Server-only: never import from src/lib or client components.
-// Job queue on the `job` table (db/migrations/0005_job_queue.sql, spec §7.2). Every statement goes through the
+// Job queue on the `job` table (db/migrations/0006_job_queue.sql, spec §7.2). Every statement goes through the
 // shared pool. Each claim of a job stamps a fresh claim_token; finishing or retrying it matches that token, so only
 // the activation that claimed it last can record an outcome.
 

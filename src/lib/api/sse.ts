@@ -63,15 +63,12 @@ export type TurnEvent =
 const TURN_EVENTS = new Set(['token', 'patch', 'suggestion', 'question', 'done', 'error']);
 
 /**
- * Sends a facilitator message and yields the streamed turn events. Request failures before the stream starts
- * (409 turn_in_progress, 423 session_locked, ...) throw ApiError.
+ * POSTs to an SSE turn route (/messages, /analyze, /questions/:qid/answer) and yields the streamed turn events.
+ * `body` is sent as JSON; omit it for routes without a body. Request failures before the stream starts
+ * (409 turn_in_progress / not_ingested / already_analyzed, 423 session_locked, ...) throw ApiError.
  */
-export async function* streamMessage(sessionId: string, text: string, signal?: AbortSignal): AsyncGenerator<TurnEvent> {
-  const res = await apiFetchResponse(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
-    method: 'POST',
-    json: { text },
-    signal,
-  });
+export async function* streamTurn(path: string, body?: unknown, signal?: AbortSignal): AsyncGenerator<TurnEvent> {
+  const res = await apiFetchResponse(path, { method: 'POST', json: body, signal });
   if (!res.body) return;
   for await (const msg of parseSse(res.body)) {
     if (!TURN_EVENTS.has(msg.event)) continue;
@@ -83,4 +80,9 @@ export async function* streamMessage(sessionId: string, text: string, signal?: A
     }
     yield { ...data, type: msg.event } as TurnEvent;
   }
+}
+
+/** Sends a facilitator message: streamTurn on POST /api/sessions/:id/messages. */
+export function streamMessage(sessionId: string, text: string, signal?: AbortSignal): AsyncGenerator<TurnEvent> {
+  return streamTurn(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, { text }, signal);
 }

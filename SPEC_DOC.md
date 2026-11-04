@@ -99,22 +99,25 @@ Requirement IDs `SR-<FR>.<n>` trace to PRD `FR-<n>`.
 - **SR-1.7** Login success, login failure, logout and token-refresh failure produce Audit Records. (FR-12 "Authentication")
 
 ### FR-2 Planning Session Creation
-- **SR-2.1** Facilitator creates a session by entering one or more Jira issue keys (e.g. `ABC-123`). The first key is the **primary ticket** [D-8]. Keys are validated for format and existence/readability in Jira before creation.
-- **SR-2.2** For each ticket the app retrieves: summary, description, issue type, status, priority, assignee, reporter, labels, components, fix versions, parent/epic, issue links, comments, attachment metadata, and remote/web links. (FR-2)
+- **SR-2.1** Facilitator creates a session by entering one or more Jira issue keys (e.g. `ABC-123`). The first key is the **primary ticket** [D-8]. Keys are validated for format and existence/readability in Jira before creation. Creation reads the tickets only to validate them: no source is ingested or snapshotted at creation (see SR-2.9 and SR-2.11).
+- **SR-2.2** At ingest (SR-2.9), for each ticket the app retrieves: summary, description, issue type, status, priority, assignee, reporter, labels, components, fix versions, parent/epic, issue links, comments, attachment metadata, and remote/web links. (FR-2)
 - **SR-2.3** Linked Confluence pages = pages referenced by Jira remote links plus Confluence page URLs found in the description or comments. Each is fetched (storage format → converted to text/markdown). Linked pages are followed one level only. (FR-2) [D-10]
 - **SR-2.4** Attachments [D-10]: text (`.txt`, `.md`, `.json`, `.yaml`, `.csv`), PDF and DOCX ≤ 10 MB are text-extracted; images (`png`, `jpg`, `gif`, `webp`) ≤ 5 MB are passed to the model as images; max 20 ingested attachments per session. All others are listed by name/size/type only and marked "not ingested" in the UI.
 - **SR-2.5** Total ingested context is capped (configurable; default 150k tokens). When exceeded, oldest comments and largest attachments are truncated first and the UI lists what was truncated.
-- **SR-2.6** Retrieved source material is snapshotted into the session with a retrieval timestamp. Facilitator can trigger **Refresh sources**; diffs are shown to the AI as a new context message.
+- **SR-2.6** Retrieved source material is snapshotted into the session with a retrieval timestamp when the Facilitator ingests it (SR-2.9). Once ingested, the Facilitator can trigger **Refresh sources** (not available before ingest); diffs are shown to the AI as a new context message.
 - **SR-2.7** If a session already exists for the primary ticket, the Facilitator is offered to open it instead of creating a duplicate (duplicate creation allowed after confirmation).
-- **SR-2.8** Session creation produces an Audit Record (`draft.created`).
+- **SR-2.8** Session creation produces an Audit Record (`draft.created`; its details carry no source count, because nothing is ingested at creation). Ingestion produces `sources.ingested`.
+- **SR-2.9** **Ingest ticket** (button **Ingest tickets** for more than one key). A new session has intake state `not_ingested`: the left panel shows the tickets, the code repository picker (editable in every state, ADR-0016) and **Ingest ticket** with a checkbox **Analyze after ingest** (checked by default) instead of a sources list ("Sources not ingested yet."). Ingest (`POST /api/sessions/:id/ingest`, session lock required) fetches the tickets and collects the sources exactly as SR-2.2–SR-2.5 describe, snapshots them, sets `ingested_at`, posts one `system` message summarising the counts and audits `sources.ingested`. A second ingest returns `409 already_ingested`; a failure of the whole request leaves the session `not_ingested`. Until the session is ingested, AI turns (messages, analysis, answers) and Refresh sources return `409 not_ingested`; Notes and specification edits stay available. [GD-1, ADR-0017]
+- **SR-2.10** **Analyze.** With **Analyze after ingest** checked the client starts the analysis turn as soon as ingestion succeeds; otherwise (or after a failed analysis) the left panel offers **Analyze ticket**. The analysis turn (`POST /api/sessions/:id/analyze`, SSE, same turn lock as messages) persists a `system` message instead of a facilitator message, summarises the AI's understanding, drafts every section the sources support, records gaps, contradictions and risks, and asks up to `ANALYSIS_MAX_QUESTIONS` (default 8) initial questions, most critical gaps first; every other turn keeps the SR-3.4 limit of 3 [GD-2]. A successful analysis sets `analyzed_at` (intake state `analyzed`); a failed one leaves it unset. `409 already_analyzed` is returned for a second analysis.
+- **SR-2.11** **Create and ingest.** The New session page offers **Create session** (SR-2.1, nothing ingested) and **Create and ingest**. The latter ingests in the create request (SR-2.9) and opens the workspace with the analysis starting (`?analyze=1`); the parameter is removed once handled, so a reload never starts a second analysis. If ingestion fails the session still exists, and the workspace shows **Ingest ticket** with the error. [GD-8]
 
 ### FR-3 AI Technical Facilitator / PRD §9 AI Behaviour
 - **SR-3.1** The AI is an active participant behaving as a senior software architect: asks follow-up questions, identifies ambiguity, contradictions, hidden/missing requirements, edge cases, risks and dependencies, validates/challenges assumptions, recommends improvements, ensures consistency. (FR-3, §9)
 - **SR-3.2** The AI must not merely transcribe discussion; each AI turn must either (a) update the Working Copy, (b) ask at least one targeted question, or (c) both. (FR-3 "should never simply document")
 - **SR-3.3** Vague statements (no quantity, owner, condition, or acceptance test where one is needed — e.g. "should be fast", "handle errors properly") are not accepted into a Section as Complete; the AI asks a concrete follow-up. (§9 "avoid accepting vague statements")
 - **SR-3.4** Question prioritization: questions targeting open Critical Issues first, then Warnings, then Informational. The AI asks at most 3 questions per turn to keep the meeting flowing. [D-7]
-- **SR-3.5** The left panel shows an **AI Questions** list: each open question with status `open` / `answered` / `dismissed`, linked to the Issue/Section it addresses. Facilitator may dismiss a question (reason optional, audited).
-- **SR-3.6** Facilitator input modes: chat message (conversation), and **Notes** — free text that is included in AI context but not treated as a reply. (PRD §12)
+- **SR-3.5** The left panel shows an **AI Questions** list, the main work queue, linked to the Issue/Section each question addresses and grouped as **Open**, **Answered — awaiting resolve** and **Resolved** (collapsed, with a count). A question is `open`, `answered` or `resolved`; a resolved question has a resolution of `answered` or `not_relevant`. The Facilitator can **Answer** an open question (inline form): the answer is stored first (`question.answered`, status `answered`; GD-3) and an AI turn works it into the affected sections, asking a follow-up only when the answer is vague (SR-3.3) or opens a new gap. An answer can be edited and resent while the question is not resolved. **Resolve** closes an answered question as `answered`, or an open one as `not_relevant` with an optional reason (`question.resolved`); neither runs an AI turn [GD-4, GD-7]. **Reopen** returns a resolved question to `answered` (if it has an answer) or `open` (`question.reopened`). The AI sees every question with its state in each turn's context and does not ask resolved questions again without a stated reason. Legacy `dismissed` questions are shown as resolved, not relevant. [ADR-0017]
+- **SR-3.6** Facilitator input modes: chat message (**Discuss with AI**, the overview conversation with the specification, all questions with their answers and the sources as context; it can update the Working Copy and ask questions [GD-5]), answering a question (SR-3.5), and **Notes** — free text that is included in AI context but not treated as a reply. (PRD §12)
 - **SR-3.7** AI responses stream to the UI token-by-token. (FR-4 "real time")
 - **SR-3.8** Every AI turn, including the structured changes it proposed, is recorded as an Audit Record (`ai.suggestion`). (FR-12)
 
@@ -169,7 +172,7 @@ Requirement IDs `SR-<FR>.<n>` trace to PRD `FR-<n>`.
 - **SR-11.4** Restore copies the chosen Revision into the Working Copy and creates a new Revision (`trigger=restore`); no history is deleted. (FR-11)
 
 ### FR-12 / PRD §14 Audit Logging
-- **SR-12.1** Event types (FR-12): `auth.login`, `auth.logout`, `auth.failure`, `draft.created`, `draft.updated`, `draft.saved`, `ai.suggestion`, `ai.suggestion.accepted`, `ai.suggestion.rejected`, `user.edit`, `readiness.evaluated`, `readiness.override`, `publish.started`, `publish.completed`, `publish.failed`, `jira.updated`, `confluence.updated`, `downstream.triggered`, `revision.restored`, `error`.
+- **SR-12.1** Event types (FR-12): `auth.login`, `auth.logout`, `auth.failure`, `draft.created`, `draft.updated`, `draft.saved`, `ai.suggestion`, `ai.suggestion.accepted`, `ai.suggestion.rejected`, `user.edit`, `readiness.evaluated`, `readiness.override`, `publish.started`, `publish.completed`, `publish.failed`, `jira.updated`, `confluence.updated`, `downstream.triggered`, `revision.restored`, `sources.ingested`, `question.answered`, `question.resolved`, `question.reopened`, `error`. (`question.dismissed` appears in records written before guided intake and is no longer emitted. `ai.suggestion` details carry `turnKind`: `message`, `analysis` or `answer`.)
 - **SR-12.2** Each record contains (§14): timestamp (UTC, ms), user (Atlassian accountId + display name), session ID, ticket ID(s), action, result (`success` / `failure`), details (JSON). Additionally: record ID, previous-record hash, record hash. [D-13]
 - **SR-12.3** Records are immutable: append-only storage with update/delete rejected at the database level, plus a SHA-256 hash chain so tampering is detectable. (§14 "immutable") [D-13]
 - **SR-12.4** Stored on the hosting server's database (FR-12 "locally or on the hosting server"); retained indefinitely by default. Secrets and tokens are never written to audit details.
@@ -197,9 +200,11 @@ Three-panel layout, desktop-first (min width 1280 px).
 
 | Panel | Contents |
 |---|---|
-| Left | Session header (tickets, sources, Refresh sources); Conversation (streaming); AI Questions list; Notes. |
+| Left | Session header (tickets, code repository); Sources (**Ingest ticket** with **Analyze after ingest** before ingest; the sources list, **Refresh sources** and, when needed, **Analyze ticket** after); AI Questions list (Answer, Resolve, Edit answer, Reopen); **Discuss with AI** (collapsible streaming conversation); Notes. |
 | Center | Generated Specification Working Copy (27 Sections, collapsible, per-Section status badge, inline markdown editing, pending AI suggestions inline); Save Draft; Version history (list, compare, restore). |
 | Right | Readiness Score; per-Section status list; Missing Sections; Critical Issues; Warnings; Action items; Evaluate now; End clarification; Publish controls & publish step status. |
+
+The New session page has ticket keys, the optional code repository, **Create session** and **Create and ingest** (SR-2.11).
 
 Additional screens: Login; Session list (my sessions, filter by ticket/status: draft / published / partially published); Audit trail view for a session.
 
@@ -219,22 +224,23 @@ Session lock [D-3]: a session is editable by one browser tab at a time. Opening 
 ### 7.2 Data model (logical)
 - `user` (atlassian_account_id PK, display_name, email, created_at)
 - `oauth_token` (user_id, enc_access_token, enc_refresh_token, expires_at, scopes)
-- `planning_session` (id UUID, primary_ticket_key, ticket_keys[], facilitator_id, status {draft, published, partially_published}, clarification_ended bool, confluence_page_id, confluence_page_version, created_at, updated_at, lock_holder, lock_expires_at)
+- `planning_session` (id UUID, primary_ticket_key, ticket_keys[], facilitator_id, status {draft, published, partially_published}, clarification_ended bool, ingested_at, analyzed_at (intake state: `not_ingested` / `ingested` / `analyzed`), code_repository, confluence_page_id, confluence_page_version, created_at, updated_at, lock_holder, lock_expires_at)
 - `source_snapshot` (session_id, kind {jira_issue, confluence_page, attachment}, ref, content_text, truncated bool, retrieved_at)
-- `conversation_message` (session_id, seq, role {facilitator, ai, note, system}, content, created_at)
+- `conversation_message` (session_id, seq, role {facilitator, ai, note, system}, content, question_id?, created_at)
 - `working_copy` (session_id PK, sections JSONB {name → {body, last_ai_read_at, last_user_edit_at}}, updated_at)
 - `pending_suggestion` (id, session_id, section, patch, status, created_at)
 - `revision` (session_id, number, sections JSONB, trigger {save, restore, publish}, readiness_score, author_id, created_at; immutable)
 - `evaluation` (id, session_id, section_statuses JSONB, score, created_at)
 - `issue` (id, session_id, severity, section, description, fingerprint, status, created_at, resolved_at)
-- `ai_question` (id, session_id, issue_id?, text, status, created_at)
+- `ai_question` (id, session_id, issue_id?, section, text, status {open, answered, resolved; legacy dismissed}, answer_text?, answered_at?, answered_via? {facilitator, ai}, resolution? {answered, not_relevant}, resolved_at?, dismiss_reason? (the resolve reason), created_at)
 - `publish_run` (id, session_id, revision_number, override_justification?, steps JSONB, status, created_at)
 - `audit_record` (id bigserial, ts, user_id, session_id, ticket_ids[], action, result, details JSONB, prev_hash, hash) — append-only
 
 ### 7.3 APIs (internal, JSON over HTTPS)
 - `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`
-- `GET/POST /api/sessions`, `GET /api/sessions/:id`, `POST /api/sessions/:id/refresh-sources`
+- `GET/POST /api/sessions`, `GET /api/sessions/:id`, `POST /api/sessions/:id/ingest`, `POST /api/sessions/:id/refresh-sources`
 - `POST /api/sessions/:id/messages` (returns SSE stream of AI tokens, patches, questions)
+- `POST /api/sessions/:id/analyze` (SSE, initial analysis), `POST /api/sessions/:id/questions/:qid/answer` (SSE), `POST /api/sessions/:id/questions/:qid/{resolve|reopen}`; `POST /api/sessions` accepts `ingest: true` (Create and ingest). The three SSE routes share one per-session turn lock (`409 turn_in_progress`); `GET /api/sessions/:id` returns `ingestedAt`, `analyzedAt` and `intakeState`. `POST /api/sessions/:id/questions/:qid/dismiss` remains for one release as an alias of resolve-from-open.
 - `POST /api/sessions/:id/notes`
 - `PATCH /api/sessions/:id/working-copy/sections/:section`
 - `POST /api/sessions/:id/suggestions/:sid/{accept|reject}`
@@ -280,7 +286,7 @@ Configurable per deployment, one of:
 |---|---|---|
 | NFR-1 | AI first streamed token ≤ 3 s p95; Working Copy patch visible ≤ 1 s after generation. | FR-4 "real time" [D-7] |
 | NFR-2 | Readiness evaluation completes ≤ 20 s p95. | FR-6 [D-7] |
-| NFR-3 | Session open (incl. cached sources) ≤ 2 s p95; session creation with source fetch ≤ 30 s p95. | [D-7] |
+| NFR-3 | Session open (incl. cached sources) ≤ 2 s p95; session creation (tickets validated) and ingest (source fetch) each ≤ 30 s p95. | [D-7] |
 | NFR-4 | Working Copy data loss ≤ 5 s of edits on crash. | FR-10 [D-5] |
 | NFR-5 | Supports ≥ 50 concurrent active sessions per instance. | [D-7] |
 | NFR-6 | All traffic TLS 1.2+; tokens encrypted at rest; no secrets in logs/audit; CSRF protection on state-changing endpoints; CSP set. | FR-1 [D-11] |
@@ -291,14 +297,14 @@ Configurable per deployment, one of:
 
 ### Error handling
 - Every error surfaced in the UI has a human-readable message and a correlation ID; an `error` Audit Record is written with that ID. (FR-12)
-- Source fetch failures for individual pages/attachments do not fail session creation; they are listed as "unavailable" with the reason.
+- Source fetch failures for individual pages/attachments do not fail ingestion (or session creation); they are listed as "unavailable" with the reason.
 - Publish failures follow SR-13.3 (per-step retry, no rollback of successful steps).
 
 ### Testing strategy
 - Unit: score formula, Issue fingerprinting, patch application & edit-precedence, hash chain, Jira description block insert/replace idempotency.
 - Integration: Atlassian API client against recorded fixtures; Postgres append-only enforcement (UPDATE/DELETE on `audit_record` must fail).
-- LLM behaviour evals: a fixture set of ≥ 20 tickets with known gaps; pass criteria — facilitator asks about each seeded Critical gap within 3 turns; evaluator flags each seeded Critical gap; evaluator never marks a vague statement Complete (SR-3.3).
-- E2E (Playwright): login (mocked OAuth), create session, converse, save, compare, restore, override, publish with injected step failure + retry.
+- LLM behaviour evals: a fixture set of ≥ 20 tickets with known gaps; pass criteria — facilitator asks about each seeded Critical gap within 3 turns (conversation mode) and in the initial analysis turn (`--mode analysis`); evaluator flags each seeded Critical gap; evaluator never marks a vague statement Complete (SR-3.3).
+- E2E (Playwright): login (mocked OAuth), create session, ingest, analyze, answer and resolve questions, converse, save, compare, restore, override, publish with injected step failure + retry.
 
 ### Deployment & rollback
 - Single Docker image (web + worker processes + pinned GitHub Copilot CLI) plus managed PostgreSQL, deployed to the organisation's hosting server; DB migrations run forward-only on deploy. [D-1]
@@ -333,8 +339,8 @@ Gaps not settled by the PRD, resolved by the spec author per user instruction. E
 ## 10. Acceptance Criteria (release)
 
 1. A user logs in with Atlassian OAuth; no PAT or shared credential is configured anywhere. (FR-1)
-2. Creating a session with `ABC-123` shows its description, comments, attachments (ingested vs listed) and linked Confluence pages. (FR-2)
-3. In a seeded ticket missing acceptance criteria, the AI asks about acceptance criteria within its first 2 turns and the evaluator raises a Critical Issue on Acceptance Criteria. (FR-3, FR-6, FR-7)
+2. Creating a session with `ABC-123` ingests nothing and offers **Ingest ticket**; after ingesting, the workspace shows its description, comments, attachments (ingested vs listed) and linked Confluence pages. (FR-2)
+3. In a seeded ticket missing acceptance criteria, the AI's initial analysis turn asks about acceptance criteria and the evaluator raises a Critical Issue on Acceptance Criteria. (FR-3, FR-6, FR-7)
 4. AI answers stream; a Section patch appears in the center panel ≤ 1 s after generation. (FR-4, NFR-1)
 5. A Section edited by the Facilitator is not overwritten by a later AI patch; a pending suggestion appears instead. (D-5)
 6. The Generated Specification always contains the 27 FR-5 Sections in order. (FR-5)

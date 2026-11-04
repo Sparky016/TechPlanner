@@ -237,7 +237,8 @@ interface WorkingCopy {
 
 async function createPerfSession(c: Client_, samples?: Samples): Promise<string> {
   const t0 = performance.now();
-  const res = await c.api('POST', '/api/sessions', { body: { ticketKeys: ['ABC-123'], confirmDuplicate: true } });
+  // Create and ingest (GI-26): AI turns are refused until the sources are ingested (GI-23).
+  const res = await c.api('POST', '/api/sessions', { body: { ticketKeys: ['ABC-123'], confirmDuplicate: true, ingest: true } });
   const body = await json<{ session: { id: string } }>(res, 'create session');
   samples?.add(performance.now() - t0);
   return body.session.id;

@@ -20,7 +20,7 @@ export default async function SessionWorkspacePage({ params }: { params: Promise
       <div className="relative left-1/2 -my-6 w-screen -translate-x-1/2 overflow-x-auto">
         <LockBanner />
         <div className="grid h-[calc(100vh-7rem)] min-w-[1280px] grid-cols-[minmax(340px,1fr)_minmax(560px,2fr)_minmax(340px,1fr)] divide-x divide-slate-200">
-          <aside aria-label="Session and conversation" className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
+          <aside aria-label="Session and conversation" className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0">
             <SessionHeader />
             <QuestionsList />
             <Conversation />

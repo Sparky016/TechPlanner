@@ -1,95 +1,78 @@
 id: "46"
-title: "MySQL 8.4 cutover: mysql2 driver, MySQL migrations, dialect SQL, per-table grants, test harness and dev setup"
+title: "Question lifecycle API: answer (streamed turn), resolve, reopen; AI context for all questions"
 phase: 7
-severity: critical
-complexity: critical
+severity: high
+complexity: high
 model: opus
-effort: high
-eval_model: opus
+effort: medium
+eval_model: sonnet
 eval_effort: medium
-depends_on: ["44", "45"]
+depends_on: ["45"]
 status: PENDING
-source: "docs/specs/mysql-migration.md §3, §4, §5.2, §5.3 (remaining rows), §5.4, §6, §9, §11a (users and grants)"
+source: "docs/specs/guided-intake-and-question-answering.md GI-12, GI-14, GI-16, GI-17, GI-19, GI-21, §8.3"
 
 objective: |
-  Switch the application, scripts and tests from PostgreSQL to MySQL 8.4 in one task, so the branch is never
-  half on each database. After this task `npm run migrate && npm run dev` and every suite run against a native
-  MySQL with no Docker.
+  Let the Facilitator answer a question (persisted, then worked into the spec by an AI turn), resolve it
+  (answered or not relevant), or reopen it, and give every AI turn the full question picture so resolved
+  questions are not asked again.
 
 scope:
   in:
-    - "Driver: replace pg with mysql2/promise behind DbClient (task 44); pool options per spec §5.2 (timezone 'Z', bigNumberStrings, typeCast TINYINT(1) → boolean, multipleStatements false); session init SET time_zone='+00:00', strict sql_mode"
-    - "Config: DATABASE_URL must use mysql://; new optional MIGRATE_DATABASE_URL (owner user) read by scripts/migrate.ts, falling back to DATABASE_URL"
-    - "Migrations: rewrite 0001-0005 for MySQL (types per spec §4.1, CHECKs, FKs, UUID() defaults, utf8mb4 / utf8mb4_0900_bin on hashed and key columns); triggers for revision immutability and audit UPDATE/DELETE with SIGNAL SQLSTATE '45000'; app_lock table seeded with 'audit_chain'; job table with STORED generated singleton column; delete the Postgres versions"
-    - "Per-table grants in each migration: GRANT SELECT, INSERT, UPDATE, DELETE to techplanner_app; audit_record and schema_migrations get SELECT, INSERT only (audit) / none (schema_migrations); grantee written as ${APP_DB_USER} and substituted by the runner from env APP_DB_USER (default 'techplanner_app'@'%'; production sets the bridge-subnet host, task 48)"
-    - "Runner (scripts/migrate.ts): GET_LOCK('techplanner_migrate', 60) / RELEASE_LOCK; split files on '-- statement-break'; record schema_migrations after the file; error message says DDL may be partially applied"
-    - "Remaining dialect SQL: ON CONFLICT → INSERT ... AS new ON DUPLICATE KEY UPDATE (auth/tokens.ts, auth/callback/route.ts, spec/editAudit.ts); cardinality → JSON_LENGTH; make_interval / interval '60 seconds' → INTERVAL ? SECOND|HOUR|DAY; ::casts removed; now() → NOW(6)"
-    - "Arrays → JSON: ticket_keys, scopes, ticket_ids written with JSON.stringify, read as string[]"
-    - "locks.ts MySQL impls: withTxLock → INSERT IGNORE INTO app_lock(name) + SELECT ... FOR UPDATE; connection lock → GET_LOCK(name, 0) / RELEASE_LOCK(name)"
-    - "errors.ts MySQL errno: 1062, 1452, 1213, 1205, 1644 (SIGNAL)"
-    - "scripts/mysql-bootstrap.sql: create techplanner and techplanner_test databases, techplanner_owner (ALL + GRANT OPTION) and techplanner_app (no database-wide grants); dev passwords documented as dev-only"
-    - "Tests: tests/integration/setup.ts drops and recreates the test database (owner connection) then migrates; env defaults to mysql://techplanner_app@localhost:3306/techplanner_test with MIGRATE_DATABASE_URL for the owner; tests/e2e/support/prepareDb.ts uses CREATE DATABASE IF NOT EXISTS; e2e env and helpers; unit-test config fixtures postgres:// → mysql://"
-    - "schema.test.ts: trigger rejections asserted by isTriggerRejection; new privilege case: as techplanner_app, UPDATE, DELETE and TRUNCATE on audit_record all fail"
-    - "Remove pg and @types/pg; add mysql2; delete docker-compose.dev.yml"
-    - "README development section: install MySQL 8.4 (Homebrew / apt / Windows installer), run scripts/mysql-bootstrap.sql, set DATABASE_URL and MIGRATE_DATABASE_URL; .env.example; DEV_TASK_LIST execution notes (integration tests need local MySQL, per-test databases)"
+    - "POST /api/sessions/:id/questions/:qid/answer { text } (lock): in one transaction set answer_text, answered_at, answered_via='facilitator', status='answered', insert facilitator message with question_id, audit question.answered; then turnStreamResponse with turn { kind: 'answer' }"
+    - "Answer allowed from open and answered; resolved -> 409 question_resolved; >10 000 chars -> 413; not ingested -> 409 not_ingested"
+    - "POST .../resolve { reason? } (lock): answered -> resolved/answered; open -> resolved/not_relevant (reason kept in dismiss_reason); resolved -> 409 question_not_open; audit question.resolved; no AI call"
+    - "POST .../reopen (lock): resolved -> answered when answer_text set, else open; clear resolution/resolved_at; audit question.reopened; 409 question_not_resolved"
+    - "POST .../dismiss becomes an alias of resolve-from-open (same response shape as today plus status 'resolved'); keep for one release"
+    - "mark_question_answered gains optional answerSummary (<= 2000): stores answer_text, answered_via='ai'; only open -> answered"
+    - "context.ts loads every question; prompt.ts renders Open / Answered (with answer and source) / Resolved (resolution, reason, do-not-re-ask rule); discussion line from GI-21 added to the base prompt for message turns"
   out:
-    - "Production compose, runbook, backups (task 48)"
-    - "Hash round-trip property tests and concurrency hardening (task 47)"
+    - "UI (task 48)"
 
 files:
-  "src/server/db/pool.ts, locks.ts, errors.ts": "update"
-  "src/server/db/placeholders.ts, placeholders.test.ts": "delete (mysql2 uses ? natively)"
-  "src/server/config.ts, src/server/config.test.ts": "update"
-  "db/migrations/0001_init.sql .. 0005_job_queue.sql": "rewrite for MySQL"
-  "scripts/migrate.ts": "update"
-  "scripts/mysql-bootstrap.sql": "create"
-  "src/server/auth/tokens.ts, src/server/auth/session.ts, src/app/auth/callback/route.ts, src/server/spec/editAudit.ts, src/server/sessions/lock.ts, src/server/audit/*.ts, src/server/jobs/queue.ts": "update dialect SQL"
-  "src/**/*.ts": "update array columns and casts where used"
-  "tests/integration/setup.ts, env.ts, schema.test.ts": "update"
-  "tests/e2e/support/env.ts, prepareDb.ts, helpers.ts": "update"
-  "src/**/*.test.ts": "update DATABASE_URL fixtures"
-  "docker-compose.dev.yml": "delete"
-  "README.md, .env.example, DEV_TASK_LIST.md": "update"
-  "package.json, package-lock.json": "remove pg, @types/pg; add mysql2"
+  "src/server/questions/lifecycle.ts": "create (answerQuestion, resolveQuestion, reopenQuestion - transactional, audited)"
+  "src/app/api/sessions/[id]/questions/[qid]/answer/route.ts": "create"
+  "src/app/api/sessions/[id]/questions/[qid]/resolve/route.ts": "create"
+  "src/app/api/sessions/[id]/questions/[qid]/reopen/route.ts": "create"
+  "src/app/api/sessions/[id]/questions/[qid]/dismiss/route.ts": "update to delegate to resolveQuestion"
+  "src/server/facilitator/tools.ts": "update mark_question_answered"
+  "src/server/facilitator/context.ts": "update (questions grouped)"
+  "src/server/facilitator/prompt.ts": "update buildContextMessage"
+  "src/server/facilitator/facilitator.test.ts": "update"
+  "src/server/facilitator/__snapshots__/facilitator.test.ts.snap": "update"
+  "tests/integration/questionsApi.test.ts": "create"
+  "tests/integration/conversationApi.test.ts": "update dismiss AC4 expectations"
 
 implementation_notes: |
-  Install MySQL 8.4 locally to run the suites (no Docker). The worker and eval may need: apt-get install
-  mysql-server-8.4 or the MySQL APT repo; then `mysql -uroot < scripts/mysql-bootstrap.sql`.
-  revision_immutable trigger: compare every column with <=> except published; allow only published 0 → 1.
-  Use mysql2 query() (text protocol) for DDL and execute() (prepared) for parameterised DML.
-  JSON columns: mysql2 returns parsed objects; jsonb-era code that JSON.parse()d a string must not double-parse.
-  Section ordering: run log 2026-10-05 19:35 notes code relied on JSONB key order being unordered; MySQL JSON
-  also reorders keys, so sort in code as today.
-  CHAR(36) UUIDs: compare lowercase; canonicalUuid in audit stays.
-  Integration databases per parallel test file stay as today (techplanner_tNN), created by setup.ts with the owner user.
+  Conventions: lock the question row FOR UPDATE inside the transaction (dismiss route pattern); reuse
+  isUuid() for qid; MAX_REASON_CHARS 500; MAX_MESSAGE_CHARS 10 000 from the messages route (export it).
+  Answer ordering matters: persist answer + message BEFORE acquiring the turn advisory lock would leave an
+  answered question with no turn on 409. Acquire the turn lock first (turnStream), then run answerQuestion as
+  the first step of the run callback, then the facilitator turn. On 409 nothing is persisted.
+  ContextQuestion gains status, answerText, answeredVia, resolution, reason. Keep 'Open AI questions' heading
+  text stable for the existing snapshot where possible.
 
 acceptance_criteria:
   - id: AC1
-    behavior: "Fresh MySQL 8.4 with only the bootstrap script: migrate applies 0001-0005 and a second run applies nothing"
-    verify: "npm run migrate && npm run migrate | grep 'No pending migrations'"
+    behavior: "Answering streams a turn whose ANSWER_TEXT names the question; question is answered with answer_text; facilitator message has question_id; question.answered audited"
+    verify: "npm run test:integration -- questionsApi"
   - id: AC2
-    behavior: "All suites pass on MySQL with no Docker running"
-    verify: "npm run lint && npm run typecheck && npm test && npm run test:integration && npm run test:e2e"
+    behavior: "LLM failure during an answer turn keeps the answer and status answered; re-answering replaces answer_text and runs a new turn"
+    verify: "npm run test:integration -- questionsApi"
   - id: AC3
-    behavior: "Audit UPDATE/DELETE rejected by trigger for any user; TRUNCATE rejected for techplanner_app"
-    verify: "npm run test:integration -- schema"
+    behavior: "Resolve from answered/open sets the right resolution; reopen restores answered/open; every invalid transition returns its 409"
+    verify: "npm run test:integration -- questionsApi"
   - id: AC4
-    behavior: "Concurrent migrate runs serialise"
-    verify: "npm run test:integration -- schema"
+    behavior: "Legacy /dismiss resolves as not_relevant and audits question.resolved"
+    verify: "npm run test:integration -- conversationApi"
   - id: AC5
-    behavior: "No Postgres left in code or deps"
-    verify: "! grep -rnE \"from 'pg'|postgres://|pg_|hashtext|ON CONFLICT|make_interval|::(text|bigint|timestamptz|uuid)\" src scripts tests evals --include=*.ts && ! grep -n '\"pg\"' package.json"
+    behavior: "Context message lists answered and resolved questions with the do-not-re-ask rule (snapshot); mark_question_answered stores answerSummary and refuses resolved questions"
+    verify: "npm test"
 
 risks_vulnerabilities:
-  - risk: "Partially applied DDL after a failed migration"
-    mitigation: "One logical change per file; IF NOT EXISTS where cheap; runner error says manual cleanup may be needed; documented in runbook (task 48)"
-  - risk: "TINYINT/BIGINT/JSON type differences surface as subtle bugs (0/1 vs boolean, number vs string ids)"
-    mitigation: "typeCast in one place; integration suites cover every repository"
-  - risk: "Audit hash mismatch from collation or timestamp formatting"
-    mitigation: "utf8mb4_0900_bin on hashed columns; audit.test.ts verifies the chain; deeper property test in task 47"
+  - risk: "Answer text is user input fed back to the model"
+    mitigation: "Same handling as facilitator messages (trusted facilitator input); question text is AI-authored, rendered as data in ANSWER_TEXT"
 
-knowledge_gaps:
-  - "Whether mysql2 typeCast for TINYINT(1) interferes with JSON columns. Fallback: map booleans per repository instead of globally."
+knowledge_gaps: []
 
 commit_message: |
-  feat(task-46): switch database from PostgreSQL to MySQL 8.4
+  feat(task-46): question answer, resolve and reopen with full question context

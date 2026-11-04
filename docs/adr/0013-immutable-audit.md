@@ -14,7 +14,7 @@ How "immutable" audit is enforced.
 
 Append-only table with UPDATE/DELETE rejected by triggers, app role has INSERT/SELECT only + SHA-256 hash chain + verify command. Indefinite retention.
 
-Amended by ADR-0017 (MySQL 8.4):
+Amended by ADR-0018 (MySQL 8.4):
 
 - UPDATE and DELETE are still rejected by `BEFORE UPDATE` and `BEFORE DELETE` triggers that signal SQLSTATE `45000`.
 - TRUNCATE is rejected by privileges, not a trigger (MySQL has no TRUNCATE triggers). `techplanner_app` gets

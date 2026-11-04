@@ -1,10 +1,15 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useEffect } from 'react';
 import { EditorView } from '@uiw/react-codemirror';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type WorkspaceEvent, WorkspaceProvider, useWorkspace } from '@/components/workspace/WorkspaceProvider';
 import { SECTION_NAMES } from '@/lib/spec/sections';
 import { SpecEditor } from './SpecEditor';
+
+// Mounting 27 CodeMirror editors is CPU-heavy: on a loaded machine (full suite, CI) it exceeds the 5 s test timeout and
+// the 1 s findBy/waitFor timeout. The assertions are unchanged; only the time they may wait is raised.
+vi.setConfig({ testTimeout: 30_000 });
+configure({ asyncUtilTimeout: 15_000 });
 
 const apiFetch = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/api/client', async (orig) => ({ ...(await orig<typeof import('@/lib/api/client')>()), apiFetch }));

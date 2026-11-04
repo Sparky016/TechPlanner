@@ -14,7 +14,9 @@ import { createCodeTools } from './codeTools';
 
 export const PATCH_CONTENT_MAX = 20_000;
 export const QUESTION_TEXT_MAX = 500;
-/** SR-3.4 / D-7. */
+/** GI-19: max length of the answer summary mark_question_answered stores as answer_text. */
+export const ANSWER_SUMMARY_MAX = 2_000;
+/** SR-3.4 / D-7: the default per-turn question limit (FacilitatorTurnState.maxQuestions). */
 export const MAX_QUESTIONS_PER_TURN = 3;
 export const QUESTION_LIMIT_MESSAGE = 'Question limit reached for this turn';
 
@@ -41,6 +43,8 @@ export interface FacilitatorTurnState {
   /** Turn start: the AI read time passed to applyAiPatch. */
   aiReadAt: Date;
   clarificationEnded: boolean;
+  /** ask_question limit for this turn: MAX_QUESTIONS_PER_TURN, or ANALYSIS_MAX_QUESTIONS for the analysis turn. */
+  maxQuestions: number;
   patches: PatchOutcome[];
   questionIds: string[];
   /** The acting facilitator; Jira writes run as this user. Absent in unit tests that only exercise patches. */
@@ -59,12 +63,13 @@ export function createTurnState(
   sessionId: string,
   aiReadAt: Date,
   clarificationEnded: boolean,
-  opts: { user?: CurrentUser; ticketKeys?: string[]; codeRepository?: string | null } = {},
+  opts: { user?: CurrentUser; ticketKeys?: string[]; codeRepository?: string | null; maxQuestions?: number } = {},
 ): FacilitatorTurnState {
   return {
     sessionId,
     aiReadAt,
     clarificationEnded,
+    maxQuestions: opts.maxQuestions ?? MAX_QUESTIONS_PER_TURN,
     patches: [],
     questionIds: [],
     user: opts.user,
@@ -90,6 +95,7 @@ interface AskQuestionArgs {
 
 interface MarkQuestionAnsweredArgs {
   questionId: string;
+  answerSummary?: string;
 }
 
 function applySectionPatchTool(state: FacilitatorTurnState): LlmToolDefinition {
@@ -124,7 +130,7 @@ function applySectionPatchTool(state: FacilitatorTurnState): LlmToolDefinition {
 function askQuestionTool(state: FacilitatorTurnState): LlmToolDefinition {
   return {
     name: 'ask_question',
-    description: `Ask the facilitator one targeted question, optionally linked to a section and/or an open issue id. At most ${MAX_QUESTIONS_PER_TURN} per turn.`,
+    description: `Ask the facilitator one targeted question, optionally linked to a section and/or an open issue id. At most ${state.maxQuestions} per turn.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -137,7 +143,7 @@ function askQuestionTool(state: FacilitatorTurnState): LlmToolDefinition {
     },
     handler: async (args) => {
       const { text, section, issueId } = args as AskQuestionArgs;
-      if (state.questionIds.length >= MAX_QUESTIONS_PER_TURN) return QUESTION_LIMIT_MESSAGE;
+      if (state.questionIds.length >= state.maxQuestions) return QUESTION_LIMIT_MESSAGE;
       let target: SectionName | null = section ?? null;
       if (issueId !== undefined) {
         const [issue] = await query<{ section: SectionName }>(
@@ -162,20 +168,36 @@ function askQuestionTool(state: FacilitatorTurnState): LlmToolDefinition {
 function markQuestionAnsweredTool(state: FacilitatorTurnState): LlmToolDefinition {
   return {
     name: 'mark_question_answered',
-    description: 'Mark one of the open AI questions as answered once the conversation has resolved it.',
+    description:
+      'Mark one of the open AI questions as answered once the conversation has answered it, with a short summary of the answer (answerSummary). Only open questions can be marked.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       required: ['questionId'],
-      properties: { questionId: { type: 'string', pattern: UUID_PATTERN } },
+      properties: {
+        questionId: { type: 'string', pattern: UUID_PATTERN },
+        answerSummary: { type: 'string', maxLength: ANSWER_SUMMARY_MAX },
+      },
     },
+    // GI-19: only open -> answered; the summary is stored as answer_text with answered_via 'ai'.
     handler: async (args) => {
-      const { questionId } = args as MarkQuestionAnsweredArgs;
+      const { questionId, answerSummary } = args as MarkQuestionAnsweredArgs;
+      const summary = answerSummary?.trim() ? answerSummary.trim() : null;
       const { rowCount } = await db.query(
-        "UPDATE ai_question SET status = 'answered' WHERE id = ? AND session_id = ? AND status = 'open'",
+        `UPDATE ai_question SET status = 'answered', answer_text = ?, answered_at = NOW(6), answered_via = 'ai'
+          WHERE id = ? AND session_id = ? AND status = 'open'`,
+        [summary, questionId, state.sessionId],
+      );
+      if (rowCount > 0) return `Question ${questionId} marked answered`;
+      const { rows } = await db.query<{ status: string }>(
+        'SELECT status FROM ai_question WHERE id = ? AND session_id = ?',
         [questionId, state.sessionId],
       );
-      return rowCount > 0 ? `Question ${questionId} marked answered` : `No open question with id ${questionId}`;
+      const current = rows[0];
+      if (!current) return `No open question with id ${questionId}`;
+      return current.status === 'answered'
+        ? `Question ${questionId} is already answered`
+        : `Question ${questionId} is resolved and cannot be changed`;
     },
   };
 }

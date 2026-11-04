@@ -196,7 +196,7 @@ verification. Still required:
 - Text columns in the hash use `utf8mb4_0900_bin` so stored bytes equal hashed bytes. The existing lone-surrogate
   rejection stays.
 
-Outcome (task 47): integers beyond 2^53 round-trip (JS has already rounded them before hashing). Doubles with 16–17
+Outcome (task 56): integers beyond 2^53 round-trip (JS has already rounded them before hashing). Doubles with 16–17
 significant digits do not: MySQL's JSON parser is not correctly rounded, and about one random double in eight read
 back one or two units in the last place off (e.g. `123456789.12345679` → `123456789.1234568`). `recordAudit` now
 rejects such `details` numbers (`assertStorableDetails` in `audit/hash.ts`). It accepts integer literals within
@@ -218,7 +218,7 @@ next-key/gap locks over ranges and non-unique indexes. Review each of the 15 `FO
   tests show it is needed.
 - Keep a consistent lock order: `planning_session` row first, then children (already the pattern).
 
-Outcome (task 47): 18 `FOR UPDATE` sites. 15 are point lookups on a primary key. 3 are ranges and carry a comment:
+Outcome (task 56): 18 `FOR UPDATE` sites. 15 are point lookups on a primary key. 3 are ranges and carry a comment:
 the two above and the job claim (`jobs/queue.ts`, `SKIP LOCKED`). `tests/integration/concurrency.test.ts` passes
 20 consecutive runs at READ COMMITTED with no 1213. At REPEATABLE READ the same tests deadlock in evaluate + edit
 and fork the audit chain. `withTransaction(fn, { retryOnDeadlock: true })` re-runs the callback up to 3 times. It is
@@ -249,11 +249,11 @@ Rejected because MySQL is required (§13). Kept for the ADR record.
 
 ## 11. Work breakdown
 
-Each step lands green (lint, typecheck, unit, integration). Implementation tasks: DEV_TASK_43–49
-([DEV_TASK_LIST.md](../../DEV_TASK_LIST.md), phase 7). The tasks reorder the steps below so the dialect-neutral
-refactor and the queue replacement land on PostgreSQL first, and one task (46) switches databases.
+Each step lands green (lint, typecheck, unit, integration). Implementation tasks: DEV_TASK_52–58
+([DEV_TASK_LIST.md](../../DEV_TASK_LIST.md), phase 8). The tasks reorder the steps below so the dialect-neutral
+refactor and the queue replacement land on PostgreSQL first, and one task (55) switches databases.
 
-1. **ADR**: write ADR-0017 "Database: MySQL 8.4 on the hosting server", amend ADR-0001 (database) and ADR-0013
+1. **ADR**: write ADR-0018 "Database: MySQL 8.4 on the hosting server", amend ADR-0001 (database) and ADR-0013
    (TRUNCATE enforced by privileges, accepted).
 2. **Driver layer**: `mysql2` pool, `DbClient` interface, type casts, error mapping. Keep `pg` until step 6.
 3. **Schema + runner**: MySQL migrations, statement splitting, `GET_LOCK`, `app_lock` table; `schema.test.ts`
